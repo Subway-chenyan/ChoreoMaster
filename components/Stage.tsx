@@ -18,7 +18,7 @@ interface StageProps {
 
 const ShapeIcon: React.FC<{ shape: string; color: string; size: number; className?: string }> = ({ shape, color, size, className }) => {
   const style = { fill: color, stroke: 'white', strokeWidth: 2 };
-  
+
   if (shape === 'square') {
     return (
       <svg width={size} height={size} viewBox="0 0 24 24" className={className}>
@@ -42,12 +42,12 @@ const ShapeIcon: React.FC<{ shape: string; color: string; size: number; classNam
 };
 
 interface DragState {
-    startX: number;
-    startY: number;
-    initialPositions: Record<string, Position>;
+  startX: number;
+  startY: number;
+  initialPositions: Record<string, Position>;
 }
 
-export const Stage: React.FC<StageProps> = ({
+export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: number }> = ({
   performers,
   positions,
   selectedPerformerIds,
@@ -57,7 +57,9 @@ export const Stage: React.FC<StageProps> = ({
   mode = ToolMode.SELECT,
   showLabels = true,
   gridScale = 1,
-  onZoom
+  onZoom,
+  aspectRatio = STAGE_ASPECT_RATIO,
+  maxWidthPx = 1200
 }) => {
   const stageRef = useRef<HTMLDivElement>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
@@ -83,10 +85,10 @@ export const Stage: React.FC<StageProps> = ({
         endX: e.clientX,
         endY: e.clientY,
       });
-      
+
       // If no modifier key, clear selection
       if (!e.ctrlKey && !e.metaKey && !e.shiftKey) {
-          onSelectionChange([]);
+        onSelectionChange([]);
       }
     }
   };
@@ -95,30 +97,30 @@ export const Stage: React.FC<StageProps> = ({
     if (readonly) return;
 
     if (dragState && stageRef.current) {
-        // Calculate delta in percentage
-        const rect = stageRef.current.getBoundingClientRect();
-        const deltaXPx = e.clientX - dragState.startX;
-        const deltaYPx = e.clientY - dragState.startY;
-        
-        const deltaX = (deltaXPx / rect.width) * 100;
-        const deltaY = (deltaYPx / rect.height) * 100;
+      // Calculate delta in percentage
+      const rect = stageRef.current.getBoundingClientRect();
+      const deltaXPx = e.clientX - dragState.startX;
+      const deltaYPx = e.clientY - dragState.startY;
 
-        const updates: { id: string; pos: Position }[] = [];
+      const deltaX = (deltaXPx / rect.width) * 100;
+      const deltaY = (deltaYPx / rect.height) * 100;
 
-        Object.entries(dragState.initialPositions).forEach(([id, rawPos]) => {
-            const initialPos = rawPos as Position;
-            updates.push({
-                id,
-                pos: {
-                    x: Math.max(0, Math.min(100, initialPos.x + deltaX)),
-                    y: Math.max(0, Math.min(100, initialPos.y + deltaY)),
-                }
-            });
+      const updates: { id: string; pos: Position }[] = [];
+
+      Object.entries(dragState.initialPositions).forEach(([id, rawPos]) => {
+        const initialPos = rawPos as Position;
+        updates.push({
+          id,
+          pos: {
+            x: Math.max(0, Math.min(100, initialPos.x + deltaX)),
+            y: Math.max(0, Math.min(100, initialPos.y + deltaY)),
+          }
         });
+      });
 
-        if (updates.length > 0) {
-            onPositionChange(updates);
-        }
+      if (updates.length > 0) {
+        onPositionChange(updates);
+      }
 
     } else if (selectionBox) {
       setSelectionBox((prev) => prev ? ({ ...prev, endX: e.clientX, endY: e.clientY }) : null);
@@ -139,20 +141,20 @@ export const Stage: React.FC<StageProps> = ({
       const boxSelectedIds = performers.filter((p) => {
         const pos = positions[p.id];
         if (!pos) return false; // Skip if not in frame
-        
+
         const px = rect.left + (pos.x / 100) * rect.width;
         const py = rect.top + (pos.y / 100) * rect.height;
         return px >= sbLeft && px <= sbRight && py >= sbTop && py <= sbBottom;
       }).map(p => p.id);
-      
+
       if (boxSelectedIds.length > 0) {
-          // If modifier held, merge with existing
-          if (e.ctrlKey || e.metaKey || e.shiftKey) {
-               const merged = Array.from(new Set([...selectedPerformerIds, ...boxSelectedIds]));
-               onSelectionChange(merged);
-          } else {
-               onSelectionChange(boxSelectedIds);
-          }
+        // If modifier held, merge with existing
+        if (e.ctrlKey || e.metaKey || e.shiftKey) {
+          const merged = Array.from(new Set([...selectedPerformerIds, ...boxSelectedIds]));
+          onSelectionChange(merged);
+        } else {
+          onSelectionChange(boxSelectedIds);
+        }
       }
     }
     setDragState(null);
@@ -162,104 +164,104 @@ export const Stage: React.FC<StageProps> = ({
   const handlePerformerMouseDown = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     if (readonly) return;
-    
+
     let newSelection = [...selectedPerformerIds];
 
     if (e.ctrlKey || e.metaKey) {
-        // Toggle Selection
-        if (selectedPerformerIds.includes(id)) {
-            newSelection = selectedPerformerIds.filter(pid => pid !== id);
-        } else {
-            newSelection = [...selectedPerformerIds, id];
-        }
-        onSelectionChange(newSelection);
-        
-        // If we just deselected the item we clicked, don't drag it
-        if (!newSelection.includes(id)) {
-            return;
-        }
+      // Toggle Selection
+      if (selectedPerformerIds.includes(id)) {
+        newSelection = selectedPerformerIds.filter(pid => pid !== id);
+      } else {
+        newSelection = [...selectedPerformerIds, id];
+      }
+      onSelectionChange(newSelection);
+
+      // If we just deselected the item we clicked, don't drag it
+      if (!newSelection.includes(id)) {
+        return;
+      }
     } else {
-        // Normal Click
-        if (!selectedPerformerIds.includes(id)) {
-            // If clicking an unselected item, select only it
-            newSelection = [id];
-            onSelectionChange(newSelection);
-        }
-        // If clicking an already selected item, keep selection (so we can drag the group)
+      // Normal Click
+      if (!selectedPerformerIds.includes(id)) {
+        // If clicking an unselected item, select only it
+        newSelection = [id];
+        onSelectionChange(newSelection);
+      }
+      // If clicking an already selected item, keep selection (so we can drag the group)
     }
 
     // Initialize Drag State for ALL selected items (including the one just clicked if it was added)
     const initialPositions: Record<string, Position> = {};
     newSelection.forEach(pid => {
-        // Use current positions passed in props
-        if (positions[pid]) {
-            initialPositions[pid] = { ...positions[pid] };
-        }
+      // Use current positions passed in props
+      if (positions[pid]) {
+        initialPositions[pid] = { ...positions[pid] };
+      }
     });
 
     if (Object.keys(initialPositions).length > 0) {
-        setDragState({
-            startX: e.clientX,
-            startY: e.clientY,
-            initialPositions
-        });
+      setDragState({
+        startX: e.clientX,
+        startY: e.clientY,
+        initialPositions
+      });
     }
   };
 
   const handleWheel = (e: React.WheelEvent) => {
-      if (e.ctrlKey && onZoom) {
-          e.preventDefault();
-          onZoom(e.deltaY > 0 ? -0.1 : 0.1);
-      }
+    if (e.ctrlKey && onZoom) {
+      e.preventDefault();
+      onZoom(e.deltaY > 0 ? -0.1 : 0.1);
+    }
   };
 
   // Generate Dynamic Grid
   const gridLines = useMemo(() => {
-      const divisions = Math.round(4 * gridScale);
-      return (
-          <svg className="absolute inset-0 w-full h-full pointer-events-none opacity-20" preserveAspectRatio="none">
-              {/* Vertical Lines */}
-              {Array.from({ length: divisions + 1 }).map((_, i) => (
-                  <line 
-                    key={`v-${i}`} 
-                    x1={`${(i / divisions) * 100}%`} 
-                    y1="0" 
-                    x2={`${(i / divisions) * 100}%`} 
-                    y2="100%" 
-                    stroke="#94a3b8" 
-                    strokeWidth={1}
-                  />
-              ))}
-              {/* Horizontal Lines */}
-              {Array.from({ length: divisions + 1 }).map((_, i) => (
-                  <line 
-                    key={`h-${i}`} 
-                    x1="0" 
-                    y1={`${(i / divisions) * 100}%`} 
-                    x2="100%" 
-                    y2={`${(i / divisions) * 100}%`} 
-                    stroke="#94a3b8" 
-                    strokeWidth={1}
-                  />
-              ))}
-          </svg>
-      );
+    const divisions = Math.round(4 * gridScale);
+    return (
+      <svg className="absolute inset-0 w-full h-full pointer-events-none opacity-20" preserveAspectRatio="none">
+        {/* Vertical Lines */}
+        {Array.from({ length: divisions + 1 }).map((_, i) => (
+          <line
+            key={`v-${i}`}
+            x1={`${(i / divisions) * 100}%`}
+            y1="0"
+            x2={`${(i / divisions) * 100}%`}
+            y2="100%"
+            stroke="#94a3b8"
+            strokeWidth={1}
+          />
+        ))}
+        {/* Horizontal Lines */}
+        {Array.from({ length: divisions + 1 }).map((_, i) => (
+          <line
+            key={`h-${i}`}
+            x1="0"
+            y1={`${(i / divisions) * 100}%`}
+            x2="100%"
+            y2={`${(i / divisions) * 100}%`}
+            stroke="#94a3b8"
+            strokeWidth={1}
+          />
+        ))}
+      </svg>
+    );
   }, [gridScale]);
 
   return (
-    <div 
+    <div
       className="flex-1 bg-slate-900 flex items-center justify-center p-8 overflow-hidden select-none"
       onMouseUp={handleMouseUp}
     >
       {/* Stage Container */}
-      <div 
+      <div
         ref={stageRef}
         className="relative bg-slate-800 border border-slate-700 shadow-2xl transition-transform duration-75 ease-out"
-        style={{ 
-            aspectRatio: `${STAGE_ASPECT_RATIO}`, 
-            width: '100%', 
-            maxWidth: '1200px',
-            cursor: mode === ToolMode.SELECT ? 'default' : 'crosshair'
+        style={{
+          aspectRatio: `${aspectRatio}`,
+          width: '100%',
+          maxWidth: `${maxWidthPx}px`,
+          cursor: mode === ToolMode.SELECT ? 'default' : 'crosshair'
         }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
@@ -269,9 +271,9 @@ export const Stage: React.FC<StageProps> = ({
         {gridLines}
 
         {/* Stage Front Indicator */}
-        <div className="absolute bottom-0 left-0 right-0 h-2 bg-slate-600 opacity-50 text-center text-[10px] uppercase tracking-widest text-white">Stage Front</div>
+        <div className="absolute bottom-0 left-0 right-0 h-2 bg-slate-600 opacity-50 text-center text-[10px] tracking-widest text-white">舞台前沿</div>
 
-        {/* Performers */}
+        {/* Performers Layer */}
         {performers.map((performer) => {
           // Check if performer exists in the current frame positions
           const pos = positions[performer.id];
@@ -290,23 +292,40 @@ export const Stage: React.FC<StageProps> = ({
               }}
             >
               <div className={`relative transition-transform duration-100 ${isSelected ? 'scale-125' : 'hover:scale-110'}`}>
-                <ShapeIcon 
-                  shape={performer.shape} 
-                  color={performer.color} 
-                  size={32} 
-                  className={`drop-shadow-lg ${isSelected ? 'filter brightness-125' : ''}`} 
+                <ShapeIcon
+                  shape={performer.shape}
+                  color={performer.color}
+                  size={32}
+                  className={`drop-shadow-lg ${isSelected ? 'filter brightness-125' : ''}`}
                 />
-                
+
                 {/* Selection Ring */}
                 {isSelected && (
                   <div className="absolute inset-0 -m-1 border-2 border-blue-400 rounded-full animate-pulse opacity-50" />
                 )}
               </div>
-              
-              {/* Name Label (Toggleable) */}
-              <div className={`absolute -bottom-6 left-1/2 -translate-x-1/2 text-[10px] font-medium text-white bg-slate-900/80 px-2 py-0.5 rounded whitespace-nowrap pointer-events-none transition-opacity 
-                  ${showLabels ? (isSelected ? 'opacity-100' : 'opacity-100') : (isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100')}
-              `}>
+            </div>
+          );
+        })}
+
+        {/* Labels Layer (Always on Top) */}
+        {showLabels && performers.map((performer) => {
+          const pos = positions[performer.id];
+          if (!pos) return null;
+          const isSelected = selectedPerformerIds.includes(performer.id);
+
+          return (
+            <div
+              key={`label-${performer.id}`}
+              className={`absolute transform -translate-x-1/2 -translate-y-1/2 pointer-events-none z-20 transition-opacity duration-200
+                        ${isSelected ? 'opacity-100' : 'opacity-100'}
+                    `}
+              style={{
+                left: `${pos.x}%`,
+                top: `${pos.y}%`,
+              }}
+            >
+              <div className={`absolute -bottom-6 left-1/2 -translate-x-1/2 text-[10px] font-medium text-white bg-slate-900/80 px-2 py-0.5 rounded whitespace-nowrap shadow-sm`}>
                 {performer.name}
               </div>
             </div>
@@ -316,7 +335,7 @@ export const Stage: React.FC<StageProps> = ({
         {/* Selection Box */}
         {selectionBox && (
           <div
-            className="absolute border-2 border-dashed border-blue-400 bg-blue-500/20 pointer-events-none"
+            className="absolute border-2 border-dashed border-blue-400 bg-blue-500/20 pointer-events-none z-30"
             style={{
               left: Math.min(selectionBox.startX, selectionBox.endX) - (stageRef.current?.getBoundingClientRect().left || 0),
               top: Math.min(selectionBox.startY, selectionBox.endY) - (stageRef.current?.getBoundingClientRect().top || 0),

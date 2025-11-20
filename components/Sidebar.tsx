@@ -27,6 +27,8 @@ interface SidebarProps {
   onDuplicateFrame: (id: string) => void;
   onReorderFrame: (id: string, direction: 'up' | 'down') => void;
   onResetProject: () => void;
+  onRenameFrame: (id: string, name?: string) => void;
+  widthPx?: number;
 }
 
 type Tab = 'project' | 'formations' | 'performers' | 'presets';
@@ -62,9 +64,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onDeleteFrame,
   onDuplicateFrame,
   onReorderFrame,
-  onResetProject
+  onResetProject,
+  onRenameFrame,
+  widthPx = 320
 }) => {
   const [activeTab, setActiveTab] = useState<Tab>('performers');
+  const [editingFrameId, setEditingFrameId] = useState<string | null>(null);
+  const [editingFrameName, setEditingFrameName] = useState<string>('');
+  const [editingPerformerId, setEditingPerformerId] = useState<string | null>(null);
+  const [editingPerformerName, setEditingPerformerName] = useState<string>('');
   
   // Add Performer State
   const [newPerformerName, setNewPerformerName] = useState('');
@@ -81,6 +89,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const filteredPerformers = useMemo(() => {
       return performers.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()));
   }, [performers, searchQuery]);
+
+  const shapeLabel = (key: string) => {
+      const base = key.split('(')[0].trim();
+      if (base.includes('Horizontal')) return '水平线';
+      if (base.includes('Vertical')) return '垂直线';
+      if (base.includes('Diagonal')) return '对角线';
+      if (base.includes('Circle')) return '圆形';
+      if (base.includes('Square')) return '方形';
+      if (base.includes('Triangle')) return '三角形';
+      return base;
+  };
 
   // Frames sorted by time for display
   const sortedFrames = useMemo(() => {
@@ -126,7 +145,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   return (
-    <div className="w-80 bg-slate-900 border-r border-slate-800 flex flex-col shadow-xl z-20">
+    <div style={{ width: widthPx }} className="bg-slate-900 border-r border-slate-800 flex flex-col shadow-xl z-20">
         {/* Top Tabs */}
         <div className="flex items-center bg-slate-950 border-b border-slate-800 px-1 pt-1">
             <button onClick={() => setActiveTab('project')} className={`flex-1 py-3 flex justify-center ${activeTab === 'project' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`}>
@@ -148,34 +167,34 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {/* PROJECT TAB */}
             {activeTab === 'project' && (
                 <div className="space-y-6">
-                     <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Project Settings</h2>
+                     <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">项目设置</h2>
                      
                      <div className="space-y-3">
                         <button onClick={onResetProject} className="w-full flex items-center gap-3 px-4 py-3 bg-slate-800 hover:bg-slate-700 rounded text-slate-200 transition-colors text-sm">
-                            <FilePlus size={16} /> New Project
+                            <FilePlus size={16} /> 新建项目
                         </button>
                         <label className="w-full flex items-center gap-3 px-4 py-3 bg-slate-800 hover:bg-slate-700 rounded text-slate-200 transition-colors text-sm cursor-pointer">
-                            <Upload size={16} /> Import Project (JSON)
+                            <Upload size={16} /> 导入项目 (JSON)
                             <input type="file" accept=".json" className="hidden" onChange={onImportProject} />
                         </label>
                         <button onClick={onExport} className="w-full flex items-center gap-3 px-4 py-3 bg-slate-800 hover:bg-slate-700 rounded text-slate-200 transition-colors text-sm">
-                            <Download size={16} /> Export Project (JSON)
+                            <Download size={16} /> 导出项目 (JSON)
                         </button>
                      </div>
 
                      <div className="bg-slate-800 p-4 rounded-lg border border-slate-700 mt-4">
                         <div className="flex items-center justify-between mb-2">
                             <label className="text-xs font-bold text-slate-400 uppercase flex items-center gap-1">
-                                <Music size={12} /> Soundtrack
+                                <Music size={12} /> 配乐
                             </label>
                         </div>
                         {musicName ? (
                             <div className="text-sm text-blue-300 truncate mb-3 font-medium">{musicName}</div>
                         ) : (
-                            <div className="text-sm text-slate-500 italic mb-3">No music loaded</div>
+                            <div className="text-sm text-slate-500 italic mb-3">暂无配乐</div>
                         )}
                         <label className="block w-full text-center px-3 py-2 bg-slate-700 hover:bg-slate-600 border border-slate-600 rounded text-xs cursor-pointer transition-colors text-white">
-                            Import Audio File
+                            导入音频文件
                             <input type="file" accept="audio/*" className="hidden" onChange={onImportMusic} />
                         </label>
                     </div>
@@ -186,8 +205,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {activeTab === 'formations' && (
                 <div className="h-full flex flex-col">
                     <div className="flex items-center justify-between mb-4">
-                        <h2 className="text-sm font-bold text-slate-400 uppercase">Timeline Frames</h2>
-                        <span className="text-xs text-slate-600">{frames.length} frames</span>
+                        <h2 className="text-sm font-bold text-slate-400 uppercase">时间轴队形</h2>
+                        <span className="text-xs text-slate-600">{frames.length} 个队形</span>
                     </div>
                     
                     <div className="flex-1 space-y-3 overflow-y-auto pr-1">
@@ -195,6 +214,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             <div 
                                 key={f.id} 
                                 onClick={() => onSelectFrame(f.id)}
+                                onDoubleClick={(e) => { 
+                                    e.stopPropagation(); 
+                                    setEditingFrameId(f.id); 
+                                    setEditingFrameName(f.name); 
+                                }}
                                 className={`group relative flex gap-3 p-2 rounded-lg border transition-all cursor-pointer ${f.id === currentFrameId ? 'bg-slate-800 border-blue-500 shadow-md' : 'bg-slate-900 border-slate-800 hover:bg-slate-800'}`}
                             >
                                 {/* Thumbnail */}
@@ -205,7 +229,30 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 {/* Info */}
                                 <div className="flex-1 min-w-0 flex flex-col justify-center">
                                     <div className={`text-sm font-medium truncate ${f.id === currentFrameId ? 'text-blue-400' : 'text-slate-300'}`}>
-                                        {f.name}
+                                        {editingFrameId === f.id ? (
+                                            <input
+                                                autoFocus
+                                                value={editingFrameName}
+                                                onChange={(e) => setEditingFrameName(e.target.value)}
+                                                onBlur={() => { 
+                                                    const name = editingFrameName.trim();
+                                                    if (name) onRenameFrame(f.id, name);
+                                                    setEditingFrameId(null);
+                                                }}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter') {
+                                                        const name = editingFrameName.trim();
+                                                        if (name) onRenameFrame(f.id, name);
+                                                        setEditingFrameId(null);
+                                                    } else if (e.key === 'Escape') {
+                                                        setEditingFrameId(null);
+                                                    }
+                                                }}
+                                                className={`w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs ${f.id === currentFrameId ? 'text-blue-400' : 'text-slate-300'}`}
+                                            />
+                                        ) : (
+                                            f.name
+                                        )}
                                     </div>
                                     <div className="text-[10px] text-slate-500 flex gap-2">
                                         <span>Start: {(f.startTime/1000).toFixed(1)}s</span>
@@ -223,7 +270,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     </div>
                     
                     <button onClick={onAddFrame} className="mt-4 w-full py-3 bg-green-600 hover:bg-green-500 rounded font-bold text-sm text-white shadow-lg shadow-green-900/20 uppercase tracking-wide">
-                        Capture Formation (Current Time)
+                        创建队形
                     </button>
                 </div>
             )}
@@ -232,8 +279,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {activeTab === 'performers' && (
                 <div className="h-full flex flex-col">
                     <div className="flex items-center justify-between mb-4">
-                        <h2 className="text-sm font-bold text-slate-400 uppercase">Cast List</h2>
-                        <span className="text-xs text-slate-500">{performers.length} total</span>
+                        <h2 className="text-sm font-bold text-slate-400 uppercase">演员列表</h2>
+                        <span className="text-xs text-slate-500">{performers.length} 人</span>
                     </div>
 
                     {/* Search */}
@@ -241,7 +288,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
                         <input 
                             type="text" 
-                            placeholder="Search performers..." 
+                            placeholder="搜索演员..." 
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                             className="w-full bg-slate-950 border border-slate-800 rounded-full py-1.5 pl-9 pr-4 text-xs text-slate-300 focus:outline-none focus:border-blue-500"
@@ -250,11 +297,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
                     {/* Add New Section */}
                     <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700 mb-4">
-                        <div className="flex gap-2 mb-3">
+                        <div className="flex gap-2 mb-3 min-w-0 items-stretch">
                              <input
                                 type="text"
-                                placeholder="Name"
-                                className="flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                                placeholder="名称"
+                                className="flex-1 min-w-0 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
                                 value={newPerformerName}
                                 onChange={(e) => setNewPerformerName(e.target.value)}
                                 onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
@@ -270,21 +317,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 <button 
                                     onClick={() => setNewPerformerShape('circle')} 
                                     className={`p-1.5 rounded ${newPerformerShape === 'circle' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
-                                    title="Circle Shape"
+                                    title="圆形"
                                 >
                                     <Circle size={14} fill={newPerformerShape === 'circle' ? 'currentColor' : 'none'} />
                                 </button>
                                 <button 
                                     onClick={() => setNewPerformerShape('triangle')} 
                                     className={`p-1.5 rounded ${newPerformerShape === 'triangle' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
-                                    title="Triangle Shape"
+                                    title="三角形"
                                 >
                                     <Triangle size={14} fill={newPerformerShape === 'triangle' ? 'currentColor' : 'none'} />
                                 </button>
                                 <button 
                                     onClick={() => setNewPerformerShape('square')} 
                                     className={`p-1.5 rounded ${newPerformerShape === 'square' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
-                                    title="Square Shape"
+                                    title="方形"
                                 >
                                     <Square size={14} fill={newPerformerShape === 'square' ? 'currentColor' : 'none'} />
                                 </button>
@@ -297,7 +344,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                     value={newPerformerColor} 
                                     onChange={(e) => setNewPerformerColor(e.target.value)}
                                     className="w-6 h-6 bg-transparent border-none cursor-pointer"
-                                    title="Customize Color"
+                                    title="自定义颜色"
                                 />
                                 <span className="text-[10px] text-slate-400 font-mono">{newPerformerColor.toUpperCase()}</span>
                              </div>
@@ -311,12 +358,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 onClick={onDuplicateSelected}
                                 className="flex-1 bg-blue-600/20 hover:bg-blue-600/40 border border-blue-500/50 text-blue-200 text-xs py-1.5 rounded flex items-center justify-center gap-2 transition-colors"
                             >
-                                <Copy size={12} /> Duplicate ({selectedPerformerIds.length})
+                                <Copy size={12} /> 复制 ({selectedPerformerIds.length})
                             </button>
                             <button 
                                 onClick={() => selectedPerformerIds.forEach(id => onRemovePerformer(id))}
                                 className="px-3 bg-red-900/20 hover:bg-red-900/40 border border-red-500/50 text-red-300 text-xs py-1.5 rounded transition-colors"
-                                title="Delete Selected"
+                                title="删除选中"
                             >
                                 <Trash2 size={12} />
                             </button>
@@ -344,21 +391,48 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                     {p.shape === 'square' && <div className="w-4 h-4 border-2 shrink-0" style={{ borderColor: p.color, backgroundColor: selectedPerformerIds.includes(p.id) ? p.color : 'transparent' }} />}
                                     {p.shape === 'triangle' && <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-b-[10px] border-transparent shrink-0" style={{ borderBottomColor: p.color }} />}
                                     
-                                    {/* Editable Name Input */}
-                                    <input 
-                                        type="text"
-                                        value={p.name}
-                                        onChange={(e) => onUpdatePerformer(p.id, { name: e.target.value })}
-                                        onClick={(e) => e.stopPropagation()} // Prevent selecting row when clicking input
-                                        className={`flex-1 text-sm font-medium bg-transparent border-none focus:ring-0 focus:outline-none p-0 ${selectedPerformerIds.includes(p.id) ? 'text-white' : 'text-slate-300'}`}
-                                    />
+                                    {/* Editable Name by Double Click */}
+                                    {editingPerformerId === p.id ? (
+                                        <input
+                                            autoFocus
+                                            value={editingPerformerName}
+                                            onChange={(e) => setEditingPerformerName(e.target.value)}
+                                            onBlur={() => {
+                                                const name = editingPerformerName.trim();
+                                                if (name) onUpdatePerformer(p.id, { name });
+                                                setEditingPerformerId(null);
+                                            }}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter') {
+                                                    const name = editingPerformerName.trim();
+                                                    if (name) onUpdatePerformer(p.id, { name });
+                                                    setEditingPerformerId(null);
+                                                } else if (e.key === 'Escape') {
+                                                    setEditingPerformerId(null);
+                                                }
+                                            }}
+                                            className={`flex-1 text-sm font-medium bg-slate-900 border border-slate-700 rounded px-2 py-1 ${selectedPerformerIds.includes(p.id) ? 'text-white' : 'text-slate-300'}`}
+                                            onClick={(e) => e.stopPropagation()}
+                                        />
+                                    ) : (
+                                        <div 
+                                            onDoubleClick={(e) => { 
+                                                e.stopPropagation(); 
+                                                setEditingPerformerId(p.id);
+                                                setEditingPerformerName(p.name);
+                                            }}
+                                            className={`flex-1 text-sm font-medium bg-transparent p-0 ${selectedPerformerIds.includes(p.id) ? 'text-white' : 'text-slate-300'}`}
+                                        >
+                                            {p.name}
+                                        </div>
+                                    )}
 
                                     {/* Actions: Toggle In/Out of Frame, Delete */}
                                     <div className="flex items-center gap-1">
                                         <button
                                             onClick={(e) => { e.stopPropagation(); onTogglePerformerInFrame(p.id); }}
                                             className={`p-1 rounded ${inFrame ? 'text-blue-400 hover:text-white hover:bg-blue-600' : 'text-slate-600 hover:text-white hover:bg-green-600'}`}
-                                            title={inFrame ? "Remove from this formation" : "Add to this formation"}
+                                            title={inFrame ? "从此队形移除" : "添加到此队形"}
                                         >
                                             {inFrame ? <UserCheck size={14} /> : <UserX size={14} />}
                                         </button>
@@ -366,7 +440,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                         <button 
                                             onClick={(e) => { e.stopPropagation(); onRemovePerformer(p.id); }} 
                                             className="text-slate-600 hover:text-red-400 p-1 rounded hover:bg-slate-700"
-                                            title="Delete Globally"
+                                            title="全局删除"
                                         >
                                             <Trash2 size={14} />
                                         </button>
@@ -374,7 +448,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 </div>
                             );
                         })}
-                         {performers.length === 0 && <div className="text-slate-600 text-center text-sm py-10 italic">No performers added</div>}
+                         {performers.length === 0 && <div className="text-slate-600 text-center text-sm py-10 italic">尚未添加演员</div>}
                     </div>
                 </div>
             )}
@@ -386,11 +460,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     <div className="bg-gradient-to-r from-slate-800 to-slate-900 p-4 rounded-lg border border-slate-700/50">
                          <div className="flex items-center gap-2 mb-2 text-purple-400">
                             <Sparkles size={14} />
-                            <span className="text-xs font-bold uppercase">AI Choreographer</span>
+                            <span className="text-xs font-bold uppercase">AI 编舞</span>
                          </div>
                          <textarea
                             className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-xs text-white mb-2 focus:outline-none focus:border-purple-500 resize-none h-16"
-                            placeholder="e.g. 'A flying wedge formation'"
+                            placeholder="例如：“飞行楔形队形”"
                             value={aiPrompt}
                             onChange={(e) => setAiPrompt(e.target.value)}
                         />
@@ -399,7 +473,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             disabled={isGenerating}
                             className="w-full py-1.5 bg-purple-600 hover:bg-purple-500 rounded text-xs font-bold text-white flex items-center justify-center gap-2"
                         >
-                            <Wand2 size={12} /> {isGenerating ? 'Thinking...' : 'Generate'}
+                            <Wand2 size={12} /> {isGenerating ? '思考中...' : '生成'}
                         </button>
                     </div>
 
@@ -408,7 +482,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         <div className="flex items-center justify-between mb-2">
                             <div className="flex items-center gap-2 text-slate-400">
                                 <Scaling size={14} />
-                                <span className="text-xs font-bold uppercase">Preset Size</span>
+                                <span className="text-xs font-bold uppercase">预设大小</span>
                             </div>
                             <span className="text-xs font-mono text-blue-400">{Math.round(presetScale * 100)}%</span>
                         </div>
@@ -425,9 +499,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
                     {/* Categorized Presets */}
                     {[
-                        { id: 'Fill', keys: Object.keys(PRESET_SHAPES).filter(k => k.includes('Fill')) },
-                        { id: 'Outline', keys: Object.keys(PRESET_SHAPES).filter(k => k.includes('Outline')) },
-                        { id: 'Lines', keys: Object.keys(PRESET_SHAPES).filter(k => k.includes('Line')) },
+                        { id: '填充', keys: Object.keys(PRESET_SHAPES).filter(k => k.includes('Fill')) },
+                        { id: '轮廓', keys: Object.keys(PRESET_SHAPES).filter(k => k.includes('Outline')) },
+                        { id: '线条', keys: Object.keys(PRESET_SHAPES).filter(k => k.includes('Line')) },
                     ].map(group => (
                         <div key={group.id}>
                             <h3 className="text-xs font-bold text-slate-500 uppercase mb-2 px-1">{group.id}</h3>
@@ -452,7 +526,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                             {shape.includes('Square (Fill)') && <div className="w-6 h-6 bg-slate-400" />}
                                             {shape.includes('Triangle (Fill)') && <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-b-[10px] border-transparent border-b-slate-400" />}
                                         </div>
-                                        <span className="text-[10px] font-medium text-slate-400 group-hover:text-white text-center">{shape.split('(')[0].trim()}</span>
+                                        <span className="text-[10px] font-medium text-slate-400 group-hover:text-white text-center">{shapeLabel(shape)}</span>
                                     </button>
                                 ))}
                             </div>
