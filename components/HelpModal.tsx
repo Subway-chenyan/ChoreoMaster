@@ -26,7 +26,7 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
                 {/* Content */}
                 <div className="p-6 grid grid-cols-2 gap-8 text-slate-600 dark:text-slate-300 text-sm">
 
-                    {/* Section 1: General */}
+                    {/* Section 1: 通用与快捷键 */}
                     <div className="space-y-4">
                         <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-2">
                             <MousePointer2 size={16} /> 通用操作
@@ -37,17 +37,20 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
                                 <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Space</kbd>
                             </li>
                             <li className="flex justify-between">
-                                <span>撤销 (Undo)</span>
+                                <span>撤销</span>
                                 <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Ctrl + Z</kbd>
                             </li>
                             <li className="flex justify-between">
-                                <span>重做 (Redo)</span>
-                                <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Ctrl + Shift + Z</kbd>
+                                <span>重做</span>
+                                <div className="flex gap-1">
+                                    <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Ctrl + Y</kbd>
+                                    <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Shift + Ctrl + Z</kbd>
+                                </div>
                             </li>
                         </ul>
                     </div>
 
-                    {/* Section 2: Stage */}
+                    {/* Section 2: 舞台编辑 */}
                     <div className="space-y-4">
                         <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-2">
                             <Move size={16} /> 舞台编辑
@@ -70,18 +73,38 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
                                 <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Ctrl + V</kbd>
                             </li>
                             <li className="flex justify-between">
-                                <span>舞台缩放</span>
-                                <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Ctrl + Wheel</kbd>
+                                <span>删除选中演员（仅当前队形）</span>
+                                <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Delete / Backspace</kbd>
+                            </li>
+                            <li className="flex justify-between">
+                                <span>调整网格密度</span>
+                                <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Ctrl + 滚轮</kbd>
                             </li>
                         </ul>
                     </div>
 
-                    {/* Section 3: Timeline */}
+                    {/* Section 3: 时间轴与队形 */}
                     <div className="space-y-4">
                         <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-2">
                             <Copy size={16} /> 时间轴 & 队形
                         </h3>
                         <ul className="space-y-2">
+                            <li className="flex justify-between">
+                                <span>划擦定位</span>
+                                <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">拖拽时间轴</kbd>
+                            </li>
+                            <li className="flex justify-between">
+                                <span>添加队形</span>
+                                <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">工具栏按钮</kbd>
+                            </li>
+                            <li className="flex justify-between">
+                                <span>选择队形</span>
+                                <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">单击帧块</kbd>
+                            </li>
+                            <li className="flex justify-between">
+                                <span>拖动队形位置 / 调整时长</span>
+                                <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">拖拽帧块 / 右侧把手</kbd>
+                            </li>
                             <li className="flex justify-between">
                                 <span>复制当前队形</span>
                                 <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Ctrl + C (选中队形)</kbd>
@@ -98,19 +121,22 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
                                 <span>删除队形</span>
                                 <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Delete</kbd>
                             </li>
+                            <li className="flex justify-between">
+                                <span>设为入点 / 出点</span>
+                                <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">工具栏按钮</kbd>
+                            </li>
                         </ul>
                     </div>
 
-                    {/* Section 4: Tips */}
+                    {/* Section 4: 导出与提示 */}
                     <div className="space-y-4">
                         <h3 className="font-bold text-slate-900 dark:text-white flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-2">
                             <Type size={16} /> 小贴士
                         </h3>
                         <ul className="space-y-2 list-disc pl-4 text-xs leading-relaxed">
-                            <li>点击时间轴上的 <span className="text-blue-500 font-bold">GAP</span> 区域可以查看过渡动画。</li>
-                            <li>在侧边栏可以直接修改演员的名字和颜色。</li>
-                            <li>使用 <span className="text-purple-500 font-bold">AI 编舞</span> 功能可以快速生成复杂的队形。</li>
-                            <li>拖动时间轴上的队形块可以调整开始时间和持续时间。</li>
+                            <li>导出视频为固定 720p，支持切换是否显示姓名与网格，导出时显示录制进度。</li>
+                            <li>舞台底部“舞台前沿”指示条用于标记前沿方向。</li>
+                            <li>时间轴的空白过渡区间会进行平滑插值，便于观察队形变换。</li>
                         </ul>
                     </div>
 

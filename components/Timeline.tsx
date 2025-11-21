@@ -17,6 +17,20 @@ interface TimelineProps {
     selectedFrameId: string | null;
     onRenameFrame?: (frameId: string) => void;
     heightPx?: number;
+    inPointMs?: number | null;
+    outPointMs?: number | null;
+    onSetInPoint?: () => void;
+    onSetOutPoint?: () => void;
+    onExportVideo?: () => void;
+    isExporting?: boolean;
+    exportProgress?: number;
+    exportIncludeLabels?: boolean;
+    exportIncludeGrid?: boolean;
+    onToggleExportIncludeLabels?: () => void;
+    onToggleExportIncludeGrid?: () => void;
+    exportWidthPx?: number;
+    exportHeightPx?: number;
+    
 }
 
 export const Timeline: React.FC<TimelineProps> = ({
@@ -32,7 +46,21 @@ export const Timeline: React.FC<TimelineProps> = ({
     onSelectFrame,
     selectedFrameId,
     onRenameFrame,
-    heightPx = 160
+    heightPx = 160,
+    inPointMs,
+    outPointMs,
+    onSetInPoint,
+    onSetOutPoint,
+    onExportVideo
+    , isExporting
+    , exportProgress
+    , exportIncludeLabels
+    , exportIncludeGrid
+    , onToggleExportIncludeLabels
+    , onToggleExportIncludeGrid
+    , exportWidthPx
+    , exportHeightPx
+    
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -236,6 +264,8 @@ export const Timeline: React.FC<TimelineProps> = ({
                     </button>
                     <span className="font-mono text-slate-300 ml-4 text-sm">{formatTime(currentTime)}</span>
                     <span className="text-[10px] text-slate-500 ml-2">(空格键)</span>
+                    <button className="ml-3 text-[11px] px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300" onClick={onSetInPoint}>设为入点</button>
+                    <button className="text-[11px] px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300" onClick={onSetOutPoint}>设为出点</button>
                 </div>
                 <div className="flex items-center gap-4">
                     <button
@@ -251,8 +281,39 @@ export const Timeline: React.FC<TimelineProps> = ({
                             <div className="h-full bg-slate-500" style={{ width: `${(zoom / 200) * 100}%` }}></div>
                         </div>
                         <button className="p-1 hover:bg-slate-800 rounded text-slate-400" onClick={() => setZoom(Math.min(200, zoom + 20))}><ZoomIn size={14} /></button>
-                    </div>
+                        <button
+                            onClick={onToggleExportIncludeLabels}
+                            className={`text-xs ml-2 px-2 py-1 rounded border ${exportIncludeLabels ? 'bg-blue-600 text-white border-blue-500' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'}`}
+                            title="切换导出时是否显示姓名"
+                        >显示姓名</button>
+                        <button
+                            onClick={onToggleExportIncludeGrid}
+                            className={`text-xs ml-1 px-2 py-1 rounded border ${exportIncludeGrid ? 'bg-blue-600 text-white border-blue-500' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'}`}
+                            title="切换导出时是否显示网格"
+                        >显示网格</button>
+                        <span className="text-[11px] ml-2 px-2 py-1 rounded border bg-slate-800 text-slate-300 border-slate-700">
+                            分辨率: {Math.round(exportWidthPx || 0)}x{Math.round(exportHeightPx || 0)}（固定720p）
+                        </span>
+                    <button
+                        onClick={onExportVideo}
+                        disabled={isExporting || !(typeof inPointMs === 'number' && typeof outPointMs === 'number' && outPointMs > inPointMs)}
+                        className={`text-xs px-3 py-1 rounded border ${isExporting ? 'bg-gray-500 text-white border-gray-500' : 'bg-green-600 hover:bg-green-500 text-white border-green-500'}`}
+                        title={isExporting ? '导出中...' : '导出视频'}
+                    >{isExporting ? '导出中…' : '导出视频'}</button>
+                    {isExporting && (
+                        <div className="flex items-center gap-2 ml-2">
+                            <div className="w-32 h-2 bg-slate-700 rounded overflow-hidden">
+                                <div className="h-2 bg-amber-500" style={{ width: `${Math.round((exportProgress || 0) * 100)}%` }} />
+                            </div>
+                            <span className="text-[11px] text-slate-300">
+                                录制中 {typeof inPointMs === 'number' && typeof outPointMs === 'number'
+                                    ? `${formatTime(Math.floor((exportProgress || 0) * (outPointMs - inPointMs)))} / ${formatTime(outPointMs - inPointMs)}`
+                                    : ''}
+                            </span>
+                        </div>
+                    )}
                 </div>
+            </div>
             </div>
 
             {/* Scrollable Timeline Area */}
@@ -288,6 +349,15 @@ export const Timeline: React.FC<TimelineProps> = ({
                         <div className="w-3 h-4 -ml-[5px] bg-amber-500 text-[8px] flex items-center justify-center text-black font-bold clip-path-arrow shadow-md"></div>
                         <div className="absolute top-0 left-0 h-full w-full bg-amber-500/20"></div>
                     </div>
+                    {typeof inPointMs === 'number' && (
+                        <div className="absolute top-0 bottom-0 w-[1px] bg-blue-400 z-40 pointer-events-none" style={{ left: (inPointMs / 1000) * zoom }} />
+                    )}
+                    {typeof outPointMs === 'number' && (
+                        <div className="absolute top-0 bottom-0 w-[1px] bg-red-400 z-40 pointer-events-none" style={{ left: (outPointMs / 1000) * zoom }} />
+                    )}
+                    {typeof inPointMs === 'number' && typeof outPointMs === 'number' && outPointMs > inPointMs && (
+                        <div className="absolute top-0 bottom-0 bg-green-500/10 z-30 pointer-events-none" style={{ left: (inPointMs / 1000) * zoom, width: ((outPointMs - inPointMs) / 1000) * zoom }} />
+                    )}
 
                     {/* Frame Tracks - Vertically Centered */}
                     <div className="absolute top-6 bottom-0 left-0 right-0 flex items-center">
@@ -323,6 +393,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                             >
                                 <div
                                         onMouseDown={(e) => handleFrameDragStart(e, frame, 'move')}
+                                        onClick={() => onSelectFrame(frame.id)}
                                         className={`relative h-full rounded-lg flex flex-col items-center justify-center cursor-grab active:cursor-grabbing overflow-hidden transition-all border select-none shadow-lg
                                 ${selectedFrameId === frame.id
                                             ? 'bg-slate-700 border-blue-400 shadow-blue-900/20 z-20'

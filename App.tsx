@@ -32,6 +32,12 @@ const App: React.FC = () => {
   const [musicUrl, setMusicUrl] = useState<string | null>(null);
   const [audioBuffer, setAudioBuffer] = useState<AudioBuffer | null>(null);
   const [musicName, setMusicName] = useState<string | null>(null);
+  const [inPointMs, setInPointMs] = useState<number | null>(null);
+  const [outPointMs, setOutPointMs] = useState<number | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState(0);
+  const [exportIncludeLabels, setExportIncludeLabels] = useState<boolean>(true);
+  const [exportIncludeGrid, setExportIncludeGrid] = useState<boolean>(true);
 
   // Stage View State
   const [showLabels, setShowLabels] = useState(true);
@@ -45,6 +51,8 @@ const App: React.FC = () => {
   const [stageToolbarCollapsed, setStageToolbarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState<number>(320);
   const [timelineHeight, setTimelineHeight] = useState<number>(160);
+  const [undoStack, setUndoStack] = useState<any[]>([]);
+  const [redoStack, setRedoStack] = useState<any[]>([]);
 
   // Theme
   const { theme } = useTheme();
@@ -149,6 +157,38 @@ const App: React.FC = () => {
 
   }, [currentTime, frames, performers, getSortedFrames]);
 
+  const computePositionsAtTime = useCallback((timeMs: number) => {
+    const sortedFrames = getSortedFrames(frames);
+    const activeFrame = sortedFrames.find(f => timeMs >= f.startTime && timeMs < f.startTime + f.duration);
+    if (activeFrame) {
+      return activeFrame.positions;
+    }
+    const prevFrame = [...sortedFrames].reverse().find(f => f.startTime + f.duration <= timeMs);
+    const nextFrame = sortedFrames.find(f => f.startTime > timeMs);
+    if (prevFrame && nextFrame) {
+      const gapStart = prevFrame.startTime + prevFrame.duration;
+      const gapEnd = nextFrame.startTime;
+      const totalGap = gapEnd - gapStart;
+      if (totalGap <= 0) return prevFrame.positions;
+      const progress = (timeMs - gapStart) / totalGap;
+      const ease = progress < .5 ? 2 * progress * progress : -1 + (4 - 2 * progress) * progress;
+      const interpolated: Record<string, Position> = {};
+      performers.forEach(p => {
+        const start = prevFrame.positions[p.id];
+        const end = nextFrame.positions[p.id];
+        if (start && end) {
+          interpolated[p.id] = { x: start.x + (end.x - start.x) * ease, y: start.y + (end.y - start.y) * ease };
+        }
+      });
+      return interpolated;
+    }
+    if (sortedFrames.length > 0) {
+      if (timeMs < sortedFrames[0].startTime) return sortedFrames[0].positions;
+      return sortedFrames[sortedFrames.length - 1].positions;
+    }
+    return {};
+  }, [frames, performers, getSortedFrames]);
+
   // --- Actions ---
 
   const handleAddPerformer = (name: string, color: string, shape: PerformerShape) => {
@@ -174,6 +214,25 @@ const App: React.FC = () => {
 
   const handleUpdatePerformer = (id: string, updates: Partial<Performer>) => {
     setPerformers(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
+  };
+
+  const handleDeleteSelectedPerformers = () => {
+    if (selectedPerformerIds.length === 0) return;
+    if (isPlaying) handlePlayPause();
+    const ids = new Set(selectedPerformerIds);
+    const currentFrame = frames.find(fr => fr.id === currentFrameId);
+    if (!currentFrame) return;
+    const backup: Record<string, Position> = {};
+    Object.entries(currentFrame.positions).forEach(([pid, pos]) => { if (ids.has(pid)) backup[pid] = pos as Position; });
+    setUndoStack(prev => [...prev, { type: 'delete-performers-in-frame', frameId: currentFrameId, positionsBackup: backup, deletedIds: selectedPerformerIds }]);
+    setRedoStack([]);
+    setFrames(prev => prev.map(f => {
+      if (f.id !== currentFrameId) return f;
+      const newPositions = { ...f.positions } as Record<string, Position>;
+      Object.keys(newPositions).forEach(pid => { if (ids.has(pid)) delete (newPositions as any)[pid]; });
+      return { ...f, positions: newPositions };
+    }));
+    setSelectedPerformerIds([]);
   };
 
   // Toggle presence in the CURRENT frame
@@ -281,10 +340,62 @@ const App: React.FC = () => {
 
   const handleDeleteFrame = (id: string) => {
     if (frames.length <= 0) return;
-    const newFrames = frames.filter(f => f.id !== id);
-    setFrames(newFrames);
-    if (currentFrameId === id && newFrames.length > 0) {
-      setCurrentFrameId(newFrames[newFrames.length - 1].id);
+    if (isPlaying) handlePlayPause();
+    const target = frames.find(f => f.id === id);
+    const filtered = frames.filter(f => f.id !== id);
+    if (target) {
+      setUndoStack(prev => [...prev, { type: 'delete-frame', frame: JSON.parse(JSON.stringify(target)), prevCurrentFrameId: currentFrameId }]);
+      setRedoStack([]);
+    }
+    if (filtered.length === 0) {
+      const nf: Frame = { id: generateId(), name: 'Opening', startTime: 0, duration: 2000, positions: {} };
+      setFrames([nf]);
+      setCurrentFrameId(nf.id);
+      return;
+    }
+    setFrames(filtered);
+    if (currentFrameId === id) {
+      setCurrentFrameId(filtered[filtered.length - 1].id);
+    }
+  };
+
+  const handleUndo = () => {
+    const last = undoStack[undoStack.length - 1];
+    if (!last) return;
+    setUndoStack(prev => prev.slice(0, -1));
+    if (last.type === 'delete-performers-in-frame') {
+      setFrames(prev => prev.map(f => f.id === last.frameId ? { ...f, positions: { ...f.positions, ...last.positionsBackup } } : f));
+      setSelectedPerformerIds(last.deletedIds);
+      setRedoStack(prev => [...prev, last]);
+    } else if (last.type === 'delete-frame') {
+      setFrames(prev => {
+        const nf = [...prev, last.frame];
+        nf.sort((a, b) => a.startTime - b.startTime);
+        return nf;
+      });
+      setCurrentFrameId(last.frame.id);
+      setRedoStack(prev => [...prev, last]);
+    }
+  };
+
+  const handleRedo = () => {
+    const last = redoStack[redoStack.length - 1];
+    if (!last) return;
+    setRedoStack(prev => prev.slice(0, -1));
+    if (last.type === 'delete-performers-in-frame') {
+      const ids = new Set(Object.keys(last.positionsBackup));
+      setFrames(prev => prev.map(f => {
+        if (f.id !== last.frameId) return f;
+        const newPositions = { ...f.positions } as Record<string, Position>;
+        Object.keys(newPositions).forEach(pid => { if (ids.has(pid)) delete (newPositions as any)[pid]; });
+        return { ...f, positions: newPositions };
+      }));
+      setSelectedPerformerIds([]);
+      setUndoStack(prev => [...prev, last]);
+    } else if (last.type === 'delete-frame') {
+      setFrames(prev => prev.filter(f => f.id !== last.frame.id));
+      setCurrentFrameId(last.prevCurrentFrameId || null as any);
+      setUndoStack(prev => [...prev, last]);
     }
   };
 
@@ -529,6 +640,27 @@ const App: React.FC = () => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.key === 'Delete' || e.key === 'Backspace' || e.code === 'Delete' || e.code === 'Backspace') {
+        e.preventDefault();
+        if (selectedPerformerIds.length > 0) {
+          handleDeleteSelectedPerformers();
+        } else if (currentFrameId) {
+          handleDeleteFrame(currentFrameId);
+        }
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        handleUndo();
+        return;
+      }
+
+      if (((e.ctrlKey || e.metaKey) && e.key === 'y') || ((e.ctrlKey || e.metaKey) && e.key === 'z' && e.shiftKey)) {
+        e.preventDefault();
+        handleRedo();
+        return;
+      }
 
       if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
         if (selectedPerformerIds.length > 0) {
@@ -638,6 +770,165 @@ const App: React.FC = () => {
       startTimeRef.current = performance.now() - time;
       playAudio(time);
     }
+  };
+
+  const renderFrameToCanvas = (canvas: HTMLCanvasElement, timeMs: number, opts?: { includeLabels?: boolean; includeGrid?: boolean; bgColor?: string; }) => {
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const includeLabels = opts?.includeLabels ?? true;
+    const includeGrid = opts?.includeGrid ?? true;
+    const bgColor = opts?.bgColor ?? '#1f2937';
+    const w = canvas.width;
+    const h = canvas.height;
+    ctx.fillStyle = bgColor;
+    ctx.fillRect(0, 0, w, h);
+    // Stage border to match editor
+    ctx.strokeStyle = '#334155';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
+
+    if (includeGrid) {
+      const divisions = Math.round(4 * gridScale);
+      const alpha = 0.2;
+      ctx.strokeStyle = '#94a3b8';
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = alpha;
+      for (let i = 0; i <= divisions; i++) {
+        const x = (i / divisions) * w;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, h);
+        ctx.stroke();
+      }
+      for (let i = 0; i <= divisions; i++) {
+        const y = (i / divisions) * h;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(w, y);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+    const positions = computePositionsAtTime(timeMs);
+    performers.forEach(p => {
+      const pos = positions[p.id];
+      if (!pos) return;
+      const x = (pos.x / 100) * w;
+      const y = (pos.y / 100) * h;
+      ctx.fillStyle = p.color;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      const shapeSize = 32;
+      if (p.shape === 'circle') {
+        ctx.beginPath();
+        ctx.arc(x, y, Math.floor(shapeSize / 2 - 7), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      } else if (p.shape === 'square') {
+        const s = shapeSize;
+        ctx.fillRect(x - s / 2, y - s / 2, s, s);
+        ctx.strokeRect(x - s / 2, y - s / 2, s, s);
+      } else {
+        const s = shapeSize + 6;
+        ctx.beginPath();
+        ctx.moveTo(x, y - s / 2);
+        ctx.lineTo(x + s / 2, y + s / 2);
+        ctx.lineTo(x - s / 2, y + s / 2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      }
+      if (includeLabels) {
+        ctx.fillStyle = '#ffffff';
+        ctx.font = `10px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillText(p.name, x, y + Math.floor(shapeSize / 2));
+      }
+    });
+
+    // Stage front indicator to match editor
+    ctx.fillStyle = 'rgba(100,116,139,0.5)';
+    const frontH = 8;
+    ctx.fillRect(0, h - frontH, w, frontH);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText('舞台前沿', Math.floor(w / 2), h - 2);
+  };
+
+  const handleSetInPoint = () => { setInPointMs(currentTime); };
+  const handleSetOutPoint = () => { setOutPointMs(currentTime); };
+
+  const handleExportVideo = async () => {
+    if (inPointMs == null || outPointMs == null || outPointMs <= inPointMs) {
+      alert('请先设置有效的入点与出点（出点必须大于入点）。');
+      return;
+    }
+    const width = 1280;
+    const height = 720;
+    const fps = 30;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const streamV = (canvas as any).captureStream ? (canvas as any).captureStream(fps) : null;
+    if (!streamV) return;
+    const audioCtx = audioContextRef.current;
+    let stream: MediaStream = streamV;
+    let source: AudioBufferSourceNode | null = null;
+    if (audioCtx && audioBuffer) {
+      if (audioCtx.state === 'suspended') {
+        try { await audioCtx.resume(); } catch {}
+      }
+      const dest = audioCtx.createMediaStreamDestination();
+      source = audioCtx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(dest);
+      source.connect(audioCtx.destination);
+      stream = new MediaStream([...streamV.getVideoTracks(), ...dest.stream.getAudioTracks()]);
+    }
+    const mimeCandidates = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+    const mime = mimeCandidates.find(m => (window as any).MediaRecorder && (MediaRecorder as any).isTypeSupported && MediaRecorder.isTypeSupported(m)) || 'video/webm';
+    const recorder = new MediaRecorder(stream, { mimeType: mime });
+    const chunks: Blob[] = [];
+    recorder.ondataavailable = (e: any) => { if (e.data && e.data.size > 0) chunks.push(e.data); };
+    const totalMs = outPointMs - inPointMs;
+    let startTs = performance.now();
+    setIsExporting(true);
+    setExportProgress(0);
+    recorder.start();
+    if (source) source.start(0, inPointMs / 1000);
+    const step = 1000 / fps;
+    const tick = () => {
+      const elapsed = performance.now() - startTs;
+      const t = inPointMs + elapsed;
+      renderFrameToCanvas(canvas, t, { includeLabels: exportIncludeLabels, includeGrid: exportIncludeGrid });
+      setExportProgress(Math.max(0, Math.min(1, elapsed / totalMs)));
+      if (elapsed < totalMs) {
+        setTimeout(tick, step);
+      } else {
+        recorder.stop();
+        if (source) { try { source.stop(); } catch { } }
+      }
+    };
+    tick();
+    const urlPromise = new Promise<string>(resolve => {
+      recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: mime });
+        const url = URL.createObjectURL(blob);
+        setIsExporting(false);
+        resolve(url);
+      };
+    });
+    const url = await urlPromise;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `choreomaster-export-${Math.round(inPointMs)}-${Math.round(outPointMs)}.webm`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   };
 
   const handleSelectFrame = (id: string) => {
@@ -898,6 +1189,19 @@ const App: React.FC = () => {
         selectedFrameId={currentFrameId}
         heightPx={timelineHeight}
         onRenameFrame={handleRenameFrame}
+        inPointMs={inPointMs}
+        outPointMs={outPointMs}
+        onSetInPoint={handleSetInPoint}
+        onSetOutPoint={handleSetOutPoint}
+        onExportVideo={handleExportVideo}
+        isExporting={isExporting}
+        exportProgress={exportProgress}
+        exportIncludeLabels={exportIncludeLabels}
+        exportIncludeGrid={exportIncludeGrid}
+        onToggleExportIncludeLabels={() => setExportIncludeLabels(v => !v)}
+        onToggleExportIncludeGrid={() => setExportIncludeGrid(v => !v)}
+        exportWidthPx={1280}
+        exportHeightPx={720}
       />
     </div>
   );
