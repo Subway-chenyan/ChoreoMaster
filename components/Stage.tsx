@@ -1,10 +1,12 @@
 
 import React, { useRef, useState, useEffect, useMemo } from 'react';
-import { Performer, Position, SelectionBox, ToolMode } from '../types';
+import { Performer, Position, SelectionBox, ToolMode, PerformerGroup } from '../types';
 import { STAGE_ASPECT_RATIO } from '../constants';
 
 interface StageProps {
   performers: Performer[];
+  performerGroups?: PerformerGroup[];
+  hiddenGroupIds?: string[]; // IDs of groups hidden in current frame
   positions: Record<string, Position>;
   selectedPerformerIds: string[];
   onSelectionChange: (ids: string[]) => void;
@@ -49,6 +51,8 @@ interface DragState {
 
 export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: number }> = ({
   performers,
+  performerGroups = [],
+  hiddenGroupIds = [],
   positions,
   selectedPerformerIds,
   onSelectionChange,
@@ -64,6 +68,14 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
   const stageRef = useRef<HTMLDivElement>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
+
+  // Filter performers based on group visibility in current frame
+  const visiblePerformers = useMemo(() => {
+    return performers.filter(performer => {
+      if (!performer.groupId) return true; // Ungrouped performers are always visible
+      return !hiddenGroupIds.includes(performer.groupId); // Hide if group is in hiddenGroupIds
+    });
+  }, [performers, hiddenGroupIds]);
 
   // Convert client coordinates to percentage relative to stage
   const getPercentagePos = (clientX: number, clientY: number) => {
@@ -138,7 +150,7 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
       const sbTop = Math.min(selectionBox.startY, selectionBox.endY);
       const sbBottom = Math.max(selectionBox.startY, selectionBox.endY);
 
-      const boxSelectedIds = performers.filter((p) => {
+      const boxSelectedIds = visiblePerformers.filter((p) => {
         const pos = positions[p.id];
         if (!pos) return false; // Skip if not in frame
 
@@ -274,7 +286,7 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
         <div className="absolute bottom-0 left-0 right-0 h-2 bg-slate-600 opacity-50 text-center text-[10px] tracking-widest text-white">舞台前沿</div>
 
         {/* Performers Layer */}
-        {performers.map((performer) => {
+        {visiblePerformers.map((performer) => {
           // Check if performer exists in the current frame positions
           const pos = positions[performer.id];
           if (!pos) return null; // Don't render if not in current frame/interpolation
@@ -309,7 +321,7 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
         })}
 
         {/* Labels Layer (Always on Top) */}
-        {showLabels && performers.map((performer) => {
+        {showLabels && visiblePerformers.map((performer) => {
           const pos = positions[performer.id];
           if (!pos) return null;
           const isSelected = selectedPerformerIds.includes(performer.id);

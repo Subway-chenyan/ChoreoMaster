@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Frame, Performer, Position, PerformerShape } from './types';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Frame, Performer, Position, PerformerShape, PerformerGroup } from './types';
 import { Sidebar } from './components/Sidebar';
 import { Stage } from './components/Stage';
 import { Timeline } from './components/Timeline';
@@ -26,6 +26,7 @@ interface ClipboardItem {
 const App: React.FC = () => {
   // State
   const [performers, setPerformers] = useState<Performer[]>([]);
+  const [performerGroups, setPerformerGroups] = useState<PerformerGroup[]>([]);
   const [frames, setFrames] = useState<Frame[]>([DEFAULT_FRAME]);
   const [currentFrameId, setCurrentFrameId] = useState<string>(DEFAULT_FRAME.id);
   const [selectedPerformerIds, setSelectedPerformerIds] = useState<string[]>([]);
@@ -157,6 +158,31 @@ const App: React.FC = () => {
 
   }, [currentTime, frames, performers, getSortedFrames]);
 
+  // Calculate Active Hidden Groups based on Current Time (for playback syncing)
+  const activeHiddenGroupIds = useMemo(() => {
+    const sortedFrames = getSortedFrames(frames);
+
+    // 1. Inside a frame
+    const activeFrame = sortedFrames.find(f => currentTime >= f.startTime && currentTime < f.startTime + f.duration);
+    if (activeFrame) {
+      return activeFrame.hiddenGroupIds || [];
+    }
+
+    // 2. In a GAP (Transition) -> Use Previous Frame's settings
+    const prevFrame = [...sortedFrames].reverse().find(f => f.startTime + f.duration <= currentTime);
+    if (prevFrame) {
+      return prevFrame.hiddenGroupIds || [];
+    }
+
+    // 3. Before first frame -> Use first frame's settings (if exists) 
+    // This is optional, but keeps consistency if waiting to start
+    if (sortedFrames.length > 0 && currentTime < sortedFrames[0].startTime) {
+      return sortedFrames[0].hiddenGroupIds || [];
+    }
+
+    return [];
+  }, [currentTime, frames, getSortedFrames]);
+
   const computePositionsAtTime = useCallback((timeMs: number) => {
     const sortedFrames = getSortedFrames(frames);
     const activeFrame = sortedFrames.find(f => timeMs >= f.startTime && timeMs < f.startTime + f.duration);
@@ -200,11 +226,22 @@ const App: React.FC = () => {
       shape
     };
     setPerformers([...performers, newPerformer]);
-    // Update all frames to include initial pos for new performer
-    setFrames(frames.map(f => ({
-      ...f,
-      positions: { ...f.positions, [newPerformer.id]: { x: 50, y: 50 } }
-    })));
+
+    // Default hiding logic: If adding in a specific frame, hide in previous frames
+    // by only adding position to frames starting at or after the current frame
+    const currentFrame = frames.find(f => f.id === currentFrameId);
+    const startThreshold = currentFrame ? currentFrame.startTime : -1;
+
+    setFrames(frames.map(f => {
+      // If frame is before current frame, do not add performer (effectively hidden)
+      if (f.startTime < startThreshold) {
+        return f;
+      }
+      return {
+        ...f,
+        positions: { ...f.positions, [newPerformer.id]: { x: 50, y: 50 } }
+      };
+    }));
   };
 
   const handleRemovePerformer = (id: string) => {
@@ -215,6 +252,78 @@ const App: React.FC = () => {
   const handleUpdatePerformer = (id: string, updates: Partial<Performer>) => {
     setPerformers(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
   };
+
+  // --- Group Management ---
+  const handleAddGroup = (name: string, color: string) => {
+    const newGroup: PerformerGroup = {
+      id: generateId(),
+      name,
+      color,
+      collapsed: false,
+    };
+    setPerformerGroups(prev => [...prev, newGroup]);
+    return newGroup.id;
+  };
+
+  const handleRemoveGroup = (groupId: string) => {
+    // Remove group and unassign all performers from this group
+    setPerformers(prev => prev.map(p => p.groupId === groupId ? { ...p, groupId: undefined } : p));
+    setPerformerGroups(prev => prev.filter(g => g.id !== groupId));
+    // Also remove from all frames' hiddenGroupIds
+    setFrames(prev => prev.map(f => ({
+      ...f,
+      hiddenGroupIds: f.hiddenGroupIds?.filter(id => id !== groupId)
+    })));
+  };
+
+  const handleUpdateGroup = (groupId: string, updates: Partial<PerformerGroup>) => {
+    setPerformerGroups(prev => prev.map(g => g.id === groupId ? { ...g, ...updates } : g));
+  };
+
+  const handleAddPerformerToGroup = (performerId: string, groupId: string) => {
+    setPerformers(prev => prev.map(p => p.id === performerId ? { ...p, groupId } : p));
+  };
+
+  const handleRemovePerformerFromGroup = (performerId: string) => {
+    setPerformers(prev => prev.map(p => p.id === performerId ? { ...p, groupId: undefined } : p));
+  };
+
+  const handleAddPerformersToGroup = (performerIds: string[], groupId: string) => {
+    setPerformers(prev => prev.map(p => performerIds.includes(p.id) ? { ...p, groupId } : p));
+  };
+
+  const handleUpdateGroupPerformers = (groupId: string, updates: Partial<Performer>) => {
+    // Update all performers in a group (for batch color/name change)
+    setPerformers(prev => prev.map(p => p.groupId === groupId ? { ...p, ...updates } : p));
+  };
+
+  const handleToggleGroupVisibilityInFrame = (groupId: string) => {
+    setFrames(prev => prev.map(f => {
+      if (f.id !== currentFrameId) return f;
+
+      const hiddenGroupIds = f.hiddenGroupIds || [];
+      const isCurrentlyHidden = hiddenGroupIds.includes(groupId);
+
+      return {
+        ...f,
+        hiddenGroupIds: isCurrentlyHidden
+          ? hiddenGroupIds.filter(id => id !== groupId)
+          : [...hiddenGroupIds, groupId]
+      };
+    }));
+  };
+
+  const handleToggleGroupCollapsed = (groupId: string) => {
+    setPerformerGroups(prev => prev.map(g =>
+      g.id === groupId ? { ...g, collapsed: !g.collapsed } : g
+    ));
+  };
+
+  const handleSelectGroupPerformers = (groupId: string) => {
+    const groupPerformerIds = performers.filter(p => p.groupId === groupId).map(p => p.id);
+    setSelectedPerformerIds(groupPerformerIds);
+  };
+
 
   const handleDeleteSelectedPerformers = () => {
     if (selectedPerformerIds.length === 0) return;
@@ -418,11 +527,12 @@ const App: React.FC = () => {
 
   const handleExportProject = () => {
     const projectData = {
-      version: "1.0",
+      version: "1.1",
       createdAt: new Date().toISOString(),
       name: "ChoreoMaster Project",
       musicName,
       performers,
+      performerGroups,
       frames,
     };
 
@@ -456,6 +566,7 @@ const App: React.FC = () => {
     // Perform Reset
     const newFrameId = generateId();
     setPerformers([]);
+    setPerformerGroups([]);
     setFrames([{
       id: newFrameId,
       name: 'Opening',
@@ -485,6 +596,7 @@ const App: React.FC = () => {
         if (!json.frames || !Array.isArray(json.frames)) throw new Error("Invalid project file: missing frames");
 
         setPerformers(json.performers);
+        setPerformerGroups(json.performerGroups || []);
         setFrames(json.frames);
         setMusicName(json.musicName || null);
 
@@ -710,7 +822,7 @@ const App: React.FC = () => {
         setShowHelp(true);
       }
 
-      
+
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -879,7 +991,7 @@ const App: React.FC = () => {
     let source: AudioBufferSourceNode | null = null;
     if (audioCtx && audioBuffer) {
       if (audioCtx.state === 'suspended') {
-        try { await audioCtx.resume(); } catch {}
+        try { await audioCtx.resume(); } catch { }
       }
       const dest = audioCtx.createMediaStreamDestination();
       source = audioCtx.createBufferSource();
@@ -991,38 +1103,50 @@ const App: React.FC = () => {
           >
             <Maximize2 size={20} />
           </button>
-          
+
         </div>
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        { !sidebarCollapsed && (
-        <Sidebar
-          performers={performers}
-          frames={frames}
-          currentFrameId={currentFrameId}
-          onAddPerformer={handleAddPerformer}
-          onRemovePerformer={handleRemovePerformer}
-          onUpdatePerformer={handleUpdatePerformer}
-          onTogglePerformerInFrame={handleTogglePerformerInFrame}
-          onDuplicateSelected={handleDuplicateSelected}
-          onApplyPreset={handleApplyPreset}
-          onImportMusic={handleImportMusic}
-          onExport={handleExportProject}
-          onImportProject={handleImportProject}
-          selectedPerformerIds={selectedPerformerIds}
-          onSelectionChange={setSelectedPerformerIds}
-          musicName={musicName}
-          onSelectFrame={handleSelectFrame}
-          onAddFrame={handleAddFrame}
-          onDeleteFrame={handleDeleteFrame}
-          onDuplicateFrame={handleDuplicateFrame}
-          onReorderFrame={() => { }} // Disabled
-          onResetProject={handleResetProject}
-          onRenameFrame={handleRenameFrame}
-          widthPx={sidebarWidth}
-        /> )}
-        { !sidebarCollapsed && (
+        {!sidebarCollapsed && (
+          <Sidebar
+            performers={performers}
+            performerGroups={performerGroups}
+            frames={frames}
+            currentFrameId={currentFrameId}
+            onAddPerformer={handleAddPerformer}
+            onRemovePerformer={handleRemovePerformer}
+            onUpdatePerformer={handleUpdatePerformer}
+            onTogglePerformerInFrame={handleTogglePerformerInFrame}
+            onDuplicateSelected={handleDuplicateSelected}
+            onApplyPreset={handleApplyPreset}
+            onImportMusic={handleImportMusic}
+            onExport={handleExportProject}
+            onImportProject={handleImportProject}
+            selectedPerformerIds={selectedPerformerIds}
+            onSelectionChange={setSelectedPerformerIds}
+            musicName={musicName}
+            onSelectFrame={handleSelectFrame}
+            onAddFrame={handleAddFrame}
+            onDeleteFrame={handleDeleteFrame}
+            onDuplicateFrame={handleDuplicateFrame}
+            onReorderFrame={() => { }} // Disabled
+            onResetProject={handleResetProject}
+            onRenameFrame={handleRenameFrame}
+            widthPx={sidebarWidth}
+            // Group Management Props
+            onAddGroup={handleAddGroup}
+            onRemoveGroup={handleRemoveGroup}
+            onUpdateGroup={handleUpdateGroup}
+            onAddPerformerToGroup={handleAddPerformerToGroup}
+            onRemovePerformerFromGroup={handleRemovePerformerFromGroup}
+            onAddPerformersToGroup={handleAddPerformersToGroup}
+            onUpdateGroupPerformers={handleUpdateGroupPerformers}
+            onToggleGroupVisibility={handleToggleGroupVisibilityInFrame}
+            onToggleGroupCollapsed={handleToggleGroupCollapsed}
+            onSelectGroupPerformers={handleSelectGroupPerformers}
+          />)}
+        {!sidebarCollapsed && (
           <div
             onMouseDown={(e) => {
               const startX = e.clientX;
@@ -1053,6 +1177,8 @@ const App: React.FC = () => {
 
           <Stage
             performers={performers}
+            performerGroups={performerGroups}
+            hiddenGroupIds={activeHiddenGroupIds}
             positions={displayedPositions}
             selectedPerformerIds={selectedPerformerIds}
             onSelectionChange={setSelectedPerformerIds}
