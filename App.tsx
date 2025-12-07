@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Frame, Performer, Position, PerformerShape, PerformerGroup } from './types';
+import { Frame, Performer, Position, PerformerShape, PerformerGroup, PerformerType } from './types';
 import { Sidebar } from './components/Sidebar';
 import { Stage } from './components/Stage';
 import { Timeline } from './components/Timeline';
@@ -217,13 +216,17 @@ const App: React.FC = () => {
 
   // --- Actions ---
 
-  const handleAddPerformer = (name: string, color: string, shape: PerformerShape) => {
+  const handleAddPerformer = (name: string, color: string, shape: PerformerShape, extra?: { type?: PerformerType, width?: number, height?: number, rotation?: number }) => {
     const newPerformer: Performer = {
       id: generateId(),
       name,
       color,
       label: name.charAt(0).toUpperCase(),
-      shape
+      shape,
+      type: extra?.type || 'performer',
+      width: extra?.width,
+      height: extra?.height,
+      rotation: extra?.rotation
     };
     setPerformers([...performers, newPerformer]);
 
@@ -254,12 +257,13 @@ const App: React.FC = () => {
   };
 
   // --- Group Management ---
-  const handleAddGroup = (name: string, color: string) => {
+  const handleAddGroup = (name: string, color: string, type: 'performer' | 'prop' = 'performer') => {
     const newGroup: PerformerGroup = {
       id: generateId(),
       name,
       color,
       collapsed: false,
+      type,
     };
     setPerformerGroups(prev => [...prev, newGroup]);
     return newGroup.id;
@@ -1183,6 +1187,7 @@ const App: React.FC = () => {
             selectedPerformerIds={selectedPerformerIds}
             onSelectionChange={setSelectedPerformerIds}
             onPositionChange={handlePositionChange}
+            onUpdatePerformer={handleUpdatePerformer}
             readonly={isPlaying}
             showLabels={showLabels}
             gridScale={gridScale}

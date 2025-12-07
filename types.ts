@@ -6,6 +6,8 @@ export interface Position {
 
 export type PerformerShape = 'circle' | 'square' | 'triangle';
 
+export type PerformerType = 'performer' | 'prop';
+
 export interface Performer {
   id: string;
   name: string;
@@ -13,6 +15,10 @@ export interface Performer {
   label: string;
   shape: PerformerShape;
   groupId?: string; // Optional group membership
+  type?: PerformerType;
+  width?: number; // Width in meters (conceptual)
+  height?: number; // Height in meters (conceptual)
+  rotation?: number; // Rotation in degrees
 }
 
 export interface PerformerGroup {
@@ -20,6 +26,7 @@ export interface PerformerGroup {
   name: string;
   color: string; // Group theme color
   collapsed: boolean; // Whether the group is collapsed in UI
+  type?: 'performer' | 'prop'; // Group type
 }
 
 export interface Frame {

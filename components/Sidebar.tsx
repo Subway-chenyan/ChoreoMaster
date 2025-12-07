@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useRef } from 'react';
-import { Performer, Frame, PerformerShape, PerformerGroup } from '../types';
-import { Plus, Users, Trash2, Download, Grid, Music, Sparkles, Wand2, Film, Copy, Search, Settings, Scaling, Upload, FilePlus, Circle, Square, Triangle, UserCheck, UserX, Eye, EyeOff, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreVertical, Palette, Edit2 } from 'lucide-react';
+import { Performer, Frame, PerformerShape, PerformerGroup, PerformerType } from '../types';
+import { Plus, Users, Trash2, Download, Grid, Music, Sparkles, Wand2, Film, Copy, Search, Settings, Scaling, Upload, FilePlus, Circle, Square, Triangle, UserCheck, UserX, Eye, EyeOff, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreVertical, Palette, Edit2, Box } from 'lucide-react';
 import { PRESET_SHAPES, DEFAULT_COLORS } from '../constants';
 import { generateFormationCoordinates } from '../services/geminiService';
 
@@ -10,7 +10,7 @@ interface SidebarProps {
     performerGroups: PerformerGroup[];
     frames: Frame[];
     currentFrameId: string;
-    onAddPerformer: (name: string, color: string, shape: PerformerShape) => void;
+    onAddPerformer: (name: string, color: string, shape: PerformerShape, extra?: { type?: PerformerType, width?: number, height?: number, rotation?: number }) => void;
     onRemovePerformer: (id: string) => void;
     onUpdatePerformer: (id: string, updates: Partial<Performer>) => void;
     onTogglePerformerInFrame: (id: string) => void;
@@ -31,7 +31,7 @@ interface SidebarProps {
     onRenameFrame: (id: string, name?: string) => void;
     widthPx?: number;
     // Group Management Props
-    onAddGroup: (name: string, color: string) => string;
+    onAddGroup: (name: string, color: string, type?: 'performer' | 'prop') => string;
     onRemoveGroup: (groupId: string) => void;
     onUpdateGroup: (groupId: string, updates: Partial<PerformerGroup>) => void;
     onAddPerformerToGroup: (performerId: string, groupId: string) => void;
@@ -43,7 +43,7 @@ interface SidebarProps {
     onSelectGroupPerformers: (groupId: string) => void;
 }
 
-type Tab = 'project' | 'formations' | 'performers' | 'presets';
+type Tab = 'project' | 'formations' | 'performers' | 'props' | 'presets';
 
 const FormationThumbnail: React.FC<{ positions: any }> = ({ positions }) => {
     return (
@@ -102,6 +102,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const [newPerformerName, setNewPerformerName] = useState('');
     const [newPerformerShape, setNewPerformerShape] = useState<PerformerShape>('circle');
     const [newPerformerColor, setNewPerformerColor] = useState<string>(DEFAULT_COLORS[0]);
+    // Prop State
+    const [newPropWidth, setNewPropWidth] = useState<number>(0.5); // Default 0.5m
+    const [newPropHeight, setNewPropHeight] = useState<number>(0.5); // Default 0.5m
 
     // Preset State
     const [presetScale, setPresetScale] = useState(0.8); // Default 80% size to be safe
@@ -125,12 +128,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }>({ show: false, x: 0, y: 0, performerId: null, groupId: null });
     const [draggedPerformerId, setDraggedPerformerId] = useState<string | null>(null);
 
+    // Custom Color Picker Modal State
+    const [colorPickerState, setColorPickerState] = useState<{
+        show: boolean;
+        groupId: string | null;
+        color: string;
+    }>({ show: false, groupId: null, color: '#000000' });
+
     // Ref for context menu click outside detection
     const contextMenuRef = useRef<HTMLDivElement>(null);
 
     const filteredPerformers = useMemo(() => {
-        return performers.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()));
-    }, [performers, searchQuery]);
+        let list = performers;
+        if (activeTab === 'performers') {
+            list = list.filter(p => !p.type || p.type === 'performer');
+        } else if (activeTab === 'props') {
+            list = list.filter(p => p.type === 'prop');
+        }
+        return list.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()));
+    }, [performers, searchQuery, activeTab]);
 
     // Get performers by group
     const performersByGroup = useMemo(() => {
@@ -178,6 +194,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
         }
     };
 
+    const handleAddProp = () => {
+        if (newPerformerName.trim()) {
+            onAddPerformer(newPerformerName, newPerformerColor, 'square', {
+                type: 'prop',
+                width: newPropWidth,
+                height: newPropHeight,
+                rotation: 0
+            });
+            setNewPerformerName('');
+            const nextColorIndex = (DEFAULT_COLORS.indexOf(newPerformerColor) + 1) % DEFAULT_COLORS.length;
+            setNewPerformerColor(DEFAULT_COLORS[nextColorIndex]);
+        }
+    };
+
     const handlePerformerClick = (e: React.MouseEvent, id: string) => {
         if (e.ctrlKey || e.metaKey) {
             if (selectedPerformerIds.includes(id)) {
@@ -203,10 +233,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
         }
     };
 
+    // define filtered groups based on active tab
+    const filteredGroups = useMemo(() => {
+        return performerGroups.filter(g => {
+            if (activeTab === 'props') return g.type === 'prop';
+            if (activeTab === 'performers') return !g.type || g.type === 'performer';
+            // show all groups in other tabs if needed, or default behavior
+            return true;
+        });
+    }, [performerGroups, activeTab]);
+
     // Group Handlers
     const handleCreateGroup = () => {
         if (newGroupName.trim()) {
-            const groupId = onAddGroup(newGroupName.trim(), newGroupColor);
+            const type = activeTab === 'props' ? 'prop' : 'performer';
+            const groupId = onAddGroup(newGroupName.trim(), newGroupColor, type);
             // If performers are selected, add them to the new group
             if (selectedPerformerIds.length > 0) {
                 onAddPerformersToGroup(selectedPerformerIds, groupId);
@@ -300,9 +341,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     } ${isHiddenByGroup ? 'opacity-30' : ''} ${draggedPerformerId === p.id ? 'opacity-50' : ''}`}
             >
                 {/* Icon */}
-                {p.shape === 'circle' && <div className="w-4 h-4 rounded-full border-2 shrink-0" style={{ borderColor: p.color, backgroundColor: selectedPerformerIds.includes(p.id) ? p.color : 'transparent' }} />}
-                {p.shape === 'square' && <div className="w-4 h-4 border-2 shrink-0" style={{ borderColor: p.color, backgroundColor: selectedPerformerIds.includes(p.id) ? p.color : 'transparent' }} />}
-                {p.shape === 'triangle' && <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-b-[10px] border-transparent shrink-0" style={{ borderBottomColor: p.color }} />}
+                {/* Icon */}
+                {p.type === 'prop' ? (
+                    <div className="w-4 h-4 border-2 shrink-0 flex items-center justify-center rounded-sm" style={{ borderColor: p.color, backgroundColor: selectedPerformerIds.includes(p.id) ? p.color : 'transparent' }}>
+                        <Box size={10} color={selectedPerformerIds.includes(p.id) ? '#fff' : p.color} />
+                    </div>
+                ) : (
+                    <>
+                        {p.shape === 'circle' && <div className="w-4 h-4 rounded-full border-2 shrink-0" style={{ borderColor: p.color, backgroundColor: selectedPerformerIds.includes(p.id) ? p.color : 'transparent' }} />}
+                        {p.shape === 'square' && <div className="w-4 h-4 border-2 shrink-0" style={{ borderColor: p.color, backgroundColor: selectedPerformerIds.includes(p.id) ? p.color : 'transparent' }} />}
+                        {p.shape === 'triangle' && <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-b-[10px] border-transparent shrink-0" style={{ borderBottomColor: p.color }} />}
+                    </>
+                )}
 
                 {/* Editable Name by Double Click */}
                 {editingPerformerId === p.id ? (
@@ -366,16 +416,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div style={{ width: widthPx }} className="bg-slate-900 border-r border-slate-800 flex flex-col shadow-xl z-20">
             {/* Top Tabs */}
             <div className="flex items-center bg-slate-950 border-b border-slate-800 px-1 pt-1">
-                <button onClick={() => setActiveTab('project')} className={`flex-1 py-3 flex justify-center ${activeTab === 'project' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`}>
+                <button onClick={() => setActiveTab('project')} className={`flex-1 py-3 flex justify-center ${activeTab === 'project' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="项目设置">
                     <Settings size={18} />
                 </button>
-                <button onClick={() => setActiveTab('formations')} className={`flex-1 py-3 flex justify-center ${activeTab === 'formations' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`}>
+                <button onClick={() => setActiveTab('formations')} className={`flex-1 py-3 flex justify-center ${activeTab === 'formations' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="队形列表">
                     <Film size={18} />
                 </button>
-                <button onClick={() => setActiveTab('performers')} className={`flex-1 py-3 flex justify-center ${activeTab === 'performers' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`}>
+                <button onClick={() => setActiveTab('performers')} className={`flex-1 py-3 flex justify-center ${activeTab === 'performers' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="演员管理">
                     <Users size={18} />
                 </button>
-                <button onClick={() => setActiveTab('presets')} className={`flex-1 py-3 flex justify-center ${activeTab === 'presets' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`}>
+                <button onClick={() => setActiveTab('props')} className={`flex-1 py-3 flex justify-center ${activeTab === 'props' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="道具管理">
+                    <Box size={18} />
+                </button>
+                <button onClick={() => setActiveTab('presets')} className={`flex-1 py-3 flex justify-center ${activeTab === 'presets' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="AI预设">
                     <Grid size={18} />
                 </button>
             </div>
@@ -493,12 +546,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     </div>
                 )}
 
-                {/* PERFORMERS TAB */}
-                {activeTab === 'performers' && (
+                {/* PERFORMERS & PROPS TAB */}
+                {(activeTab === 'performers' || activeTab === 'props') && (
                     <div className="h-full flex flex-col">
                         <div className="flex items-center justify-between mb-4">
-                            <h2 className="text-sm font-bold text-slate-400 uppercase">演员列表</h2>
-                            <span className="text-xs text-slate-500">{performers.length} 人</span>
+                            <h2 className="text-sm font-bold text-slate-400 uppercase">{activeTab === 'props' ? '道具列表' : '演员列表'}</h2>
+                            <span className="text-xs text-slate-500">{filteredPerformers.length} {activeTab === 'props' ? '个' : '人'}</span>
                         </div>
 
                         {/* Search */}
@@ -506,46 +559,76 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
                             <input
                                 type="text"
-                                placeholder="搜索演员..."
+                                placeholder={activeTab === 'props' ? "搜索道具..." : "搜索演员..."}
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
                                 className="w-full bg-slate-950 border border-slate-800 rounded-full py-1.5 pl-9 pr-4 text-xs text-slate-300 focus:outline-none focus:border-blue-500"
                             />
                         </div>
 
-                        {/* Add New Performer */}
-                        <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700 mb-3">
-                            <div className="flex gap-2 mb-2 min-w-0 items-stretch">
-                                <input
-                                    type="text"
-                                    placeholder="演员名称"
-                                    className="flex-1 min-w-0 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
-                                    value={newPerformerName}
-                                    onChange={(e) => setNewPerformerName(e.target.value)}
-                                    onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
-                                />
-                                <button onClick={handleAdd} className="bg-blue-600 hover:bg-blue-500 px-3 rounded text-white">
-                                    <Plus size={18} />
-                                </button>
-                            </div>
-                            <div className="flex items-center justify-between gap-2">
-                                <div className="flex bg-slate-900 rounded p-1 gap-1 border border-slate-600">
-                                    <button onClick={() => setNewPerformerShape('circle')} className={`p-1.5 rounded ${newPerformerShape === 'circle' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`} title="圆形">
-                                        <Circle size={14} fill={newPerformerShape === 'circle' ? 'currentColor' : 'none'} />
-                                    </button>
-                                    <button onClick={() => setNewPerformerShape('triangle')} className={`p-1.5 rounded ${newPerformerShape === 'triangle' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`} title="三角形">
-                                        <Triangle size={14} fill={newPerformerShape === 'triangle' ? 'currentColor' : 'none'} />
-                                    </button>
-                                    <button onClick={() => setNewPerformerShape('square')} className={`p-1.5 rounded ${newPerformerShape === 'square' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`} title="方形">
-                                        <Square size={14} fill={newPerformerShape === 'square' ? 'currentColor' : 'none'} />
+                        {/* Add New Performer / Prop */}
+                        {activeTab === 'props' ? (
+                            <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700 mb-3">
+                                <div className="flex flex-col gap-2">
+                                    <input
+                                        type="text"
+                                        placeholder="道具名称"
+                                        className="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                                        value={newPerformerName}
+                                        onChange={(e) => setNewPerformerName(e.target.value)}
+                                        onKeyDown={(e) => e.key === 'Enter' && handleAddProp()}
+                                    />
+                                    <div className="flex gap-2 items-center">
+                                        <div className="flex items-center gap-1 bg-slate-900 px-2 py-1 rounded border border-slate-600 flex-1">
+                                            <span className="text-[10px] text-slate-400">宽</span>
+                                            <input type="number" step="0.1" value={newPropWidth} onChange={(e) => setNewPropWidth(parseFloat(e.target.value))} className="w-full bg-transparent text-xs text-white focus:outline-none text-center" />
+                                        </div>
+                                        <div className="flex items-center gap-1 bg-slate-900 px-2 py-1 rounded border border-slate-600 flex-1">
+                                            <span className="text-[10px] text-slate-400">高</span>
+                                            <input type="number" step="0.1" value={newPropHeight} onChange={(e) => setNewPropHeight(parseFloat(e.target.value))} className="w-full bg-transparent text-xs text-white focus:outline-none text-center" />
+                                        </div>
+                                        <div className="w-px h-6 bg-slate-700 mx-1"></div>
+                                        <input type="color" value={newPerformerColor} onChange={(e) => setNewPerformerColor(e.target.value)} className="w-8 h-8 rounded cursor-pointer bg-slate-900 p-0.5 border border-slate-600" title="道具颜色" />
+                                    </div>
+                                    <button onClick={handleAddProp} className="w-full bg-blue-600 hover:bg-blue-500 py-1.5 rounded text-white flex items-center justify-center gap-1 text-xs font-bold transition-all active:scale-95 shadow-lg shadow-blue-900/20">
+                                        <Plus size={14} /> 添加道具
                                     </button>
                                 </div>
-                                <div className="flex items-center gap-2 bg-slate-900 border border-slate-600 rounded px-2 py-1">
-                                    <input type="color" value={newPerformerColor} onChange={(e) => setNewPerformerColor(e.target.value)} className="w-6 h-6 bg-transparent border-none cursor-pointer" title="自定义颜色" />
-                                    <span className="text-[10px] text-slate-400 font-mono">{newPerformerColor.toUpperCase()}</span>
+                            </div>
+                        ) : (
+                            <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700 mb-3">
+                                <div className="flex gap-2 mb-2 min-w-0 items-stretch">
+                                    <input
+                                        type="text"
+                                        placeholder="演员名称"
+                                        className="flex-1 min-w-0 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                                        value={newPerformerName}
+                                        onChange={(e) => setNewPerformerName(e.target.value)}
+                                        onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
+                                    />
+                                    <button onClick={handleAdd} className="bg-blue-600 hover:bg-blue-500 px-3 rounded text-white">
+                                        <Plus size={18} />
+                                    </button>
+                                </div>
+                                <div className="flex items-center justify-between gap-2">
+                                    <div className="flex bg-slate-900 rounded p-1 gap-1 border border-slate-600">
+                                        <button onClick={() => setNewPerformerShape('circle')} className={`p-1.5 rounded ${newPerformerShape === 'circle' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`} title="圆形">
+                                            <Circle size={14} fill={newPerformerShape === 'circle' ? 'currentColor' : 'none'} />
+                                        </button>
+                                        <button onClick={() => setNewPerformerShape('triangle')} className={`p-1.5 rounded ${newPerformerShape === 'triangle' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`} title="三角形">
+                                            <Triangle size={14} fill={newPerformerShape === 'triangle' ? 'currentColor' : 'none'} />
+                                        </button>
+                                        <button onClick={() => setNewPerformerShape('square')} className={`p-1.5 rounded ${newPerformerShape === 'square' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`} title="方形">
+                                            <Square size={14} fill={newPerformerShape === 'square' ? 'currentColor' : 'none'} />
+                                        </button>
+                                    </div>
+                                    <div className="flex items-center gap-2 bg-slate-900 border border-slate-600 rounded px-2 py-1">
+                                        <input type="color" value={newPerformerColor} onChange={(e) => setNewPerformerColor(e.target.value)} className="w-6 h-6 bg-transparent border-none cursor-pointer" title="自定义颜色" />
+                                        <span className="text-[10px] text-slate-400 font-mono">{newPerformerColor.toUpperCase()}</span>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
+                        )}
 
                         {/* Add New Group Button */}
                         <div className="mb-3">
@@ -590,7 +673,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         {/* Performers List with Groups */}
                         <div className="flex-1 overflow-y-auto space-y-2 pr-1">
                             {/* Groups */}
-                            {performerGroups.map(group => {
+                            {filteredGroups.map(group => {
                                 const groupPerformers = performersByGroup.grouped[group.id] || [];
                                 if (groupPerformers.length === 0 && searchQuery) return null; // Hide empty groups when searching
 
@@ -690,30 +773,42 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 {contextMenuState.show && (
                     <div
                         ref={contextMenuRef}
-                        style={{ position: 'fixed', left: contextMenuState.x, top: contextMenuState.y, zIndex: 9999 }}
-                        className="bg-slate-800 border border-slate-700 rounded-lg shadow-xl py-1 min-w-[160px] animate-in fade-in zoom-in-95 duration-100"
+                        style={{ position: 'fixed', left: contextMenuState.x, top: contextMenuState.y, zIndex: 50000 }}
+                        className="bg-slate-800 border border-slate-700 rounded-lg shadow-2xl py-1 min-w-[160px] animate-in fade-in zoom-in-95 duration-100"
                     >
                         {contextMenuState.performerId && (
                             <>
                                 <div className="px-3 py-1 text-xs text-slate-500 uppercase tracking-wider">移动到分组</div>
-                                {performerGroups.map(group => (
-                                    <button
-                                        key={group.id}
-                                        onClick={() => {
-                                            if (contextMenuState.performerId) {
-                                                onAddPerformerToGroup(contextMenuState.performerId, group.id);
-                                            }
-                                            closeContextMenu();
-                                        }}
-                                        className="w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 flex items-center gap-2"
-                                    >
-                                        <Folder size={12} style={{ color: group.color }} />
-                                        {group.name}
-                                    </button>
-                                ))}
-                                {performerGroups.length === 0 && (
-                                    <div className="px-3 py-2 text-xs text-slate-600 italic">暂无分组</div>
-                                )}
+                                {(() => {
+                                    const targetPerformer = performers.find(p => p.id === contextMenuState.performerId);
+                                    const relevantGroups = performerGroups.filter(g => {
+                                        if (targetPerformer?.type === 'prop') {
+                                            return g.type === 'prop';
+                                        } else {
+                                            return !g.type || g.type === 'performer';
+                                        }
+                                    });
+
+                                    if (relevantGroups.length === 0) {
+                                        return <div className="px-3 py-2 text-xs text-slate-600 italic">暂无可用分组</div>;
+                                    }
+
+                                    return relevantGroups.map(group => (
+                                        <button
+                                            key={group.id}
+                                            onClick={() => {
+                                                if (contextMenuState.performerId) {
+                                                    onAddPerformerToGroup(contextMenuState.performerId, group.id);
+                                                }
+                                                closeContextMenu();
+                                            }}
+                                            className="w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 flex items-center gap-2"
+                                        >
+                                            <Folder size={12} style={{ color: group.color }} />
+                                            {group.name}
+                                        </button>
+                                    ));
+                                })()}
                                 <div className="h-px bg-slate-700 my-1"></div>
                                 <button
                                     onClick={() => {
@@ -748,8 +843,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                         if (contextMenuState.groupId) {
                                             const group = performerGroups.find(g => g.id === contextMenuState.groupId);
                                             if (group) {
-                                                const newColor = prompt('输入新颜色 (hex)', group.color);
-                                                if (newColor) onUpdateGroup(group.id, { color: newColor });
+                                                setColorPickerState({
+                                                    show: true,
+                                                    groupId: group.id,
+                                                    color: group.color
+                                                });
                                             }
                                         }
                                         closeContextMenu();
@@ -857,6 +955,54 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     </div>
                 )}
             </div>
+
+            {/* Custom Color Picker Modal */}
+            {colorPickerState.show && (
+                <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+                    onClick={(e) => e.stopPropagation()}>
+                    <div className="bg-slate-900 border border-slate-700 p-6 rounded-lg shadow-2xl w-80">
+                        <h3 className="text-lg font-bold text-white mb-4">选择分组颜色</h3>
+
+                        <div className="flex flex-col gap-4">
+                            <div className="flex gap-4 items-center">
+                                <input
+                                    type="color"
+                                    value={colorPickerState.color}
+                                    onChange={(e) => setColorPickerState(prev => ({ ...prev, color: e.target.value }))}
+                                    className="w-16 h-16 rounded cursor-pointer border-0 p-0 bg-transparent"
+                                />
+                                <div className="text-sm flex flex-col gap-1">
+                                    <div className="text-slate-400">已选颜色</div>
+                                    <div className="font-mono bg-slate-800 px-2 py-1 rounded text-slate-300 border border-slate-700 select-all">
+                                        {colorPickerState.color}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="flex gap-2 justify-end mt-4 pt-4 border-t border-slate-800">
+                                <button
+                                    onClick={() => setColorPickerState(prev => ({ ...prev, show: false }))}
+                                    className="px-4 py-2 rounded text-sm text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+                                >
+                                    取消
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        if (colorPickerState.groupId) {
+                                            onUpdateGroup(colorPickerState.groupId, { color: colorPickerState.color });
+                                            onUpdateGroupPerformers(colorPickerState.groupId, { color: colorPickerState.color });
+                                        }
+                                        setColorPickerState(prev => ({ ...prev, show: false }));
+                                    }}
+                                    className="px-4 py-2 rounded text-sm bg-blue-600 hover:bg-blue-500 text-white font-medium shadow-lg shadow-blue-900/20 transition-all hover:scale-105 active:scale-95"
+                                >
+                                    确定应用
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

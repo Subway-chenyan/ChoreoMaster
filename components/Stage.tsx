@@ -11,6 +11,7 @@ interface StageProps {
   selectedPerformerIds: string[];
   onSelectionChange: (ids: string[]) => void;
   onPositionChange: (updates: { id: string; pos: Position }[]) => void;
+  onUpdatePerformer?: (id: string, updates: Partial<Performer>) => void;
   readonly?: boolean;
   mode?: ToolMode;
   showLabels?: boolean;
@@ -57,6 +58,7 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
   selectedPerformerIds,
   onSelectionChange,
   onPositionChange,
+  onUpdatePerformer,
   readonly = false,
   mode = ToolMode.SELECT,
   showLabels = true,
@@ -68,6 +70,16 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
   const stageRef = useRef<HTMLDivElement>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
+
+  interface ResizeState {
+    id: string;
+    startClientX: number;
+    startClientY: number;
+    startWidth: number;
+    startHeight: number;
+    handle: 'nw' | 'ne' | 'sw' | 'se';
+  }
+  const [resizeState, setResizeState] = useState<ResizeState | null>(null);
 
   // Filter performers based on group visibility in current frame
   const visiblePerformers = useMemo(() => {
@@ -86,11 +98,24 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
     return { x, y };
   };
 
+  const handleResizeStart = (e: React.MouseEvent, id: string, handle: 'nw' | 'ne' | 'sw' | 'se', currentWidth: number, currentHeight: number) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setResizeState({
+      id,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      startWidth: currentWidth || 1,
+      startHeight: currentHeight || 1,
+      handle
+    });
+  };
+
   const handleMouseDown = (e: React.MouseEvent) => {
     if (readonly) return;
 
     // Start selection box
-    if (mode === ToolMode.SELECT && !dragState) {
+    if (mode === ToolMode.SELECT && !dragState && !resizeState) {
       setSelectionBox({
         startX: e.clientX,
         startY: e.clientY,
@@ -107,6 +132,52 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
 
   const handleMouseMove = (e: React.MouseEvent) => {
     if (readonly) return;
+
+    if (resizeState && stageRef.current && onUpdatePerformer) {
+      // Resizing Logic
+      const rect = stageRef.current.getBoundingClientRect();
+      const STAGE_WIDTH_METERS = 20;
+
+      const deltaXPixels = e.clientX - resizeState.startClientX;
+      const deltaYPixels = e.clientY - resizeState.startClientY;
+
+      // Convert pixels to meters
+      // Ratio: STAGE_WIDTH_METERS / rect.width
+      const metersPerPx = STAGE_WIDTH_METERS / rect.width;
+
+      let deltaW = 0;
+      let deltaH = 0;
+
+      // For symmetric resizing from center (simpler for now):
+      // If I drag 'se' to right, width increases by 2 * deltaX
+      // Because center stays fixed.
+      // Actually, let's do simple symmetric resizing.
+      // If handle is right-side ('ne', 'se'), dx > 0 -> grow.
+      // If handle is left-side ('nw', 'sw'), dx < 0 -> grow (so -dx).
+
+      if (resizeState.handle.includes('e')) {
+        deltaW = deltaXPixels;
+      } else {
+        deltaW = -deltaXPixels;
+      }
+
+      if (resizeState.handle.includes('s')) {
+        deltaH = deltaYPixels;
+      } else {
+        deltaH = -deltaYPixels;
+      }
+
+      // We multiply by 2 because growing one side from center implies symmetrical growth in absolute terms to keep center
+      // Or conceptually: moving right edge 1px right increases width by 2px if center is fixed?
+      // No, if width increases by 1m, and center fixed, right edge moves 0.5m.
+      // So if right edge moves 1m (delta), width must have increased by 2m.
+
+      const newWidth = Math.max(0.1, resizeState.startWidth + (deltaW * metersPerPx * 2));
+      const newHeight = Math.max(0.1, resizeState.startHeight + (deltaH * metersPerPx * 2)); // Assuming uniform scale factor for ease
+
+      onUpdatePerformer(resizeState.id, { width: newWidth, height: newHeight });
+      return;
+    }
 
     if (dragState && stageRef.current) {
       // Calculate delta in percentage
@@ -141,9 +212,18 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
 
   const handleMouseUp = (e: React.MouseEvent) => {
     if (readonly) return;
+    setResizeState(null);
+    setDragState(null);
+    setSelectionBox(null);
 
-    if (selectionBox && stageRef.current) {
-      // Calculate intersection
+    // Context for selection box logic... (retained but moved logic out of if block to be safe, or just keep it)
+    if (selectionBox && stageRef.current && !resizeState && !dragState) {
+      // ... (selection logic)
+      // Since I'm replacing the whole block, I need to include selection box logic here.
+      // Wait, replace_content replaces a block. The original block ended at setSelectionBox(null). 
+      // I need to be careful not to delete logic I'm not showing.
+      // My replacement ends at setSelectionBox(null) ? No. 
+      // I'll try to match the end of handleMouseUp.
       const rect = stageRef.current.getBoundingClientRect();
       const sbLeft = Math.min(selectionBox.startX, selectionBox.endX);
       const sbRight = Math.max(selectionBox.startX, selectionBox.endX);
@@ -169,8 +249,6 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
         }
       }
     }
-    setDragState(null);
-    setSelectionBox(null);
   };
 
   const handlePerformerMouseDown = (e: React.MouseEvent, id: string) => {
@@ -292,6 +370,48 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
           if (!pos) return null; // Don't render if not in current frame/interpolation
 
           const isSelected = selectedPerformerIds.includes(performer.id);
+
+          // Render Prop
+          if (performer.type === 'prop') {
+            const STAGE_WIDTH_METERS = 20; // Assume 20m width
+            const STAGE_DEPTH_METERS = STAGE_WIDTH_METERS / aspectRatio;
+
+            const widthPct = ((performer.width || 1) / STAGE_WIDTH_METERS) * 100;
+            const heightPct = ((performer.height || 1) / STAGE_DEPTH_METERS) * 100;
+
+            return (
+              <div
+                key={performer.id}
+                onMouseDown={(e) => handlePerformerMouseDown(e, performer.id)}
+                className={`absolute cursor-grab active:cursor-grabbing z-10 group flex items-center justify-center`}
+                style={{
+                  left: `${pos.x}%`,
+                  top: `${pos.y}%`,
+                  width: `${widthPct}%`,
+                  height: `${heightPct}%`,
+                  backgroundColor: performer.color,
+                  transform: `translate(-50%, -50%) rotate(${performer.rotation || 0}deg)`,
+                  border: isSelected ? '2px solid white' : '1px solid rgba(255,255,255,0.3)',
+                  boxShadow: isSelected ? '0 0 10px rgba(59,130,246,0.5)' : 'none'
+                }}
+              >
+                {/* Prop Label (Optional, maybe small text inside or standard label above) */}
+                <div className="opacity-0 group-hover:opacity-100 text-[8px] text-white font-mono bg-black/50 px-1 rounded absolute pointer-events-none">
+                  {performer.name}
+                </div>
+
+                {/* Resize Handles */}
+                {isSelected && !readonly && (
+                  <>
+                    <div className="absolute top-0 left-0 w-3 h-3 bg-white border border-blue-600 rounded-full cursor-nw-resize -translate-x-1/2 -translate-y-1/2 z-20 shadow-sm hover:scale-125 transition-transform" onMouseDown={(e) => handleResizeStart(e, performer.id, 'nw', performer.width || 1, performer.height || 1)} />
+                    <div className="absolute top-0 right-0 w-3 h-3 bg-white border border-blue-600 rounded-full cursor-ne-resize translate-x-1/2 -translate-y-1/2 z-20 shadow-sm hover:scale-125 transition-transform" onMouseDown={(e) => handleResizeStart(e, performer.id, 'ne', performer.width || 1, performer.height || 1)} />
+                    <div className="absolute bottom-0 left-0 w-3 h-3 bg-white border border-blue-600 rounded-full cursor-sw-resize -translate-x-1/2 translate-y-1/2 z-20 shadow-sm hover:scale-125 transition-transform" onMouseDown={(e) => handleResizeStart(e, performer.id, 'sw', performer.width || 1, performer.height || 1)} />
+                    <div className="absolute bottom-0 right-0 w-3 h-3 bg-white border border-blue-600 rounded-full cursor-se-resize translate-x-1/2 translate-y-1/2 z-20 shadow-sm hover:scale-125 transition-transform" onMouseDown={(e) => handleResizeStart(e, performer.id, 'se', performer.width || 1, performer.height || 1)} />
+                  </>
+                )}
+              </div>
+            );
+          }
 
           return (
             <div
