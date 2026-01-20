@@ -4,6 +4,7 @@ import { Performer, Frame, PerformerShape, PerformerGroup, PerformerType } from 
 import { Plus, Users, Trash2, Download, Grid, Music, Sparkles, Wand2, Film, Copy, Search, Settings, Scaling, Upload, FilePlus, Circle, Square, Triangle, UserCheck, UserX, Eye, EyeOff, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreVertical, Palette, Edit2, Box } from 'lucide-react';
 import { PRESET_SHAPES, DEFAULT_COLORS } from '../constants';
 import { generateFormationCoordinates } from '../services/geminiService';
+import { StageConfig } from '../types';
 
 interface SidebarProps {
     performers: Performer[];
@@ -41,6 +42,11 @@ interface SidebarProps {
     onToggleGroupVisibility: (groupId: string) => void;
     onToggleGroupCollapsed: (groupId: string) => void;
     onSelectGroupPerformers: (groupId: string) => void;
+    // 新增 3D 相关 props
+    stageConfig?: StageConfig;
+    onStageConfigChange: (updates: Partial<StageConfig>) => void;
+    onLEDContentUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+    onClearLEDContent: () => void;
 }
 
 type Tab = 'project' | 'formations' | 'performers' | 'props' | 'presets';
@@ -91,6 +97,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
     onToggleGroupVisibility,
     onToggleGroupCollapsed,
     onSelectGroupPerformers,
+    stageConfig,
+    onStageConfigChange,
+    onLEDContentUpload,
+    onClearLEDContent,
 }) => {
     const [activeTab, setActiveTab] = useState<Tab>('performers');
     const [editingFrameId, setEditingFrameId] = useState<string | null>(null);
@@ -468,6 +478,54 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 导入音频文件
                                 <input type="file" accept="audio/*" className="hidden" onChange={onImportMusic} />
                             </label>
+                        </div>
+
+                        {/* 3D 舞台设置 */}
+                        <div className="bg-slate-800 p-4 rounded-lg border border-slate-700 mt-4">
+                            <div className="flex items-center gap-2 mb-3">
+                                <span className="text-xs font-bold text-slate-400 uppercase">3D 舞台设置</span>
+                            </div>
+
+                            {/* LED 高度 */}
+                            <div className="space-y-2 mb-3">
+                                <label className="text-xs text-slate-400">LED 屏幕高度</label>
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        type="number"
+                                        step={0.5}
+                                        min={2}
+                                        max={15}
+                                        value={stageConfig?.ledHeight || 6}
+                                        onChange={(e) => onStageConfigChange({ ledHeight: Number(e.target.value) })}
+                                        className="flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                                    />
+                                    <span className="text-xs text-slate-500">米</span>
+                                </div>
+                            </div>
+
+                            {/* LED 内容 */}
+                            <div className="space-y-2">
+                                <label className="text-xs text-slate-400">LED 屏幕内容</label>
+                                <div className="flex gap-2">
+                                    <label className="flex-1 flex items-center justify-center px-3 py-2 bg-slate-700 hover:bg-slate-600 border border-slate-600 rounded text-xs cursor-pointer transition-colors text-white">
+                                        上传图片/视频
+                                        <input
+                                            type="file"
+                                            accept="image/*,video/*"
+                                            className="hidden"
+                                            onChange={onLEDContentUpload}
+                                        />
+                                    </label>
+                                    {(stageConfig?.ledContent?.type !== 'none') && (
+                                        <button
+                                            onClick={onClearLEDContent}
+                                            className="px-3 py-2 bg-red-900/30 hover:bg-red-900/50 border border-red-900 rounded text-xs text-red-400 transition-colors"
+                                        >
+                                            清除
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
                         </div>
                     </div>
                 )}

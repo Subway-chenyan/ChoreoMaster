@@ -2,11 +2,13 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Frame, Performer, Position, PerformerShape, PerformerGroup, PerformerType } from './types';
 import { Sidebar } from './components/Sidebar';
 import { Stage } from './components/Stage';
+import Stage3D from './components/Stage3D';
 import { Timeline } from './components/Timeline';
 import { HelpModal } from './components/HelpModal';
 import { useTheme } from './contexts/ThemeContext';
 import { DEFAULT_COLORS } from './constants';
 import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, Maximize2, ChevronDown, ChevronUp } from 'lucide-react';
+import { StageConfig } from './types';
 
 const DEFAULT_FRAME: Frame = {
   id: 'start-frame',
@@ -53,6 +55,16 @@ const App: React.FC = () => {
   const [timelineHeight, setTimelineHeight] = useState<number>(160);
   const [undoStack, setUndoStack] = useState<any[]>([]);
   const [redoStack, setRedoStack] = useState<any[]>([]);
+
+  // 新增：3D 模式相关状态
+  const [viewMode, setViewMode] = useState<'2d' | '3d'>('2d');
+  const [stageConfig, setStageConfig] = useState<StageConfig>({
+    width: 20,
+    depth: 20 / (16/9),
+    ledHeight: 6,
+    ledContent: { type: 'none' }
+  });
+  const [mediaCache, setMediaCache] = useState<Record<string, string>>({});
 
   // Theme
   const { theme } = useTheme();
@@ -328,6 +340,35 @@ const App: React.FC = () => {
     setSelectedPerformerIds(groupPerformerIds);
   };
 
+  // LED 内容上传处理
+  const handleLEDContentUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const url = URL.createObjectURL(file);
+    const fileName = `led_${Date.now()}_${file.name}`;
+
+    setMediaCache(prev => ({ ...prev, [fileName]: url }));
+
+    const type = file.type.startsWith('video') ? 'video' : 'image';
+    setStageConfig(prev => ({
+      ...prev,
+      ledContent: { type, value: fileName, loop: true }
+    }));
+  };
+
+  // 清除 LED 内容
+  const handleClearLEDContent = () => {
+    setStageConfig(prev => ({
+      ...prev,
+      ledContent: { type: 'none' }
+    }));
+  };
+
+  // 舞台配置更新
+  const handleStageConfigChange = (updates: Partial<StageConfig>) => {
+    setStageConfig(prev => ({ ...prev, ...updates }));
+  };
 
   const handleDeleteSelectedPerformers = () => {
     if (selectedPerformerIds.length === 0) return;
@@ -531,13 +572,14 @@ const App: React.FC = () => {
 
   const handleExportProject = () => {
     const projectData = {
-      version: "1.1",
+      version: "1.2",
       createdAt: new Date().toISOString(),
       name: "ChoreoMaster Project",
       musicName,
       performers,
       performerGroups,
       frames,
+      stageConfig,
     };
 
     const blob = new Blob([JSON.stringify(projectData, null, 2)], { type: 'application/json' });
@@ -603,6 +645,14 @@ const App: React.FC = () => {
         setPerformerGroups(json.performerGroups || []);
         setFrames(json.frames);
         setMusicName(json.musicName || null);
+
+        // 恢复舞台配置
+        if (json.stageConfig) {
+          setStageConfig(json.stageConfig);
+          if (json.stageConfig.ledContent?.value) {
+            setMediaCache({});
+          }
+        }
 
         // Reset Playback
         setCurrentTime(0);
@@ -1101,6 +1151,19 @@ const App: React.FC = () => {
             <HelpCircle size={20} />
           </button>
           <button
+            onClick={() => setViewMode(viewMode === '2d' ? '3d' : '2d')}
+            className={`p-2 rounded-lg transition-colors ${
+              viewMode === '3d'
+                ? 'bg-purple-600 text-white hover:bg-purple-500'
+                : theme === 'dark'
+                  ? 'hover:bg-slate-800 text-slate-400 hover:text-purple-400'
+                  : 'hover:bg-gray-100 text-gray-600 hover:text-purple-600'
+            }`}
+            title={viewMode === '2d' ? '切换到 3D 视图' : '切换到 2D 视图'}
+          >
+            {viewMode === '2d' ? '🎲' : '🔲'}
+          </button>
+          <button
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
             className={`p-2 rounded-lg transition-colors ${theme === 'dark' ? 'hover:bg-slate-800 text-slate-400 hover:text-green-400' : 'hover:bg-gray-100 text-gray-600 hover:text-green-600'}`}
             title={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
@@ -1149,6 +1212,10 @@ const App: React.FC = () => {
             onToggleGroupVisibility={handleToggleGroupVisibilityInFrame}
             onToggleGroupCollapsed={handleToggleGroupCollapsed}
             onSelectGroupPerformers={handleSelectGroupPerformers}
+            stageConfig={stageConfig}
+            onStageConfigChange={handleStageConfigChange}
+            onLEDContentUpload={handleLEDContentUpload}
+            onClearLEDContent={handleClearLEDContent}
           />)}
         {!sidebarCollapsed && (
           <div
@@ -1179,22 +1246,39 @@ const App: React.FC = () => {
             </div>
           </div>
 
-          <Stage
-            performers={performers}
-            performerGroups={performerGroups}
-            hiddenGroupIds={activeHiddenGroupIds}
-            positions={displayedPositions}
-            selectedPerformerIds={selectedPerformerIds}
-            onSelectionChange={setSelectedPerformerIds}
-            onPositionChange={handlePositionChange}
-            onUpdatePerformer={handleUpdatePerformer}
-            readonly={isPlaying}
-            showLabels={showLabels}
-            gridScale={gridScale}
-            onZoom={handleGridZoom}
-            aspectRatio={stageAspectRatio}
-            maxWidthPx={stageMaxWidth}
-          />
+          {viewMode === '2d' ? (
+            <Stage
+              performers={performers}
+              performerGroups={performerGroups}
+              hiddenGroupIds={activeHiddenGroupIds}
+              positions={displayedPositions}
+              selectedPerformerIds={selectedPerformerIds}
+              onSelectionChange={setSelectedPerformerIds}
+              onPositionChange={handlePositionChange}
+              onUpdatePerformer={handleUpdatePerformer}
+              readonly={isPlaying}
+              showLabels={showLabels}
+              gridScale={gridScale}
+              onZoom={handleGridZoom}
+              aspectRatio={stageAspectRatio}
+              maxWidthPx={stageMaxWidth}
+            />
+          ) : (
+            <Stage3D
+              performers={performers}
+              performerGroups={performerGroups}
+              hiddenGroupIds={activeHiddenGroupIds}
+              positions={displayedPositions}
+              selectedPerformerIds={selectedPerformerIds}
+              onSelectionChange={setSelectedPerformerIds}
+              onPositionChange={handlePositionChange}
+              onUpdatePerformer={handleUpdatePerformer}
+              onRemovePerformer={handleRemovePerformer}
+              stageConfig={stageConfig}
+              mediaCache={mediaCache}
+              readonly={isPlaying}
+            />
+          )}
 
           <div
             onMouseDown={(e) => {
