@@ -1266,11 +1266,10 @@ const App: React.FC = () => {
           ) : (
             <Stage3D
               performers={performers}
-              performerGroups={performerGroups}
-              hiddenGroupIds={activeHiddenGroupIds}
               positions={displayedPositions}
-              selectedPerformerIds={selectedPerformerIds}
-              onSelectionChange={setSelectedPerformerIds}
+              selectedIds={selectedPerformerIds}
+              onSelect={setSelectedPerformerIds}
+              hiddenGroupIds={activeHiddenGroupIds}
               onPositionChange={handlePositionChange}
               onUpdatePerformer={handleUpdatePerformer}
               onRemovePerformer={handleRemovePerformer}

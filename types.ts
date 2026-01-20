@@ -74,3 +74,17 @@ export interface LEDContent {
   value?: string; // Color hex or filename reference
   loop?: boolean; // For video looping
 }
+
+export interface Entity {
+  id: string;
+  name: string;
+  type: 'performer' | 'prop';
+  position: Position;
+  color: string;
+  rotation?: number;
+  dimensions?: {
+    width: number;
+    height: number;
+    depth: number;
+  };
+}
