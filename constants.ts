@@ -1,6 +1,13 @@
-import { Position } from './types';
+import { Position, StageConfig } from './types';
 
 export const STAGE_ASPECT_RATIO = 16 / 9;
+
+export const STAGE_CONFIG: StageConfig = {
+  width: 20,           // 20 meters wide
+  depth: 20 / (16/9),  // ~11.25 meters deep (16:9 aspect)
+  ledHeight: 6,        // 6 meters tall LED wall
+  ledContent: { type: 'none' }
+};
 
 export const DEFAULT_COLORS = [
   '#EF4444', // Red
