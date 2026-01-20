@@ -2,6 +2,7 @@
 export interface Position {
   x: number; // Percentage 0-100
   y: number; // Percentage 0-100
+  z?: number; // Optional height in meters (0 = ground)
 }
 
 export type PerformerShape = 'circle' | 'square' | 'triangle';
@@ -16,8 +17,9 @@ export interface Performer {
   shape: PerformerShape;
   groupId?: string; // Optional group membership
   type?: PerformerType;
-  width?: number; // Width in meters (conceptual)
-  height?: number; // Height in meters (conceptual)
+  width?: number; // Width in meters
+  height?: number; // Height in meters
+  depth?: number; // Depth in meters (for 3D props)
   rotation?: number; // Rotation in degrees
 }
 
@@ -58,4 +60,17 @@ export interface SelectionBox {
 export enum ToolMode {
   SELECT = 'SELECT',
   ADD_PERFORMER = 'ADD_PERFORMER',
+}
+
+export interface StageConfig {
+  width: number; // Stage width in meters (default 20)
+  depth: number; // Stage depth in meters
+  ledHeight?: number; // LED wall height in meters
+  ledContent?: LEDContent;
+}
+
+export interface LEDContent {
+  type: 'none' | 'color' | 'image' | 'video';
+  value?: string; // Color hex or filename reference
+  loop?: boolean; // For video looping
 }
