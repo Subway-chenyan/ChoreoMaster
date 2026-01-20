@@ -1,0 +1,76 @@
+import React, { useRef, useEffect, useState } from 'react';
+import { useTexture } from '@react-three/drei';
+import * as THREE from 'three';
+import { StageConfig } from '../types';
+
+interface LEDTVProps {
+  config: StageConfig;
+  mediaCache?: Record<string, string>;
+}
+
+const LEDTV: React.FC<LEDTVProps> = ({ config, mediaCache = {} }) => {
+  const meshRef = useRef<THREE.Mesh>(null);
+  const [videoTexture, setVideoTexture] = useState<THREE.VideoTexture | null>(null);
+
+  const height = config.ledHeight || 6;
+  const width = config.width;
+  const depth = config.depth;
+  const content = config.ledContent;
+
+  useEffect(() => {
+    if (content?.type === 'video' && content.value && mediaCache[content.value]) {
+      const video = document.createElement('video');
+      video.src = mediaCache[content.value];
+      video.loop = content.loop ?? true;
+      video.muted = true;
+      video.playsInline = true;
+
+      const onLoadedData = () => { video.play().catch(console.error); };
+      video.addEventListener('loadeddata', onLoadedData);
+
+      const texture = new THREE.VideoTexture(video);
+      setVideoTexture(texture);
+
+      return () => {
+        video.removeEventListener('loadeddata', onLoadedData);
+        video.pause();
+        texture.dispose();
+      };
+    } else {
+      setVideoTexture(null);
+    }
+  }, [content, mediaCache]);
+
+  let imageTexture: THREE.Texture | null = null;
+  if (content?.type === 'image' && content.value && mediaCache[content.value]) {
+    try { imageTexture = useTexture(mediaCache[content.value]); }
+    catch (e) { console.error('Failed to load image texture:', e); }
+  }
+
+  const getTexture = () => {
+    if (content?.type === 'video') return videoTexture;
+    if (content?.type === 'image') return imageTexture;
+    return null;
+  };
+
+  const getColor = () => {
+    if (content?.type === 'color' && content.value) return content.value;
+    return '#111111';
+  };
+
+  return (
+    <mesh ref={meshRef} position={[0, height / 2, -depth / 2 - 0.1]} receiveShadow>
+      <planeGeometry args={[width, height]} />
+      <meshStandardMaterial
+        map={getTexture() || undefined}
+        color={getColor()}
+        emissive={getTexture() ? '#ffffff' : '#222222'}
+        emissiveIntensity={getTexture() ? 1 : 0.3}
+        emissiveMap={getTexture() || undefined}
+        side={THREE.DoubleSide}
+      />
+    </mesh>
+  );
+};
+
+export default LEDTV;
