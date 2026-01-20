@@ -28,8 +28,8 @@ const Scene3D: React.FC<Scene3DProps> = ({ performers, positions, selectedIds, o
       <StageFloor width={stageConfig.width} depth={stageConfig.depth} />
       {visiblePerformers.map(p => {
         const pos = positions[p.id]; if (!pos) return null;
-        if (p.type === 'prop') return <Prop3D key={p.id} performer={p} position={pos} isSelected={selectedIds.includes(p.id)} onSelect={onSelect} />;
-        return <Performer3D key={p.id} performer={p} position={pos} isSelected={selectedIds.includes(p.id)} onSelect={onSelect} />;
+        if (p.type === 'prop') return <Prop3D key={p.id} performer={p} position={pos} isSelected={selectedIds.includes(p.id)} onSelect={onSelect} stageConfig={{ width: stageConfig.width, depth: stageConfig.depth }} />;
+        return <Performer3D key={p.id} performer={p} position={pos} isSelected={selectedIds.includes(p.id)} onSelect={onSelect} stageConfig={{ width: stageConfig.width, depth: stageConfig.depth }} />;
       })}
       <mesh position={[0, 0, -stageConfig.depth / 2 - 5]} scale={[100, 100, 1]} visible={false} onClick={() => onSelect('')}>
         <planeGeometry />

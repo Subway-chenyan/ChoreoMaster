@@ -10,13 +10,13 @@ interface Performer3DProps {
   position: Position;
   isSelected: boolean;
   onSelect: (id: string) => void;
+  stageConfig: { width: number; depth: number };
 }
 
-const Performer3D: React.FC<Performer3DProps> = ({ performer, position, isSelected, onSelect }) => {
+const Performer3D: React.FC<Performer3DProps> = ({ performer, position, isSelected, onSelect, stageConfig }) => {
   const meshRef = useRef<THREE.Group>(null);
   const [hovered, setHover] = useState(false);
 
-  const stageConfig = { width: 20, depth: 20 / (16/9) };
   const [targetX, targetY, targetZ] = mapTo3D(position, stageConfig);
 
   useFrame(() => {

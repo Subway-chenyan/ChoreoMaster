@@ -1,5 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
-import { useTexture } from '@react-three/drei';
+import React, { useRef, useEffect, useState, useMemo } from 'react';
 import * as THREE from 'three';
 import { StageConfig } from '../types';
 
@@ -41,11 +40,17 @@ const LEDTV: React.FC<LEDTVProps> = ({ config, mediaCache = {} }) => {
     }
   }, [content, mediaCache]);
 
-  let imageTexture: THREE.Texture | null = null;
-  if (content?.type === 'image' && content.value && mediaCache[content.value]) {
-    try { imageTexture = useTexture(mediaCache[content.value]); }
-    catch (e) { console.error('Failed to load image texture:', e); }
-  }
+  const imageTexture = useMemo(() => {
+    if (content?.type === 'image' && content.value && mediaCache[content.value]) {
+      const loader = new THREE.TextureLoader();
+      try {
+        return loader.load(mediaCache[content.value]);
+      } catch (e) {
+        console.error('Failed to load image texture:', e);
+      }
+    }
+    return null;
+  }, [content, mediaCache]);
 
   const getTexture = () => {
     if (content?.type === 'video') return videoTexture;

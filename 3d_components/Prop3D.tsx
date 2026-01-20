@@ -10,13 +10,13 @@ interface Prop3DProps {
   position: Position;
   isSelected: boolean;
   onSelect: (id: string) => void;
+  stageConfig: { width: number; depth: number };
 }
 
-const Prop3D: React.FC<Prop3DProps> = ({ performer, position, isSelected, onSelect }) => {
+const Prop3D: React.FC<Prop3DProps> = ({ performer, position, isSelected, onSelect, stageConfig }) => {
   const meshRef = useRef<THREE.Group>(null);
   const [hovered, setHover] = useState(false);
 
-  const stageConfig = { width: 20, depth: 20 / (16/9) };
   const [targetX, targetY, targetZ] = mapTo3D(position, stageConfig);
   const dims = { width: performer.width || 1, height: performer.height || 1, depth: performer.depth || 1 };
 
