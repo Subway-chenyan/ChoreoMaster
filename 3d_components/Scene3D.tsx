@@ -41,6 +41,14 @@ const Scene3D: React.FC<Scene3DProps> = ({
     }
   };
 
+  const handleDragStart = () => {
+    onDragStart?.();
+  };
+
+  const handleDragEnd = () => {
+    onDragEnd?.();
+  };
+
   return (
     <>
       <ambientLight intensity={0.6} />
@@ -57,8 +65,8 @@ const Scene3D: React.FC<Scene3DProps> = ({
           isSelected: selectedIds.includes(p.id),
           onSelect,
           stageConfig: { width: stageConfig.width, depth: stageConfig.depth },
-          onDragStart,
-          onDragEnd,
+          onDragStart: handleDragStart,
+          onDragEnd: handleDragEnd,
           onPositionChange: readonly ? undefined : (newPos: Position) => handlePositionChange(p.id, newPos)
         };
         if (p.type === 'prop') return <Prop3D {...commonProps} />;
