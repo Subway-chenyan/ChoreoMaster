@@ -14,11 +14,13 @@ const StageFloor: React.FC<StageFloorProps> = ({ width, depth }) => {
         <meshStandardMaterial color="#1a1a1a" roughness={0.8} metalness={0.2} />
       </mesh>
       <gridHelper args={[width, Math.floor(width), 0x444444, 0x222222]} position={[0, 0.01, 0]} />
-      <mesh position={[0, 0.02, depth / 2]}>
+      {/* Red line at front (z = -depth/2, towards camera) */}
+      <mesh position={[0, 0.02, -depth / 2]}>
         <boxGeometry args={[width, 0.05, 0.1]} />
         <meshBasicMaterial color="#ef4444" />
       </mesh>
-      <mesh position={[0, 0.02, -depth / 2]}>
+      {/* Blue line at back (z = depth/2, away from camera) */}
+      <mesh position={[0, 0.02, depth / 2]}>
         <boxGeometry args={[width, 0.05, 0.1]} />
         <meshBasicMaterial color="#3b82f6" />
       </mesh>
