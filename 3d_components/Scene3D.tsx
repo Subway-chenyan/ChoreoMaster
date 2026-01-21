@@ -72,9 +72,10 @@ const Scene3D: React.FC<Scene3DProps> = ({
     if (readonly || !onPositionChange || draggingIdRef.current !== id) return;
 
     // Convert 3D position to 2D percentage
+    // Using the same logic as mapTo2D
     const newPos = {
       x: ((point.x / (stageConfig.width / 2)) * 50) + 50,
-      y: 50 + ((point.z / (stageConfig.depth / 2)) * 50),
+      y: ((point.z / (stageConfig.depth / 2)) * 50) + 50,
       z: positions[id]?.z || 0
     };
 

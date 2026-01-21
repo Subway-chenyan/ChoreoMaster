@@ -88,7 +88,7 @@ const Performer3D: React.FC<Performer3DProps> = ({
 
         const newPos = {
           x: ((clampedPoint.x / (stageConfig.width / 2)) * 50) + 50,
-          y: 50 + ((clampedPoint.z / (stageConfig.depth / 2)) * 50),
+          y: ((clampedPoint.z / (stageConfig.depth / 2)) * 50) + 50,
           z: position.z || 0
         };
         onPositionChange(newPos);
