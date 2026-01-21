@@ -570,7 +570,7 @@ const App: React.FC = () => {
 
   // --- Project Export / Import ---
 
-  const handleExportProject = () => {
+  const handleExportProject = async () => {
     const projectData = {
       version: "1.2",
       createdAt: new Date().toISOString(),
@@ -582,6 +582,21 @@ const App: React.FC = () => {
       stageConfig,
     };
 
+    // Check if running in Electron
+    if (window.electronAPI?.isElectron) {
+      try {
+        const defaultName = `choreomaster-project-${new Date().toISOString().slice(0, 10)}.json`;
+        const filePath = await window.electronAPI.saveFile(defaultName);
+        if (filePath) {
+          await window.electronAPI.writeFile(filePath, JSON.stringify(projectData, null, 2));
+          return;
+        }
+      } catch (error) {
+        console.error('Electron export failed, falling back to web:', error);
+      }
+    }
+
+    // Fallback to web version (blob download)
     const blob = new Blob([JSON.stringify(projectData, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -628,7 +643,55 @@ const App: React.FC = () => {
     setSelectedPerformerIds([]);
   };
 
-  const handleImportProject = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImportProject = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Check if running in Electron
+    if (window.electronAPI?.isElectron) {
+      try {
+        const filePath = await window.electronAPI.openFile([
+          { name: 'ChoreoMaster Project', extensions: ['json'] },
+          { name: 'JSON Files', extensions: ['json'] },
+        ]);
+
+        if (filePath) {
+          const content = await window.electronAPI.readFile(filePath);
+          const json = JSON.parse(content);
+
+          // Basic validation
+          if (!json.performers || !Array.isArray(json.performers)) throw new Error("Invalid project file: missing performers");
+          if (!json.frames || !Array.isArray(json.frames)) throw new Error("Invalid project file: missing frames");
+
+          setPerformers(json.performers);
+          setPerformerGroups(json.performerGroups || []);
+          setFrames(json.frames);
+          setMusicName(json.musicName || null);
+
+          // 恢复舞台配置
+          if (json.stageConfig) {
+            setStageConfig(json.stageConfig);
+            if (json.stageConfig.ledContent?.value) {
+              setMediaCache({});
+            }
+          }
+
+          // Reset Playback
+          setCurrentTime(0);
+          setAudioBuffer(null);
+          setMusicUrl(null);
+          setSelectedPerformerIds([]);
+
+          if (json.frames.length > 0) {
+            setCurrentFrameId(json.frames[0].id);
+          }
+
+          alert(`Project loaded successfully. Please re-import audio file "${json.musicName || 'if needed'}"`);
+          return;
+        }
+      } catch (error) {
+        console.error('Electron import failed, falling back to web:', error);
+      }
+    }
+
+    // Fallback to web version (file input)
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -665,7 +728,6 @@ const App: React.FC = () => {
         }
 
         alert(`Project loaded successfully. Please re-import audio file "${json.musicName || 'if needed'}"`);
-
       } catch (err) {
         console.error("Failed to import project:", err);
         alert("Failed to import project. File might be corrupted or invalid.");

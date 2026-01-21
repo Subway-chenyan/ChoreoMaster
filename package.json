@@ -1,11 +1,15 @@
 {
-  "name": "choreomaster-ai",
+  "name": "choreomaster-desktop",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "main": "dist-electron/main.js",
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:electron": "concurrently \"vite\" \"tsc -p tsconfig.electron.json && wait-on http://localhost:5173 && electron .\"",
     "build": "vite build",
+    "build:electron": "npm run build:main && npm run build && electron-builder",
+    "build:main": "tsc -p tsconfig.electron.json",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -21,7 +25,12 @@
     "@types/node": "^22.14.0",
     "@types/three": "^0.182.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "concurrently": "^9.2.1",
+    "electron": "^34.5.8",
+    "electron-builder": "^25.1.8",
+    "electron-is-dev": "^3.0.1",
     "typescript": "~5.8.2",
-    "vite": "^6.2.0"
+    "vite": "^6.2.0",
+    "wait-on": "^8.0.5"
   }
 }
