@@ -34,16 +34,10 @@ const Prop3D: React.FC<Prop3DProps> = ({
   const currentPositionRef = useRef<THREE.Vector3>(new THREE.Vector3(0, 0, 0));
   const currentRotationRef = useRef<THREE.Quaternion>(new THREE.Quaternion());
 
-  // Height drag (vertical arrow) state
-  const isHeightDraggingRef = useRef(false);
-  const dragStartPointerYRef = useRef(0);
-  const dragStartHeightRef = useRef(0);
-
   // Plane drag state
   const isPlaneDraggingRef = useRef(false);
   const dragPlaneRef = useRef<THREE.Plane>(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0));
   const dragOffsetRef = useRef<THREE.Vector3>(new THREE.Vector3());
-  const arrowMeshRef = useRef<THREE.Group>(null);
 
   const dims = { width: performer.width || 1, height: performer.height || 1, depth: performer.depth || 1 };
 
@@ -128,42 +122,9 @@ const Prop3D: React.FC<Prop3DProps> = ({
     dragContext.onPlaneDragEnd();
   }, [dragContext]);
 
-  // Height drag handlers (vertical arrow)
-  const handleHeightDragStart = useCallback((e: any) => {
-    e.stopPropagation();
-    isHeightDraggingRef.current = true;
-    dragStartPointerYRef.current = e.pointer.y;
-    dragStartHeightRef.current = position.z || 0;
-    onDragStart?.();
-  }, [position.z, onDragStart]);
-
-  const handleHeightDragMove = useCallback((e: any) => {
-    if (!isHeightDraggingRef.current || !onPositionChange) return;
-    e.stopPropagation();
-
-    const deltaY = e.pointer.y - dragStartPointerYRef.current;
-    // Use camera distance to scale the movement appropriately
-    const { camera } = useThree();
-    const scaleFactor = Math.abs(camera.position.z || 20) / 500;
-    const heightChange = -deltaY * scaleFactor; // Negative because dragging up (negative y) should increase height
-    const newHeight = Math.max(0, Math.min(10, dragStartHeightRef.current + heightChange));
-
-    onPositionChange({
-      x: position.x,
-      y: position.y,
-      z: newHeight
-    });
-  }, [onPositionChange, position.x, position.y]);
-
-  const handleHeightDragEnd = useCallback((e: any) => {
-    e.stopPropagation();
-    isHeightDraggingRef.current = false;
-    onDragEnd?.();
-  }, [onDragEnd]);
-
   const handleClick = useCallback((e: any) => {
     e.stopPropagation();
-    if (!isPlaneDraggingRef.current && !isHeightDraggingRef.current) {
+    if (!isPlaneDraggingRef.current) {
       onSelect(performer.id);
     }
   }, [onSelect, performer.id]);
@@ -178,6 +139,7 @@ const Prop3D: React.FC<Prop3DProps> = ({
       onPointerUp={handlePlanePointerUp}
     >
       <mesh castShadow receiveShadow>
+        {/* boxGeometry args: [length(2Dx/3Dx), height(3D垂直), width(2Dy/3Dz)] */}
         <boxGeometry args={[dims.width, dims.height, dims.depth]} />
         <meshStandardMaterial color={isSelected ? '#60a5fa' : performer.color} transparent opacity={hovered ? 0.9 : 1} />
       </mesh>
@@ -188,31 +150,8 @@ const Prop3D: React.FC<Prop3DProps> = ({
         </lineSegments>
       )}
 
-      {/* Height adjustment arrow (shown when selected) */}
-      {isSelected && onPositionChange && (
-        <group
-          position={[0, dims.height / 2 + 0.5, 0]}
-          onPointerDown={handleHeightDragStart}
-          onPointerMove={handleHeightDragMove}
-          onPointerUp={handleHeightDragEnd}
-        >
-          <mesh>
-            <coneGeometry args={[0.15, 0.3, 8]} />
-            <meshStandardMaterial color="#fbbf24" />
-          </mesh>
-          <mesh position={[0, 0.2, 0]}>
-            <cylinderGeometry args={[0.08, 0.08, 0.4, 8]} />
-            <meshStandardMaterial color="#fbbf24" />
-          </mesh>
-          <mesh position={[0, -0.2, 0]} rotation={[Math.PI, 0, 0]}>
-            <coneGeometry args={[0.15, 0.3, 8]} />
-            <meshStandardMaterial color="#fbbf24" />
-          </mesh>
-        </group>
-      )}
-
       {isSelected && (
-        <Html position={[0, dims.height / 2 + 1.2, 0]} center>
+        <Html position={[0, dims.height / 2 + 0.5, 0]} center>
           <div className="bg-yellow-400 text-black px-2 py-0.5 rounded text-xs font-bold">{performer.name}</div>
         </Html>
       )}

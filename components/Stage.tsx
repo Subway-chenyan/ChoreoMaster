@@ -173,9 +173,10 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
       // So if right edge moves 1m (delta), width must have increased by 2m.
 
       const newWidth = Math.max(0.1, resizeState.startWidth + (deltaW * metersPerPx * 2));
-      const newHeight = Math.max(0.1, resizeState.startHeight + (deltaH * metersPerPx * 2)); // Assuming uniform scale factor for ease
+      const newDepth = Math.max(0.1, resizeState.startHeight + (deltaH * metersPerPx * 2));
 
-      onUpdatePerformer(resizeState.id, { width: newWidth, height: newHeight });
+      // width(长) for 2D x-axis, depth(宽) for 2D y-axis
+      onUpdatePerformer(resizeState.id, { width: newWidth, depth: newDepth });
       return;
     }
 
@@ -376,8 +377,9 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
             const STAGE_WIDTH_METERS = 20; // Assume 20m width
             const STAGE_DEPTH_METERS = STAGE_WIDTH_METERS / aspectRatio;
 
+            // width(长) for 2D x-axis, depth(宽) for 2D y-axis
             const widthPct = ((performer.width || 1) / STAGE_WIDTH_METERS) * 100;
-            const heightPct = ((performer.height || 1) / STAGE_DEPTH_METERS) * 100;
+            const heightPct = ((performer.depth || 1) / STAGE_DEPTH_METERS) * 100;
 
             return (
               <div
@@ -403,10 +405,10 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
                 {/* Resize Handles */}
                 {isSelected && !readonly && (
                   <>
-                    <div className="absolute top-0 left-0 w-3 h-3 bg-white border border-blue-600 rounded-full cursor-nw-resize -translate-x-1/2 -translate-y-1/2 z-20 shadow-sm hover:scale-125 transition-transform" onMouseDown={(e) => handleResizeStart(e, performer.id, 'nw', performer.width || 1, performer.height || 1)} />
-                    <div className="absolute top-0 right-0 w-3 h-3 bg-white border border-blue-600 rounded-full cursor-ne-resize translate-x-1/2 -translate-y-1/2 z-20 shadow-sm hover:scale-125 transition-transform" onMouseDown={(e) => handleResizeStart(e, performer.id, 'ne', performer.width || 1, performer.height || 1)} />
-                    <div className="absolute bottom-0 left-0 w-3 h-3 bg-white border border-blue-600 rounded-full cursor-sw-resize -translate-x-1/2 translate-y-1/2 z-20 shadow-sm hover:scale-125 transition-transform" onMouseDown={(e) => handleResizeStart(e, performer.id, 'sw', performer.width || 1, performer.height || 1)} />
-                    <div className="absolute bottom-0 right-0 w-3 h-3 bg-white border border-blue-600 rounded-full cursor-se-resize translate-x-1/2 translate-y-1/2 z-20 shadow-sm hover:scale-125 transition-transform" onMouseDown={(e) => handleResizeStart(e, performer.id, 'se', performer.width || 1, performer.height || 1)} />
+                    <div className="absolute top-0 left-0 w-3 h-3 bg-white border border-blue-600 rounded-full cursor-nw-resize -translate-x-1/2 -translate-y-1/2 z-20 shadow-sm hover:scale-125 transition-transform" onMouseDown={(e) => handleResizeStart(e, performer.id, 'nw', performer.width || 1, performer.depth || 1)} />
+                    <div className="absolute top-0 right-0 w-3 h-3 bg-white border border-blue-600 rounded-full cursor-ne-resize translate-x-1/2 -translate-y-1/2 z-20 shadow-sm hover:scale-125 transition-transform" onMouseDown={(e) => handleResizeStart(e, performer.id, 'ne', performer.width || 1, performer.depth || 1)} />
+                    <div className="absolute bottom-0 left-0 w-3 h-3 bg-white border border-blue-600 rounded-full cursor-sw-resize -translate-x-1/2 translate-y-1/2 z-20 shadow-sm hover:scale-125 transition-transform" onMouseDown={(e) => handleResizeStart(e, performer.id, 'sw', performer.width || 1, performer.depth || 1)} />
+                    <div className="absolute bottom-0 right-0 w-3 h-3 bg-white border border-blue-600 rounded-full cursor-se-resize translate-x-1/2 translate-y-1/2 z-20 shadow-sm hover:scale-125 transition-transform" onMouseDown={(e) => handleResizeStart(e, performer.id, 'se', performer.width || 1, performer.depth || 1)} />
                   </>
                 )}
               </div>

@@ -14,6 +14,7 @@ interface Stage3DProps {
   onRemovePerformer: (id: string) => void;
   stageConfig: StageConfig;
   mediaCache?: Record<string, string>;
+  gridScale?: number;
   readonly?: boolean;
   onDragStart?: () => void;
   onDragEnd?: () => void;
@@ -30,6 +31,7 @@ const Stage3D: React.FC<Stage3DProps> = ({
   onRemovePerformer,
   stageConfig,
   mediaCache,
+  gridScale = 1,
   readonly = false,
   onDragStart,
   onDragEnd
@@ -47,6 +49,7 @@ const Stage3D: React.FC<Stage3DProps> = ({
           stageConfig={stageConfig}
           mediaCache={mediaCache}
           hiddenGroupIds={hiddenGroupIds}
+          gridScale={gridScale}
           onPositionChange={onPositionChange}
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}

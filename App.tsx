@@ -228,7 +228,7 @@ const App: React.FC = () => {
 
   // --- Actions ---
 
-  const handleAddPerformer = (name: string, color: string, shape: PerformerShape, extra?: { type?: PerformerType, width?: number, height?: number, rotation?: number }) => {
+  const handleAddPerformer = (name: string, color: string, shape: PerformerShape, extra?: { type?: PerformerType, width?: number, depth?: number, height?: number, rotation?: number }) => {
     const newPerformer: Performer = {
       id: generateId(),
       name,
@@ -237,6 +237,7 @@ const App: React.FC = () => {
       shape,
       type: extra?.type || 'performer',
       width: extra?.width,
+      depth: extra?.depth,
       height: extra?.height,
       rotation: extra?.rotation
     };
@@ -1337,6 +1338,7 @@ const App: React.FC = () => {
               onRemovePerformer={handleRemovePerformer}
               stageConfig={stageConfig}
               mediaCache={mediaCache}
+              gridScale={gridScale}
               readonly={isPlaying}
             />
           )}

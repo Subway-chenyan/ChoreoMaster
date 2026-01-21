@@ -16,6 +16,20 @@ const LEDTV: React.FC<LEDTVProps> = ({ config, mediaCache = {} }) => {
   const depth = config.depth;
   const content = config.ledContent;
 
+  // Configure texture to stretch to fill the LED screen
+  const configureTexture = (texture: THREE.Texture) => {
+    // Ensure texture stretches to fill the entire surface
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.colorSpace = THREE.SRGBColorSpace;
+    // Center the texture and repeat once (full stretch)
+    texture.center.set(0.5, 0.5);
+    texture.repeat.set(1, 1);
+    return texture;
+  };
+
   useEffect(() => {
     if (content?.type === 'video' && content.value && mediaCache[content.value]) {
       const video = document.createElement('video');
@@ -28,6 +42,7 @@ const LEDTV: React.FC<LEDTVProps> = ({ config, mediaCache = {} }) => {
       video.addEventListener('loadeddata', onLoadedData);
 
       const texture = new THREE.VideoTexture(video);
+      configureTexture(texture);
       setVideoTexture(texture);
 
       return () => {
@@ -44,7 +59,9 @@ const LEDTV: React.FC<LEDTVProps> = ({ config, mediaCache = {} }) => {
     if (content?.type === 'image' && content.value && mediaCache[content.value]) {
       const loader = new THREE.TextureLoader();
       try {
-        return loader.load(mediaCache[content.value]);
+        const texture = loader.load(mediaCache[content.value]);
+        configureTexture(texture);
+        return texture;
       } catch (e) {
         console.error('Failed to load image texture:', e);
       }
