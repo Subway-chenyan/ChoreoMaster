@@ -36,13 +36,14 @@ const Prop3D: React.FC<Prop3DProps> = ({
 
   // Height drag (vertical arrow) state
   const isHeightDraggingRef = useRef(false);
-  const dragStartYRef = useRef(0);
+  const dragStartPointerYRef = useRef(0);
   const dragStartHeightRef = useRef(0);
 
   // Plane drag state
   const isPlaneDraggingRef = useRef(false);
   const dragPlaneRef = useRef<THREE.Plane>(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0));
   const dragOffsetRef = useRef<THREE.Vector3>(new THREE.Vector3());
+  const arrowMeshRef = useRef<THREE.Group>(null);
 
   const dims = { width: performer.width || 1, height: performer.height || 1, depth: performer.depth || 1 };
 
@@ -131,7 +132,7 @@ const Prop3D: React.FC<Prop3DProps> = ({
   const handleHeightDragStart = useCallback((e: any) => {
     e.stopPropagation();
     isHeightDraggingRef.current = true;
-    dragStartYRef.current = e.clientY;
+    dragStartPointerYRef.current = e.pointer.y;
     dragStartHeightRef.current = position.z || 0;
     onDragStart?.();
   }, [position.z, onDragStart]);
@@ -140,8 +141,11 @@ const Prop3D: React.FC<Prop3DProps> = ({
     if (!isHeightDraggingRef.current || !onPositionChange) return;
     e.stopPropagation();
 
-    const deltaY = e.clientY - dragStartYRef.current;
-    const heightChange = deltaY * 0.01;
+    const deltaY = e.pointer.y - dragStartPointerYRef.current;
+    // Use camera distance to scale the movement appropriately
+    const { camera } = useThree();
+    const scaleFactor = Math.abs(camera.position.z || 20) / 500;
+    const heightChange = -deltaY * scaleFactor; // Negative because dragging up (negative y) should increase height
     const newHeight = Math.max(0, Math.min(10, dragStartHeightRef.current + heightChange));
 
     onPositionChange({
