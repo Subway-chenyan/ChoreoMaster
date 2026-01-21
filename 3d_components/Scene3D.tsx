@@ -14,10 +14,32 @@ interface Scene3DProps {
   stageConfig: StageConfig;
   mediaCache?: Record<string, string>;
   hiddenGroupIds?: string[];
+  onDragStart?: () => void;
+  onDragEnd?: () => void;
+  onPositionChange?: (updates: { id: string; pos: Position }[]) => void;
+  readonly?: boolean;
 }
 
-const Scene3D: React.FC<Scene3DProps> = ({ performers, positions, selectedIds, onSelect, stageConfig, mediaCache, hiddenGroupIds = [] }) => {
+const Scene3D: React.FC<Scene3DProps> = ({
+  performers,
+  positions,
+  selectedIds,
+  onSelect,
+  stageConfig,
+  mediaCache,
+  hiddenGroupIds = [],
+  onDragStart,
+  onDragEnd,
+  onPositionChange,
+  readonly = false
+}) => {
   const visiblePerformers = performers.filter(p => !p.groupId || !hiddenGroupIds.includes(p.groupId));
+
+  const handlePositionChange = (id: string, pos: Position) => {
+    if (onPositionChange) {
+      onPositionChange([{ id, pos }]);
+    }
+  };
 
   return (
     <>
@@ -28,8 +50,19 @@ const Scene3D: React.FC<Scene3DProps> = ({ performers, positions, selectedIds, o
       <StageFloor width={stageConfig.width} depth={stageConfig.depth} />
       {visiblePerformers.map(p => {
         const pos = positions[p.id]; if (!pos) return null;
-        if (p.type === 'prop') return <Prop3D key={p.id} performer={p} position={pos} isSelected={selectedIds.includes(p.id)} onSelect={onSelect} stageConfig={{ width: stageConfig.width, depth: stageConfig.depth }} />;
-        return <Performer3D key={p.id} performer={p} position={pos} isSelected={selectedIds.includes(p.id)} onSelect={onSelect} stageConfig={{ width: stageConfig.width, depth: stageConfig.depth }} />;
+        const commonProps = {
+          key: p.id,
+          performer: p,
+          position: pos,
+          isSelected: selectedIds.includes(p.id),
+          onSelect,
+          stageConfig: { width: stageConfig.width, depth: stageConfig.depth },
+          onDragStart,
+          onDragEnd,
+          onPositionChange: readonly ? undefined : (newPos: Position) => handlePositionChange(p.id, newPos)
+        };
+        if (p.type === 'prop') return <Prop3D {...commonProps} />;
+        return <Performer3D {...commonProps} />;
       })}
       <mesh position={[0, 0, -stageConfig.depth / 2 - 5]} scale={[100, 100, 1]} visible={false} onClick={() => onSelect('')}>
         <planeGeometry />

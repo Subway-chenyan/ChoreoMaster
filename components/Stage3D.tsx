@@ -1,7 +1,6 @@
 import React from 'react';
 import { Canvas } from '@react-three/fiber';
 import Scene3D from '../3d_components/Scene3D';
-import EditorPanel3D from './EditorPanel3D';
 import { Performer, Position, StageConfig } from '../types';
 
 interface Stage3DProps {
@@ -16,24 +15,44 @@ interface Stage3DProps {
   stageConfig: StageConfig;
   mediaCache?: Record<string, string>;
   readonly?: boolean;
+  onDragStart?: () => void;
+  onDragEnd?: () => void;
 }
 
-const Stage3D: React.FC<Stage3DProps> = ({ performers, positions, selectedIds, hiddenGroupIds, onSelect, onPositionChange, onUpdatePerformer, onRemovePerformer, stageConfig, mediaCache, readonly = false }) => {
+const Stage3D: React.FC<Stage3DProps> = ({
+  performers,
+  positions,
+  selectedIds,
+  hiddenGroupIds,
+  onSelect,
+  onPositionChange,
+  onUpdatePerformer,
+  onRemovePerformer,
+  stageConfig,
+  mediaCache,
+  readonly = false,
+  onDragStart,
+  onDragEnd
+}) => {
   const handleSelect = (id: string) => { onSelect(id === '' ? [] : [id]); };
-  const handleUpdatePosition = (id: string, pos: Position) => { onPositionChange([{ id, pos }]); };
-  const selectedPerformer = selectedIds.length === 1 ? performers.find(p => p.id === selectedIds[0]) || null : null;
-  const selectedPosition = selectedIds.length === 1 ? positions[selectedIds[0]] || null : null;
 
   return (
-    <div className="flex-1 flex bg-slate-950 relative">
-      <div className="flex-1">
-        <Canvas shadows camera={{ position: [0, 15, 20], fov: 50 }} gl={{ antialias: true }}>
-          <Scene3D performers={performers} positions={positions} selectedIds={selectedIds} onSelect={handleSelect} stageConfig={stageConfig} mediaCache={mediaCache} hiddenGroupIds={hiddenGroupIds} />
-        </Canvas>
-      </div>
-      {!readonly && (
-        <EditorPanel3D performer={selectedPerformer} position={selectedPosition} onUpdatePosition={handleUpdatePosition} onUpdatePerformer={onUpdatePerformer} onDelete={onRemovePerformer} />
-      )}
+    <div className="flex-1 bg-slate-950 relative">
+      <Canvas shadows camera={{ position: [0, 15, 20], fov: 50 }} gl={{ antialias: true }}>
+        <Scene3D
+          performers={performers}
+          positions={positions}
+          selectedIds={selectedIds}
+          onSelect={handleSelect}
+          stageConfig={stageConfig}
+          mediaCache={mediaCache}
+          hiddenGroupIds={hiddenGroupIds}
+          onPositionChange={onPositionChange}
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+          readonly={readonly}
+        />
+      </Canvas>
     </div>
   );
 };
