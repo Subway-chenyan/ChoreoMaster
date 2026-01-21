@@ -8,6 +8,17 @@ import Prop3D from './Prop3D';
 import LEDTV from '../components/LEDTV';
 import { Performer, Position, StageConfig } from '../types';
 
+interface DragContextType {
+  isDragging: boolean;
+  hasSelection: boolean;
+  dragPlane: THREE.Plane | null;
+  onPlaneDragStart: (id: string) => void;
+  onPlaneDragMove: (id: string, point: THREE.Vector3) => void;
+  onPlaneDragEnd: () => void;
+  registerDraggable: (id: string, mesh: THREE.Object3D) => void;
+  unregisterDraggable: (id: string) => void;
+}
+
 interface Scene3DProps {
   performers: Performer[];
   positions: Record<string, Position>;
@@ -34,6 +45,7 @@ interface DragContextType {
 
 const DragContext = createContext<DragContextType>({
   isDragging: false,
+  hasSelection: false,
   dragPlane: null,
   onPlaneDragStart: () => {},
   onPlaneDragMove: () => {},
@@ -101,6 +113,7 @@ const Scene3D: React.FC<Scene3DProps> = ({
 
   const contextValue: DragContextType = {
     isDragging: draggingIdRef.current !== null,
+    hasSelection: selectedIds.length > 0,
     dragPlane: dragPlaneRef.current,
     onPlaneDragStart,
     onPlaneDragMove,
@@ -129,7 +142,16 @@ const Scene3D: React.FC<Scene3DProps> = ({
     <DragContext.Provider value={contextValue}>
       <ambientLight intensity={0.6} />
       <directionalLight position={[10, 20, 10]} intensity={0.8} castShadow />
-      <OrbitControls makeDefault minPolarAngle={0} maxPolarAngle={Math.PI / 2} maxDistance={50} minDistance={5} target={[0, 0, 0]} />
+      <OrbitControls
+        makeDefault
+        minPolarAngle={0}
+        maxPolarAngle={Math.PI / 2}
+        maxDistance={50}
+        minDistance={5}
+        target={[0, 0, 0]}
+        enableRotate={!contextValue.isDragging && !contextValue.hasSelection}
+        enablePan={!contextValue.isDragging}
+      />
       <LEDTV config={stageConfig} mediaCache={mediaCache} />
       <StageFloor width={stageConfig.width} depth={stageConfig.depth} />
       {visiblePerformers.map(p => {
