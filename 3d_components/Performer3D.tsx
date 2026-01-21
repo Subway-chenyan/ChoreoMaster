@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { useFrame, useThree, ThreeEvent } from '@react-three/fiber';
+import { useFrame } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { Performer, Position } from '../types';
@@ -33,7 +33,6 @@ const Performer3D: React.FC<Performer3DProps> = ({
   const isDraggingRef = useRef(false);
   const dragStartYRef = useRef(0);
   const dragStartHeightRef = useRef(0);
-  const { camera, raycaster, pointer } = useThree();
 
   // Initialize position on mount or when position changes significantly
   useEffect(() => {
@@ -66,7 +65,7 @@ const Performer3D: React.FC<Performer3DProps> = ({
     }
   });
 
-  const handleDragStart = (e: ThreeEvent<PointerEvent>) => {
+  const handleDragStart = (e: any) => {
     e.stopPropagation();
     isDraggingRef.current = true;
     dragStartYRef.current = e.nativeEvent.clientY;
@@ -74,12 +73,12 @@ const Performer3D: React.FC<Performer3DProps> = ({
     onDragStart?.();
   };
 
-  const handleDragMove = (e: ThreeEvent<PointerEvent>) => {
+  const handleDragMove = (e: any) => {
     if (!isDraggingRef.current || !onPositionChange) return;
     e.stopPropagation();
 
     const deltaY = e.nativeEvent.clientY - dragStartYRef.current;
-    const heightChange = deltaY * 0.01; // Scale factor for height adjustment
+    const heightChange = deltaY * 0.01;
     const newHeight = Math.max(0, Math.min(10, dragStartHeightRef.current + heightChange));
 
     onPositionChange({
@@ -89,13 +88,13 @@ const Performer3D: React.FC<Performer3DProps> = ({
     });
   };
 
-  const handleDragEnd = (e: ThreeEvent<PointerEvent>) => {
+  const handleDragEnd = (e: any) => {
     e.stopPropagation();
     isDraggingRef.current = false;
     onDragEnd?.();
   };
 
-  const handleClick = (e: ThreeEvent<MouseEvent>) => {
+  const handleClick = (e: any) => {
     e.stopPropagation();
     if (!isDraggingRef.current) {
       onSelect(performer.id);
