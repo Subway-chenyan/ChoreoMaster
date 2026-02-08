@@ -88,3 +88,8 @@ export interface Entity {
     depth: number;
   };
 }
+export interface AIConfig {
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+}

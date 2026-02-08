@@ -1,10 +1,11 @@
 
-import React, { useState, useMemo, useRef } from 'react';
-import { Performer, Frame, PerformerShape, PerformerGroup, PerformerType } from '../types';
-import { Plus, Users, Trash2, Download, Grid, Music, Sparkles, Wand2, Film, Copy, Search, Settings, Scaling, Upload, FilePlus, Circle, Square, Triangle, UserCheck, UserX, Eye, EyeOff, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreVertical, Palette, Edit2, Box } from 'lucide-react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { Performer, Frame, PerformerShape, PerformerGroup, PerformerType, AIConfig } from '../types';
+import { Plus, Users, Trash2, Download, Grid, Music, Sparkles, Wand2, Film, Copy, Search, Settings, Scaling, Upload, FilePlus, Circle, Square, Triangle, UserCheck, UserX, Eye, EyeOff, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreVertical, Palette, Edit2, Box, Library, Save } from 'lucide-react';
 import { PRESET_SHAPES, DEFAULT_COLORS } from '../constants';
 import { generateFormationCoordinates } from '../services/geminiService';
 import { StageConfig } from '../types';
+import { ProjectBrowser } from './ProjectBrowser';
 
 interface SidebarProps {
     performers: Performer[];
@@ -47,9 +48,90 @@ interface SidebarProps {
     onStageConfigChange: (updates: Partial<StageConfig>) => void;
     onLEDContentUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
     onClearLEDContent: () => void;
+    aiConfig: AIConfig;
+    onAiConfigChange: (config: AIConfig) => void;
+    // Project storage props
+    currentProjectId?: string | null;
+    onLoadProject?: (projectId: string) => void;
+    onCreateProject?: (name: string) => Promise<string>;
+    onSaveProject?: () => void;
+    projectHasChanges?: boolean;
 }
 
-type Tab = 'project' | 'formations' | 'performers' | 'props' | 'presets';
+type Tab = 'library' | 'project' | 'formations' | 'performers' | 'props' | 'presets';
+
+// Storage Settings Component
+const StorageSettings: React.FC = () => {
+    const [storagePath, setStoragePath] = useState<string>('');
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const loadSettings = async () => {
+            if (!window.electronAPI?.isElectron) return;
+            try {
+                const settings = await window.electronAPI.project.getSettings();
+                setStoragePath(settings.storagePath);
+            } catch (error) {
+                console.error('Failed to load settings:', error);
+            } finally {
+                setLoading(false);
+            }
+        };
+        loadSettings();
+    }, []);
+
+    const handleChangeStoragePath = async () => {
+        if (!window.electronAPI?.isElectron) return;
+        try {
+            const newPath = await window.electronAPI.selectDirectory();
+            if (newPath) {
+                await window.electronAPI.project.setStoragePath(newPath);
+                setStoragePath(newPath);
+            }
+        } catch (error) {
+            console.error('Failed to change storage path:', error);
+        }
+    };
+
+    const handleOpenStorageFolder = async () => {
+        if (!window.electronAPI?.isElectron) return;
+        try {
+            await window.electronAPI.project.openStorageFolder();
+        } catch (error) {
+            console.error('Failed to open storage folder:', error);
+        }
+    };
+
+    if (loading) {
+        return <div className="text-xs text-slate-500">加载中...</div>;
+    }
+
+    return (
+        <div className="space-y-3">
+            <div className="space-y-1">
+                <label className="text-xs text-slate-400">项目存储位置</label>
+                <div className="text-xs text-blue-300 truncate bg-slate-900 px-2 py-1.5 rounded border border-slate-700" title={storagePath}>
+                    {storagePath}
+                </div>
+            </div>
+            <div className="flex gap-2">
+                <button
+                    onClick={handleChangeStoragePath}
+                    className="flex-1 px-3 py-2 bg-slate-700 hover:bg-slate-600 border border-slate-600 rounded text-xs text-white transition-colors"
+                >
+                    更改路径
+                </button>
+                <button
+                    onClick={handleOpenStorageFolder}
+                    className="px-3 py-2 bg-slate-700 hover:bg-slate-600 border border-slate-600 rounded text-xs text-white transition-colors"
+                    title="在文件夹中打开"
+                >
+                    <FolderOpen size={14} />
+                </button>
+            </div>
+        </div>
+    );
+};
 
 const FormationThumbnail: React.FC<{ positions: any }> = ({ positions }) => {
     return (
@@ -101,8 +183,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
     onStageConfigChange,
     onLEDContentUpload,
     onClearLEDContent,
+    aiConfig,
+    onAiConfigChange,
+    // Project storage props
+    currentProjectId,
+    onLoadProject,
+    onCreateProject,
+    onSaveProject,
+    projectHasChanges,
 }) => {
-    const [activeTab, setActiveTab] = useState<Tab>('performers');
+    const [activeTab, setActiveTab] = useState<Tab>('library');
     const [editingFrameId, setEditingFrameId] = useState<string | null>(null);
     const [editingFrameName, setEditingFrameName] = useState<string>('');
     const [editingPerformerId, setEditingPerformerId] = useState<string | null>(null);
@@ -272,7 +362,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         if (!aiPrompt.trim() || selectedPerformerIds.length === 0) return;
         setIsGenerating(true);
         try {
-            const coords = await generateFormationCoordinates(aiPrompt, selectedPerformerIds.length);
+            const coords = await generateFormationCoordinates(aiPrompt, selectedPerformerIds.length, aiConfig);
             onApplyPreset(coords);
         } catch (e) {
             console.error(e);
@@ -461,9 +551,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
     };
 
     return (
-        <div style={{ width: widthPx }} className="bg-slate-900 border-r border-slate-800 flex flex-col shadow-xl z-20">
+        <div style={{ width: widthPx, minWidth: widthPx, maxWidth: widthPx }} className="bg-slate-900 border-r border-slate-800 flex flex-col shadow-xl z-20 flex-shrink-0">
             {/* Top Tabs */}
             <div className="flex items-center bg-slate-950 border-b border-slate-800 px-1 pt-1">
+                <button onClick={() => setActiveTab('library')} className={`flex-1 py-3 flex justify-center ${activeTab === 'library' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="项目库">
+                    <Library size={18} />
+                </button>
                 <button onClick={() => setActiveTab('project')} className={`flex-1 py-3 flex justify-center ${activeTab === 'project' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="项目设置">
                     <Settings size={18} />
                 </button>
@@ -481,27 +574,68 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto custom-scrollbar bg-slate-900 p-4">
+            <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar bg-slate-900 p-4">
+
+                {/* LIBRARY TAB */}
+                {activeTab === 'library' && (
+                    <div className="h-full flex flex-col">
+                        <ProjectBrowser
+                            currentProjectId={currentProjectId || null}
+                            onLoadProject={onLoadProject || (() => {})}
+                            onCreateProject={onCreateProject || (async () => '')}
+                            onNewProject={onResetProject}
+                        />
+                        
+                        {/* Project Import/Export Section */}
+                        <div className="mt-4 pt-4 border-t border-slate-800">
+                            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">导入 / 导出</h3>
+                            <div className="space-y-2">
+                                <label className="w-full flex items-center gap-3 px-3 py-2 bg-slate-800 hover:bg-slate-700 rounded text-slate-300 transition-colors text-xs cursor-pointer">
+                                    <Upload size={14} /> 导入项目 (JSON)
+                                    <input type="file" accept=".json" className="hidden" onChange={onImportProject} />
+                                </label>
+                                <button onClick={onExport} className="w-full flex items-center gap-3 px-3 py-2 bg-slate-800 hover:bg-slate-700 rounded text-slate-300 transition-colors text-xs">
+                                    <Download size={14} /> 导出项目 (JSON)
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Storage Settings - Only in Electron */}
+                        {window.electronAPI?.isElectron && (
+                            <div className="mt-4 pt-4 border-t border-slate-800">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <Folder size={14} className="text-slate-500" />
+                                    <span className="text-xs font-bold text-slate-500 uppercase">存储设置</span>
+                                </div>
+                                <StorageSettings />
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 {/* PROJECT TAB */}
                 {activeTab === 'project' && (
                     <div className="space-y-6">
-                        <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">项目设置</h2>
-
-                        <div className="space-y-3">
-                            <button onClick={onResetProject} className="w-full flex items-center gap-3 px-4 py-3 bg-slate-800 hover:bg-slate-700 rounded text-slate-200 transition-colors text-sm">
-                                <FilePlus size={16} /> 新建项目
+                        {/* Save Button - Show when project has changes */}
+                        {currentProjectId && onSaveProject && (
+                            <button
+                                onClick={onSaveProject}
+                                className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded text-sm font-medium transition-colors ${
+                                    projectHasChanges
+                                        ? 'bg-green-600 hover:bg-green-500 text-white'
+                                        : 'bg-slate-800 text-slate-400 cursor-default'
+                                }`}
+                                disabled={!projectHasChanges}
+                            >
+                                <Save size={16} />
+                                {projectHasChanges ? '保存项目' : '已保存'}
                             </button>
-                            <label className="w-full flex items-center gap-3 px-4 py-3 bg-slate-800 hover:bg-slate-700 rounded text-slate-200 transition-colors text-sm cursor-pointer">
-                                <Upload size={16} /> 导入项目 (JSON)
-                                <input type="file" accept=".json" className="hidden" onChange={onImportProject} />
-                            </label>
-                            <button onClick={onExport} className="w-full flex items-center gap-3 px-4 py-3 bg-slate-800 hover:bg-slate-700 rounded text-slate-200 transition-colors text-sm">
-                                <Download size={16} /> 导出项目 (JSON)
-                            </button>
-                        </div>
+                        )}
+                        
+                        <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">舞台设置</h2>
 
-                        <div className="bg-slate-800 p-4 rounded-lg border border-slate-700 mt-4">
+                        {/* 配乐 */}
+                        <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
                             <div className="flex items-center justify-between mb-2">
                                 <label className="text-xs font-bold text-slate-400 uppercase flex items-center gap-1">
                                     <Music size={12} /> 配乐
@@ -519,7 +653,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         </div>
 
                         {/* 3D 舞台设置 */}
-                        <div className="bg-slate-800 p-4 rounded-lg border border-slate-700 mt-4">
+                        <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
                             <div className="flex items-center gap-2 mb-3">
                                 <span className="text-xs font-bold text-slate-400 uppercase">3D 舞台设置</span>
                             </div>
@@ -998,6 +1132,48 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 {/* PRESETS TAB */}
                 {activeTab === 'presets' && (
                     <div className="space-y-6">
+                        {/* AI Settings */}
+                        <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700/50">
+                            <div className="flex items-center justify-between mb-3 text-slate-400">
+                                <div className="flex items-center gap-2">
+                                    <Settings size={14} />
+                                    <span className="text-xs font-bold uppercase">AI 配置</span>
+                                </div>
+                            </div>
+                            <div className="space-y-3">
+                                <div className="space-y-1">
+                                    <label className="text-[10px] text-slate-500 uppercase">API Key</label>
+                                    <input
+                                        type="password"
+                                        className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                                        placeholder="输入 Google AI API Key"
+                                        value={aiConfig.apiKey}
+                                        onChange={(e) => onAiConfigChange({ ...aiConfig, apiKey: e.target.value })}
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-[10px] text-slate-500 uppercase">Base URL (可选代理)</label>
+                                    <input
+                                        type="text"
+                                        className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                                        placeholder="例如: https://proxy.com/"
+                                        value={aiConfig.baseUrl}
+                                        onChange={(e) => onAiConfigChange({ ...aiConfig, baseUrl: e.target.value })}
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-[10px] text-slate-500 uppercase">模型 (默认为 gemini-3-flash-preview)</label>
+                                    <input
+                                        type="text"
+                                        className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                                        placeholder="gemini-3-flash-preview"
+                                        value={aiConfig.model}
+                                        onChange={(e) => onAiConfigChange({ ...aiConfig, model: e.target.value })}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
                         {/* AI Box */}
                         <div className="bg-gradient-to-r from-slate-800 to-slate-900 p-4 rounded-lg border border-slate-700/50">
                             <div className="flex items-center gap-2 mb-2 text-purple-400">

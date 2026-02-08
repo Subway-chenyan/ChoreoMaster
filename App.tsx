@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Frame, Performer, Position, PerformerShape, PerformerGroup, PerformerType } from './types';
+import { Frame, Performer, Position, PerformerShape, PerformerGroup, PerformerType, AIConfig } from './types';
 import { Sidebar } from './components/Sidebar';
 import { Stage } from './components/Stage';
 import Stage3D from './components/Stage3D';
@@ -60,11 +60,38 @@ const App: React.FC = () => {
   const [viewMode, setViewMode] = useState<'2d' | '3d'>('2d');
   const [stageConfig, setStageConfig] = useState<StageConfig>({
     width: 20,
-    depth: 20 / (16/9),
+    depth: 20 / (16 / 9),
     ledHeight: 6,
     ledContent: { type: 'none' }
   });
   const [mediaCache, setMediaCache] = useState<Record<string, string>>({});
+  
+  // Project storage state
+  const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  const [currentProjectPath, setCurrentProjectPath] = useState<string | null>(null);
+  const [projectHasChanges, setProjectHasChanges] = useState(false);
+  const [lastSavedState, setLastSavedState] = useState<string>('');
+  
+  const [aiConfig, setAiConfig] = useState<AIConfig>(() => {
+    const saved = localStorage.getItem('choreo-ai-config');
+    return saved ? JSON.parse(saved) : {
+      apiKey: '',
+      baseUrl: 'https://generativelanguage.googleapis.com/',
+      model: 'gemini-3-flash-preview'
+    };
+  });
+
+  useEffect(() => {
+    localStorage.setItem('choreo-ai-config', JSON.stringify(aiConfig));
+  }, [aiConfig]);
+
+  // Sync 3D stage config depth with 2D aspect ratio
+  useEffect(() => {
+    setStageConfig(prev => ({
+      ...prev,
+      depth: prev.width / stageAspectRatio
+    }));
+  }, [stageAspectRatio]);
 
   // Theme
   const { theme } = useTheme();
@@ -370,6 +397,193 @@ const App: React.FC = () => {
   const handleStageConfigChange = (updates: Partial<StageConfig>) => {
     setStageConfig(prev => ({ ...prev, ...updates }));
   };
+
+  // ==================== Project Storage Handlers ====================
+
+  // Get current project state as JSON string for comparison
+  const getProjectStateString = useCallback(() => {
+    return JSON.stringify({
+      performers,
+      performerGroups,
+      frames,
+      stageConfig,
+      musicName,
+    });
+  }, [performers, performerGroups, frames, stageConfig, musicName]);
+
+  // Track changes to project
+  useEffect(() => {
+    if (currentProjectId && lastSavedState) {
+      const currentState = getProjectStateString();
+      setProjectHasChanges(currentState !== lastSavedState);
+    }
+  }, [performers, performerGroups, frames, stageConfig, musicName, currentProjectId, lastSavedState, getProjectStateString]);
+
+  // Create a new project
+  const handleCreateProject = async (name: string): Promise<string> => {
+    if (!window.electronAPI?.isElectron) return '';
+    
+    // Auto-save current project before creating new one
+    if (currentProjectId && projectHasChanges) {
+      try {
+        const projectData = {
+          version: '2.0',
+          name: '',
+          performers,
+          performerGroups,
+          frames,
+          stageConfig,
+          musicName,
+        };
+        await window.electronAPI.project.save(currentProjectId, projectData);
+        console.log('Auto-saved current project before creating new');
+      } catch (error) {
+        console.error('Failed to auto-save before creating:', error);
+      }
+    }
+    
+    try {
+      const { id, path } = await window.electronAPI.project.create(name);
+      setCurrentProjectId(id);
+      setCurrentProjectPath(path);
+      
+      // Reset to fresh state
+      const newFrameId = generateId();
+      setPerformers([]);
+      setPerformerGroups([]);
+      setFrames([{
+        id: newFrameId,
+        name: 'Opening',
+        startTime: 0,
+        duration: 2000,
+        positions: {}
+      }]);
+      setCurrentFrameId(newFrameId);
+      setMusicName(null);
+      setAudioBuffer(null);
+      setMusicUrl(null);
+      setCurrentTime(0);
+      setSelectedPerformerIds([]);
+      
+      // Mark as saved
+      setLastSavedState(getProjectStateString());
+      setProjectHasChanges(false);
+      
+      return id;
+    } catch (error) {
+      console.error('Failed to create project:', error);
+      return '';
+    }
+  };
+
+  // Load a project
+  const handleLoadProject = async (projectId: string) => {
+    if (!window.electronAPI?.isElectron) return;
+    
+    // Auto-save current project before switching
+    if (currentProjectId && projectHasChanges) {
+      try {
+        const projectData = {
+          version: '2.0',
+          name: '',
+          performers,
+          performerGroups,
+          frames,
+          stageConfig,
+          musicName,
+        };
+        await window.electronAPI.project.save(currentProjectId, projectData);
+        console.log('Auto-saved current project before switching');
+      } catch (error) {
+        console.error('Failed to auto-save before switching:', error);
+      }
+    }
+    
+    try {
+      const { data, projectPath } = await window.electronAPI.project.load(projectId);
+      
+      setCurrentProjectId(projectId);
+      setCurrentProjectPath(projectPath);
+      
+      // Load project data
+      setPerformers(data.performers || []);
+      setPerformerGroups(data.performerGroups || []);
+      setFrames(data.frames || []);
+      setMusicName(data.musicName || null);
+      
+      if (data.stageConfig) {
+        setStageConfig(data.stageConfig);
+      }
+      
+      // Reset playback
+      setCurrentTime(0);
+      setAudioBuffer(null);
+      setMusicUrl(null);
+      setSelectedPerformerIds([]);
+      
+      if (data.frames?.length > 0) {
+        setCurrentFrameId(data.frames[0].id);
+      }
+      
+      // Mark as saved (use setTimeout to ensure state is updated)
+      setTimeout(() => {
+        setLastSavedState(JSON.stringify({
+          performers: data.performers || [],
+          performerGroups: data.performerGroups || [],
+          frames: data.frames || [],
+          stageConfig: data.stageConfig || stageConfig,
+          musicName: data.musicName || null,
+        }));
+        setProjectHasChanges(false);
+      }, 100);
+      
+    } catch (error) {
+      console.error('Failed to load project:', error);
+      alert('加载项目失败');
+    }
+  };
+
+  // Save current project
+  const handleSaveProject = async () => {
+    if (!window.electronAPI?.isElectron || !currentProjectId) return;
+    
+    try {
+      const projectData = {
+        version: '2.0',
+        name: '', // Will be preserved from existing project.json
+        performers,
+        performerGroups,
+        frames,
+        stageConfig,
+        musicName,
+      };
+      
+      await window.electronAPI.project.save(currentProjectId, projectData);
+      
+      // Mark as saved
+      setLastSavedState(getProjectStateString());
+      setProjectHasChanges(false);
+      
+    } catch (error) {
+      console.error('Failed to save project:', error);
+      alert('保存项目失败');
+    }
+  };
+
+  // Auto-save on Ctrl+S
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        if (currentProjectId && projectHasChanges) {
+          handleSaveProject();
+        }
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [currentProjectId, projectHasChanges]);
 
   const handleDeleteSelectedPerformers = () => {
     if (selectedPerformerIds.length === 0) return;
@@ -1215,13 +1429,12 @@ const App: React.FC = () => {
           </button>
           <button
             onClick={() => setViewMode(viewMode === '2d' ? '3d' : '2d')}
-            className={`p-2 rounded-lg transition-colors ${
-              viewMode === '3d'
-                ? 'bg-purple-600 text-white hover:bg-purple-500'
-                : theme === 'dark'
-                  ? 'hover:bg-slate-800 text-slate-400 hover:text-purple-400'
-                  : 'hover:bg-gray-100 text-gray-600 hover:text-purple-600'
-            }`}
+            className={`p-2 rounded-lg transition-colors ${viewMode === '3d'
+              ? 'bg-purple-600 text-white hover:bg-purple-500'
+              : theme === 'dark'
+                ? 'hover:bg-slate-800 text-slate-400 hover:text-purple-400'
+                : 'hover:bg-gray-100 text-gray-600 hover:text-purple-600'
+              }`}
             title={viewMode === '2d' ? '切换到 3D 视图' : '切换到 2D 视图'}
           >
             {viewMode === '2d' ? '🎲' : '🔲'}
@@ -1279,26 +1492,47 @@ const App: React.FC = () => {
             onStageConfigChange={handleStageConfigChange}
             onLEDContentUpload={handleLEDContentUpload}
             onClearLEDContent={handleClearLEDContent}
+            aiConfig={aiConfig}
+            onAiConfigChange={setAiConfig}
+            // Project storage props
+            currentProjectId={currentProjectId}
+            onLoadProject={handleLoadProject}
+            onCreateProject={handleCreateProject}
+            onSaveProject={handleSaveProject}
+            projectHasChanges={projectHasChanges}
           />)}
         {!sidebarCollapsed && (
           <div
             onMouseDown={(e) => {
+              e.preventDefault();
               const startX = e.clientX;
               const startW = sidebarWidth;
+              document.body.style.cursor = 'ew-resize';
+              document.body.style.userSelect = 'none';
               const onMove = (ev: MouseEvent) => {
                 const dx = ev.clientX - startX;
                 const next = Math.max(240, Math.min(480, startW + dx));
                 setSidebarWidth(next);
               };
               const onUp = () => {
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
                 window.removeEventListener('mousemove', onMove);
                 window.removeEventListener('mouseup', onUp);
               };
               window.addEventListener('mousemove', onMove);
               window.addEventListener('mouseup', onUp);
             }}
-            className={`${theme === 'dark' ? 'bg-slate-800 hover:bg-slate-700' : 'bg-gray-300 hover:bg-gray-400'} w-1 cursor-ew-resize`}
-          />
+            className={`${theme === 'dark' ? 'bg-slate-800 hover:bg-blue-600' : 'bg-gray-300 hover:bg-blue-500'} w-1.5 cursor-ew-resize transition-colors flex-shrink-0 group relative`}
+            title="拖动调整侧边栏宽度"
+          >
+            {/* Visual indicator dots */}
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="w-1 h-1 bg-white rounded-full"></div>
+              <div className="w-1 h-1 bg-white rounded-full"></div>
+              <div className="w-1 h-1 bg-white rounded-full"></div>
+            </div>
+          </div>
         )}
 
         <div className={`flex-1 flex flex-col relative ${theme === 'dark' ? 'bg-black' : 'bg-gray-100'}`}>

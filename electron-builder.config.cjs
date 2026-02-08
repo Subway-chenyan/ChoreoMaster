@@ -3,11 +3,13 @@ module.exports = {
   productName: 'ChoreoMaster',
   copyright: 'Copyright © 2025',
   directories: {
-    output: 'dist-electron',
+    output: 'release',
     buildResources: 'build',
   },
   files: [
-    'electron/**/*',
+    'dist-electron/main.js',
+    'dist-electron/preload.js',
+    'dist-electron/ipc-handlers.js',
     'dist/**/*',
     'package.json',
   ],
@@ -20,12 +22,13 @@ module.exports = {
   win: {
     target: [
       {
-        target: 'nsis',
+        target: 'dir',
         arch: ['x64'],
       },
     ],
     icon: 'build/icon.ico',
-    artifactName: '${productName}-${version}-setup.${ext}',
+    artifactName: '${productName}-${version}-portable.${ext}',
+    signAndEditExecutable: false,
   },
   nsis: {
     oneClick: false,
@@ -52,4 +55,6 @@ module.exports = {
   asarUnpack: [],
   compression: 'maximum',
   publish: null,
+  // 只保留英文和中文 locale
+  electronLanguages: ['en', 'en-US', 'zh-CN', 'zh-TW'],
 };

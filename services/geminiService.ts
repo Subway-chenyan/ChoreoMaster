@@ -1,21 +1,20 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Position } from "../types";
 
-const getAiClient = () => {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) {
-    console.error("API_KEY is missing");
-    throw new Error("API Key missing");
-  }
-  return new GoogleGenAI({ apiKey });
-};
 
 export const generateFormationCoordinates = async (
   description: string,
-  performerCount: number
+  performerCount: number,
+  config: { apiKey: string, baseUrl?: string, model?: string }
 ): Promise<Position[]> => {
   try {
-    const ai = getAiClient();
+    const { apiKey, baseUrl, model = "gemini-3-flash-preview" } = config;
+
+    if (!apiKey) {
+      throw new Error("API Key missing");
+    }
+
+    // Default prompt
     const prompt = `
       Generate a list of 2D coordinates (x, y) for a stage formation.
       The stage coordinates are percentages: x from 0 to 100 (left to right), y from 0 to 100 (top to bottom).
@@ -24,35 +23,55 @@ export const generateFormationCoordinates = async (
       Formation description: "${description}"
       Number of performers: ${performerCount}
       
-      Return exactly ${performerCount} coordinate pairs.
+      Return exactly ${performerCount} coordinate pairs in JSON format: {"positions": [{"x": number, "y": number}, ...]}.
       Ideally keep performers within x: 10-90 and y: 10-90 to avoid edges.
     `;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            positions: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  x: { type: Type.NUMBER, description: "X coordinate (0-100)" },
-                  y: { type: Type.NUMBER, description: "Y coordinate (0-100)" },
-                },
-                required: ["x", "y"],
-              },
-            },
-          },
-        },
+    // If a custom baseUrl is provided, it might be an OpenAI-compatible proxy or a direct Google proxy
+    // We'll use fetch to be most flexible
+    const url = baseUrl
+      ? (baseUrl.endsWith('/') ? baseUrl : baseUrl + '/') + `v1beta/models/${model}:generateContent?key=${apiKey}`
+      : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
       },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: "OBJECT",
+            properties: {
+              positions: {
+                type: "ARRAY",
+                items: {
+                  type: "OBJECT",
+                  properties: {
+                    x: { type: "NUMBER" },
+                    y: { type: "NUMBER" }
+                  },
+                  required: ["x", "y"]
+                }
+              }
+            }
+          }
+        }
+      })
     });
 
-    const json = JSON.parse(response.text || "{}");
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`API Request failed: ${response.status} ${errText}`);
+    }
+
+    const result = await response.json();
+
+    // Extract text from the first candidate
+    const text = result.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+    const json = JSON.parse(text);
     if (json.positions && Array.isArray(json.positions)) {
       return json.positions;
     }
