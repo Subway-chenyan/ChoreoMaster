@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Frame, Performer, Position, PerformerShape, PerformerGroup, PerformerType, AIConfig } from './types';
+import { Frame, Performer, Position, PerformerShape, PerformerGroup, PerformerType, AIConfig, PropShape, TransitionMode } from './types';
 import { Sidebar } from './components/Sidebar';
 import { Stage } from './components/Stage';
 import Stage3D from './components/Stage3D';
@@ -23,6 +23,55 @@ interface ClipboardItem {
   performer: Performer;
   positions: Record<string, Position>; // Map FrameID -> Position
 }
+
+const clampPercent = (value: number) => Math.max(0, Math.min(100, value));
+
+const interpolateAngle = (start = 0, end = 0, progress: number) => {
+  const delta = ((((end - start) % 360) + 540) % 360) - 180;
+  return start + delta * progress;
+};
+
+const interpolatePath = (start: Position, end: Position, path: { x: number; y: number }[] | undefined, progress: number) => {
+  const points = [{ x: start.x, y: start.y }, ...(path || []), { x: end.x, y: end.y }];
+  if (points.length <= 2) {
+    return {
+      x: start.x + (end.x - start.x) * progress,
+      y: start.y + (end.y - start.y) * progress
+    };
+  }
+  const segmentProgress = progress * (points.length - 1);
+  const segmentIndex = Math.min(points.length - 2, Math.floor(segmentProgress));
+  const localProgress = segmentProgress - segmentIndex;
+  const a = points[segmentIndex];
+  const b = points[segmentIndex + 1];
+  return {
+    x: a.x + (b.x - a.x) * localProgress,
+    y: a.y + (b.y - a.y) * localProgress
+  };
+};
+
+const rotateBetweenFormations = (start: Position, end: Position, startCenter: Position, endCenter: Position, degrees: number, progress: number) => {
+  const angle = (degrees * progress * Math.PI) / 180;
+  const radiusScale = 1 - progress;
+  const relativeX = (start.x - startCenter.x) * radiusScale;
+  const relativeY = (start.y - startCenter.y) * radiusScale;
+  const rotatedX = relativeX * Math.cos(angle) - relativeY * Math.sin(angle);
+  const rotatedY = relativeX * Math.sin(angle) + relativeY * Math.cos(angle);
+  const centerX = startCenter.x + (endCenter.x - startCenter.x) * progress;
+  const centerY = startCenter.y + (endCenter.y - startCenter.y) * progress;
+  return {
+    x: centerX + rotatedX + (end.x - endCenter.x) * progress,
+    y: centerY + rotatedY + (end.y - endCenter.y) * progress
+  };
+};
+
+const getCenter = (positions: Position[]) => {
+  if (positions.length === 0) return { x: 50, y: 50 };
+  return {
+    x: positions.reduce((sum, pos) => sum + pos.x, 0) / positions.length,
+    y: positions.reduce((sum, pos) => sum + pos.y, 0) / positions.length
+  };
+};
 
 const App: React.FC = () => {
   // State
@@ -166,15 +215,34 @@ const App: React.FC = () => {
       const ease = progress < .5 ? 2 * progress * progress : -1 + (4 - 2 * progress) * progress;
 
       const interpolated: Record<string, Position> = {};
+      const sharedStarts = performers.map(p => prevFrame.positions[p.id]).filter(Boolean) as Position[];
+      const sharedEnds = performers.map(p => nextFrame.positions[p.id]).filter(Boolean) as Position[];
+      const startCenter = getCenter(sharedStarts);
+      const endCenter = getCenter(sharedEnds);
+      const transitionMode = prevFrame.transitionMode || 'linear';
+      const transitionRotation = prevFrame.transitionRotation ?? 180;
       performers.forEach(p => {
         // Only interpolate if performer exists in BOTH frames (Entrance/Exit logic)
         const start = prevFrame.positions[p.id];
         const end = nextFrame.positions[p.id];
 
         if (start && end) {
+          const point = transitionMode === 'rotate'
+            ? rotateBetweenFormations(start, end, startCenter, endCenter, transitionRotation, ease)
+            : transitionMode === 'custom'
+              ? interpolatePath(start, end, end.path || start.path, ease)
+              : {
+                x: start.x + (end.x - start.x) * ease,
+                y: start.y + (end.y - start.y) * ease,
+              };
           interpolated[p.id] = {
-            x: start.x + (end.x - start.x) * ease,
-            y: start.y + (end.y - start.y) * ease,
+            x: clampPercent(point.x),
+            y: clampPercent(point.y),
+            z: start.z !== undefined || end.z !== undefined
+              ? (start.z || 0) + ((end.z || 0) - (start.z || 0)) * ease
+              : undefined,
+            rotation: interpolateAngle(start.rotation ?? p.rotation ?? 0, end.rotation ?? p.rotation ?? 0, ease),
+            path: end.path || start.path
           };
         }
         // If in one but not other, they do not exist during transition (clean cut)
@@ -237,11 +305,30 @@ const App: React.FC = () => {
       const progress = (timeMs - gapStart) / totalGap;
       const ease = progress < .5 ? 2 * progress * progress : -1 + (4 - 2 * progress) * progress;
       const interpolated: Record<string, Position> = {};
+      const sharedStarts = performers.map(p => prevFrame.positions[p.id]).filter(Boolean) as Position[];
+      const sharedEnds = performers.map(p => nextFrame.positions[p.id]).filter(Boolean) as Position[];
+      const startCenter = getCenter(sharedStarts);
+      const endCenter = getCenter(sharedEnds);
+      const transitionMode = prevFrame.transitionMode || 'linear';
+      const transitionRotation = prevFrame.transitionRotation ?? 180;
       performers.forEach(p => {
         const start = prevFrame.positions[p.id];
         const end = nextFrame.positions[p.id];
         if (start && end) {
-          interpolated[p.id] = { x: start.x + (end.x - start.x) * ease, y: start.y + (end.y - start.y) * ease };
+          const point = transitionMode === 'rotate'
+            ? rotateBetweenFormations(start, end, startCenter, endCenter, transitionRotation, ease)
+            : transitionMode === 'custom'
+              ? interpolatePath(start, end, end.path || start.path, ease)
+              : { x: start.x + (end.x - start.x) * ease, y: start.y + (end.y - start.y) * ease };
+          interpolated[p.id] = {
+            x: clampPercent(point.x),
+            y: clampPercent(point.y),
+            z: start.z !== undefined || end.z !== undefined
+              ? (start.z || 0) + ((end.z || 0) - (start.z || 0)) * ease
+              : undefined,
+            rotation: interpolateAngle(start.rotation ?? p.rotation ?? 0, end.rotation ?? p.rotation ?? 0, ease),
+            path: end.path || start.path
+          };
         }
       });
       return interpolated;
@@ -255,7 +342,7 @@ const App: React.FC = () => {
 
   // --- Actions ---
 
-  const handleAddPerformer = (name: string, color: string, shape: PerformerShape, extra?: { type?: PerformerType, width?: number, depth?: number, height?: number, rotation?: number }) => {
+  const handleAddPerformer = (name: string, color: string, shape: PerformerShape, extra?: { type?: PerformerType, width?: number, depth?: number, height?: number, rotation?: number, textureDataUrl?: string, propShape?: PropShape, polygonPoints?: { x: number; y: number }[], boundToId?: string }) => {
     const newPerformer: Performer = {
       id: generateId(),
       name,
@@ -266,7 +353,11 @@ const App: React.FC = () => {
       width: extra?.width,
       depth: extra?.depth,
       height: extra?.height,
-      rotation: extra?.rotation
+      rotation: extra?.rotation,
+      textureDataUrl: extra?.textureDataUrl,
+      propShape: extra?.propShape,
+      polygonPoints: extra?.polygonPoints,
+      boundToId: extra?.boundToId
     };
     setPerformers([...performers, newPerformer]);
 
@@ -634,7 +725,30 @@ const App: React.FC = () => {
     setFrames(prev => prev.map(f => {
       if (f.id === currentFrameId) {
         const updatedPositions = { ...f.positions };
+        const expandedUpdates = [...updates];
         updates.forEach(update => {
+          const previousPos = f.positions[update.id];
+          if (!previousPos) return;
+          const dx = update.pos.x - previousPos.x;
+          const dy = update.pos.y - previousPos.y;
+          const dz = (update.pos.z || 0) - (previousPos.z || 0);
+          performers
+            .filter(p => p.boundToId === update.id && !updates.some(existing => existing.id === p.id))
+            .forEach(bound => {
+              const boundPos = f.positions[bound.id];
+              if (!boundPos) return;
+              expandedUpdates.push({
+                id: bound.id,
+                pos: {
+                  ...boundPos,
+                  x: clampPercent(boundPos.x + dx),
+                  y: clampPercent(boundPos.y + dy),
+                  z: boundPos.z !== undefined || dz !== 0 ? Math.max(0, (boundPos.z || 0) + dz) : undefined
+                }
+              });
+            });
+        });
+        expandedUpdates.forEach(update => {
           updatedPositions[update.id] = update.pos;
         });
         return {
@@ -677,6 +791,54 @@ const App: React.FC = () => {
         return { ...f, positions: newPositions };
       }
       return f;
+    }));
+  };
+
+  const handleUpdateCurrentFrameTransition = (updates: { transitionMode?: TransitionMode; transitionRotation?: number }) => {
+    setFrames(prev => prev.map(f => f.id === currentFrameId ? { ...f, ...updates } : f));
+  };
+
+  const handleRotateSelectedFormation = (degrees: number) => {
+    const frame = frames.find(f => f.id === currentFrameId);
+    if (!frame) return;
+    const targets = selectedPerformerIds.filter(id => frame.positions[id]);
+    if (targets.length < 2) return;
+    const center = getCenter(targets.map(id => frame.positions[id]));
+    const angle = (degrees * Math.PI) / 180;
+    setFrames(prev => prev.map(f => {
+      if (f.id !== currentFrameId) return f;
+      const newPositions = { ...f.positions };
+      targets.forEach(id => {
+        const pos = f.positions[id];
+        const dx = pos.x - center.x;
+        const dy = pos.y - center.y;
+        newPositions[id] = {
+          ...pos,
+          x: clampPercent(center.x + dx * Math.cos(angle) - dy * Math.sin(angle)),
+          y: clampPercent(center.y + dx * Math.sin(angle) + dy * Math.cos(angle)),
+          rotation: (pos.rotation ?? performers.find(p => p.id === id)?.rotation ?? 0) + degrees
+        };
+      });
+      return { ...f, positions: newPositions };
+    }));
+  };
+
+  const handleAddCustomPathWaypoint = () => {
+    const frame = frames.find(f => f.id === currentFrameId);
+    if (!frame) return;
+    const targets = selectedPerformerIds.filter(id => frame.positions[id]);
+    if (targets.length === 0) return;
+    setFrames(prev => prev.map(f => {
+      if (f.id !== currentFrameId) return f;
+      const newPositions = { ...f.positions };
+      targets.forEach(id => {
+        const pos = f.positions[id];
+        newPositions[id] = {
+          ...pos,
+          path: [...(pos.path || []), { x: pos.x, y: pos.y }]
+        };
+      });
+      return { ...f, transitionMode: 'custom', positions: newPositions };
     }));
   };
 
@@ -1476,6 +1638,9 @@ const App: React.FC = () => {
             onReorderFrame={() => { }} // Disabled
             onResetProject={handleResetProject}
             onRenameFrame={handleRenameFrame}
+            onUpdateCurrentFrameTransition={handleUpdateCurrentFrameTransition}
+            onRotateSelectedFormation={handleRotateSelectedFormation}
+            onAddCustomPathWaypoint={handleAddCustomPathWaypoint}
             widthPx={sidebarWidth}
             // Group Management Props
             onAddGroup={handleAddGroup}

@@ -44,6 +44,20 @@ const ShapeIcon: React.FC<{ shape: string; color: string; size: number; classNam
   );
 };
 
+const getPropClipPath = (performer: Performer) => {
+  if (performer.propShape === 'ellipse') return 'ellipse(50% 50% at 50% 50%)';
+  if (performer.propShape === 'triangle') return 'polygon(50% 0%, 100% 100%, 0% 100%)';
+  if (performer.propShape === 'diamond') return 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)';
+  if (performer.propShape === 'hexagon') return 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)';
+  if (performer.propShape === 'custom') {
+    const points = performer.polygonPoints?.length
+      ? performer.polygonPoints.map(p => `${p.x}% ${p.y}%`).join(', ')
+      : '10% 5%, 90% 5%, 100% 50%, 90% 95%, 10% 95%, 0% 50%';
+    return `polygon(${points})`;
+  }
+  return undefined;
+};
+
 interface DragState {
   startX: number;
   startY: number;
@@ -391,8 +405,12 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
                   top: `${pos.y}%`,
                   width: `${widthPct}%`,
                   height: `${heightPct}%`,
-                  backgroundColor: performer.color,
-                  transform: `translate(-50%, -50%) rotate(${performer.rotation || 0}deg)`,
+                  backgroundColor: performer.textureDataUrl ? undefined : performer.color,
+                  backgroundImage: performer.textureDataUrl ? `url(${performer.textureDataUrl})` : undefined,
+                  backgroundSize: 'cover',
+                  backgroundPosition: 'center',
+                  clipPath: getPropClipPath(performer),
+                  transform: `translate(-50%, -50%) rotate(${pos.rotation ?? performer.rotation ?? 0}deg)`,
                   border: isSelected ? '2px solid white' : '1px solid rgba(255,255,255,0.3)',
                   boxShadow: isSelected ? '0 0 10px rgba(59,130,246,0.5)' : 'none'
                 }}
