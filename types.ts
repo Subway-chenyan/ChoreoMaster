@@ -3,11 +3,17 @@ export interface Position {
   x: number; // Percentage 0-100
   y: number; // Percentage 0-100
   z?: number; // Optional height in meters (0 = ground)
+  rotation?: number; // Optional per-frame rotation in degrees
+  path?: { x: number; y: number }[]; // Optional custom transition waypoints
 }
 
 export type PerformerShape = 'circle' | 'square' | 'triangle';
 
 export type PerformerType = 'performer' | 'prop';
+
+export type PropShape = 'rectangle' | 'ellipse' | 'triangle' | 'diamond' | 'hexagon' | 'custom';
+
+export type TransitionMode = 'linear' | 'rotate' | 'custom';
 
 export interface Performer {
   id: string;
@@ -21,6 +27,10 @@ export interface Performer {
   height?: number; // Height in meters
   depth?: number; // Depth in meters (for 3D props)
   rotation?: number; // Rotation in degrees
+  textureDataUrl?: string; // Embedded image texture for props
+  propShape?: PropShape; // 2D/3D prop shape preset
+  polygonPoints?: { x: number; y: number }[]; // Optional normalized custom prop outline
+  boundToId?: string; // Move together with this performer/prop
 }
 
 export interface PerformerGroup {
@@ -39,6 +49,8 @@ export interface Frame {
   positions: Record<string, Position>; // Map performer ID to position
   notes?: string;
   hiddenGroupIds?: string[]; // IDs of groups that are hidden in this frame
+  transitionMode?: TransitionMode; // Movement style from this frame to next frame
+  transitionRotation?: number; // Degrees for rotate transition
 }
 
 export interface Project {
@@ -87,4 +99,9 @@ export interface Entity {
     height: number;
     depth: number;
   };
+}
+export interface AIConfig {
+  apiKey: string;
+  baseUrl: string;
+  model: string;
 }

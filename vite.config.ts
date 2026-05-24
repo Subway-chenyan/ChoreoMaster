@@ -9,6 +9,8 @@ export default defineConfig(({ mode }) => {
         port: 5173,
         host: '0.0.0.0',
       },
+      // 使用相对路径，Electron 文件协议需要
+      base: './',
       plugins: [react()],
       define: {
         'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
@@ -18,6 +20,10 @@ export default defineConfig(({ mode }) => {
         alias: {
           '@': path.resolve(__dirname, '.'),
         }
+      },
+      build: {
+        // 禁用 sourcemap 减小体积
+        sourcemap: false,
       }
     };
   });

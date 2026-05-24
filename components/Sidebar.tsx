@@ -1,17 +1,18 @@
 
-import React, { useState, useMemo, useRef } from 'react';
-import { Performer, Frame, PerformerShape, PerformerGroup, PerformerType } from '../types';
-import { Plus, Users, Trash2, Download, Grid, Music, Sparkles, Wand2, Film, Copy, Search, Settings, Scaling, Upload, FilePlus, Circle, Square, Triangle, UserCheck, UserX, Eye, EyeOff, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreVertical, Palette, Edit2, Box } from 'lucide-react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { Performer, Frame, PerformerShape, PerformerGroup, PerformerType, AIConfig, PropShape, TransitionMode } from '../types';
+import { Plus, Users, Trash2, Download, Grid, Music, Sparkles, Wand2, Film, Copy, Search, Settings, Scaling, Upload, FilePlus, Circle, Square, Triangle, UserCheck, UserX, Eye, EyeOff, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreVertical, Palette, Edit2, Box, Library, Save } from 'lucide-react';
 import { PRESET_SHAPES, DEFAULT_COLORS } from '../constants';
 import { generateFormationCoordinates } from '../services/geminiService';
 import { StageConfig } from '../types';
+import { ProjectBrowser } from './ProjectBrowser';
 
 interface SidebarProps {
     performers: Performer[];
     performerGroups: PerformerGroup[];
     frames: Frame[];
     currentFrameId: string;
-    onAddPerformer: (name: string, color: string, shape: PerformerShape, extra?: { type?: PerformerType, width?: number, depth?: number, height?: number, rotation?: number }) => void;
+    onAddPerformer: (name: string, color: string, shape: PerformerShape, extra?: { type?: PerformerType, width?: number, depth?: number, height?: number, rotation?: number, textureDataUrl?: string, propShape?: PropShape, polygonPoints?: { x: number; y: number }[], boundToId?: string }) => void;
     onRemovePerformer: (id: string) => void;
     onUpdatePerformer: (id: string, updates: Partial<Performer>) => void;
     onTogglePerformerInFrame: (id: string) => void;
@@ -30,6 +31,9 @@ interface SidebarProps {
     onReorderFrame: (id: string, direction: 'up' | 'down') => void;
     onResetProject: () => void;
     onRenameFrame: (id: string, name?: string) => void;
+    onUpdateCurrentFrameTransition?: (updates: { transitionMode?: TransitionMode; transitionRotation?: number }) => void;
+    onRotateSelectedFormation?: (degrees: number) => void;
+    onAddCustomPathWaypoint?: () => void;
     widthPx?: number;
     // Group Management Props
     onAddGroup: (name: string, color: string, type?: 'performer' | 'prop') => string;
@@ -47,9 +51,90 @@ interface SidebarProps {
     onStageConfigChange: (updates: Partial<StageConfig>) => void;
     onLEDContentUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
     onClearLEDContent: () => void;
+    aiConfig: AIConfig;
+    onAiConfigChange: (config: AIConfig) => void;
+    // Project storage props
+    currentProjectId?: string | null;
+    onLoadProject?: (projectId: string) => void;
+    onCreateProject?: (name: string) => Promise<string>;
+    onSaveProject?: () => void;
+    projectHasChanges?: boolean;
 }
 
-type Tab = 'project' | 'formations' | 'performers' | 'props' | 'presets';
+type Tab = 'library' | 'project' | 'formations' | 'performers' | 'props' | 'presets';
+
+// Storage Settings Component
+const StorageSettings: React.FC = () => {
+    const [storagePath, setStoragePath] = useState<string>('');
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const loadSettings = async () => {
+            if (!window.electronAPI?.isElectron) return;
+            try {
+                const settings = await window.electronAPI.project.getSettings();
+                setStoragePath(settings.storagePath);
+            } catch (error) {
+                console.error('Failed to load settings:', error);
+            } finally {
+                setLoading(false);
+            }
+        };
+        loadSettings();
+    }, []);
+
+    const handleChangeStoragePath = async () => {
+        if (!window.electronAPI?.isElectron) return;
+        try {
+            const newPath = await window.electronAPI.selectDirectory();
+            if (newPath) {
+                await window.electronAPI.project.setStoragePath(newPath);
+                setStoragePath(newPath);
+            }
+        } catch (error) {
+            console.error('Failed to change storage path:', error);
+        }
+    };
+
+    const handleOpenStorageFolder = async () => {
+        if (!window.electronAPI?.isElectron) return;
+        try {
+            await window.electronAPI.project.openStorageFolder();
+        } catch (error) {
+            console.error('Failed to open storage folder:', error);
+        }
+    };
+
+    if (loading) {
+        return <div className="text-xs text-slate-500">加载中...</div>;
+    }
+
+    return (
+        <div className="space-y-3">
+            <div className="space-y-1">
+                <label className="text-xs text-slate-400">项目存储位置</label>
+                <div className="text-xs text-blue-300 truncate bg-slate-900 px-2 py-1.5 rounded border border-slate-700" title={storagePath}>
+                    {storagePath}
+                </div>
+            </div>
+            <div className="flex gap-2">
+                <button
+                    onClick={handleChangeStoragePath}
+                    className="flex-1 px-3 py-2 bg-slate-700 hover:bg-slate-600 border border-slate-600 rounded text-xs text-white transition-colors"
+                >
+                    更改路径
+                </button>
+                <button
+                    onClick={handleOpenStorageFolder}
+                    className="px-3 py-2 bg-slate-700 hover:bg-slate-600 border border-slate-600 rounded text-xs text-white transition-colors"
+                    title="在文件夹中打开"
+                >
+                    <FolderOpen size={14} />
+                </button>
+            </div>
+        </div>
+    );
+};
 
 const FormationThumbnail: React.FC<{ positions: any }> = ({ positions }) => {
     return (
@@ -85,6 +170,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     onReorderFrame,
     onResetProject,
     onRenameFrame,
+    onUpdateCurrentFrameTransition,
+    onRotateSelectedFormation,
+    onAddCustomPathWaypoint,
     widthPx = 320,
     // Group Management Props
     onAddGroup,
@@ -101,8 +189,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
     onStageConfigChange,
     onLEDContentUpload,
     onClearLEDContent,
+    aiConfig,
+    onAiConfigChange,
+    // Project storage props
+    currentProjectId,
+    onLoadProject,
+    onCreateProject,
+    onSaveProject,
+    projectHasChanges,
 }) => {
-    const [activeTab, setActiveTab] = useState<Tab>('performers');
+    const [activeTab, setActiveTab] = useState<Tab>('library');
     const [editingFrameId, setEditingFrameId] = useState<string | null>(null);
     const [editingFrameName, setEditingFrameName] = useState<string>('');
     const [editingPerformerId, setEditingPerformerId] = useState<string | null>(null);
@@ -116,6 +212,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const [newPropWidth, setNewPropWidth] = useState<number>(0.5); // Default 0.5m (宽)
     const [newPropDepth, setNewPropDepth] = useState<number>(0.5); // Default 0.5m (长)
     const [newPropHeight, setNewPropHeight] = useState<number>(0.5); // Default 0.5m (高)
+
+    const [newPropShape, setNewPropShape] = useState<PropShape>('rectangle');
+    const [newPropTexture, setNewPropTexture] = useState<string | undefined>(undefined);
+    const [newPropBindTarget, setNewPropBindTarget] = useState<string>('');
 
     // Preset State
     const [presetScale, setPresetScale] = useState(0.8); // Default 80% size to be safe
@@ -154,7 +254,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
         depth: number;
         height: number;
         color: string;
-    }>({ show: false, performerId: null, width: 0.5, depth: 0.5, height: 0.5, color: '#000000' });
+        rotation: number;
+        propShape: PropShape;
+        textureDataUrl?: string;
+        boundToId?: string;
+    }>({ show: false, performerId: null, width: 0.5, depth: 0.5, height: 0.5, color: '#000000', rotation: 0, propShape: 'rectangle' });
 
     // Ref for context menu click outside detection
     const contextMenuRef = useRef<HTMLDivElement>(null);
@@ -222,12 +326,58 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 width: newPropWidth,
                 depth: newPropDepth,
                 height: newPropHeight,
-                rotation: 0
+                rotation: 0,
+                propShape: newPropShape,
+                textureDataUrl: newPropTexture,
+                boundToId: newPropBindTarget || undefined
             });
             setNewPerformerName('');
+            setNewPropTexture(undefined);
             const nextColorIndex = (DEFAULT_COLORS.indexOf(newPerformerColor) + 1) % DEFAULT_COLORS.length;
             setNewPerformerColor(DEFAULT_COLORS[nextColorIndex]);
         }
+    };
+
+    const readImageFile = (file: File) => new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+
+    const handleNewPropTextureUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const dataUrl = await readImageFile(file);
+        setNewPropTexture(dataUrl);
+        if (!newPerformerName.trim()) {
+            setNewPerformerName(file.name.replace(/\.[^.]+$/, ''));
+        }
+        setNewPropShape('custom');
+    };
+
+    const handleCreatePropFromImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const dataUrl = await readImageFile(file);
+        const image = new Image();
+        image.onload = () => {
+            const ratio = image.width > 0 && image.height > 0 ? image.width / image.height : 1;
+            const width = Math.max(0.3, Math.min(6, ratio >= 1 ? 2.2 : 2.2 * ratio));
+            const depth = Math.max(0.3, Math.min(6, ratio >= 1 ? 2.2 / ratio : 2.2));
+            onAddPerformer(file.name.replace(/\.[^.]+$/, ''), newPerformerColor, 'square', {
+                type: 'prop',
+                width,
+                depth,
+                height: newPropHeight,
+                rotation: 0,
+                propShape: 'custom',
+                textureDataUrl: dataUrl,
+                boundToId: newPropBindTarget || undefined
+            });
+        };
+        image.src = dataUrl;
+        e.target.value = '';
     };
 
     const openPropEditDialog = (performerId: string) => {
@@ -239,7 +389,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 width: performer.width || 0.5,
                 depth: performer.depth || 0.5,
                 height: performer.height || 0.5,
-                color: performer.color
+                color: performer.color,
+                rotation: performer.rotation || 0,
+                propShape: performer.propShape || 'rectangle',
+                textureDataUrl: performer.textureDataUrl,
+                boundToId: performer.boundToId
             });
         }
     };
@@ -250,10 +404,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 width: propEditState.width,
                 depth: propEditState.depth,
                 height: propEditState.height,
-                color: propEditState.color
+                color: propEditState.color,
+                rotation: propEditState.rotation,
+                propShape: propEditState.propShape,
+                textureDataUrl: propEditState.textureDataUrl,
+                boundToId: propEditState.boundToId || undefined
             });
         }
-        setPropEditState({ show: false, performerId: null, width: 0.5, depth: 0.5, height: 0.5, color: '#000000' });
+        setPropEditState({ show: false, performerId: null, width: 0.5, depth: 0.5, height: 0.5, color: '#000000', rotation: 0, propShape: 'rectangle' });
     };
 
     const handlePerformerClick = (e: React.MouseEvent, id: string) => {
@@ -272,7 +430,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         if (!aiPrompt.trim() || selectedPerformerIds.length === 0) return;
         setIsGenerating(true);
         try {
-            const coords = await generateFormationCoordinates(aiPrompt, selectedPerformerIds.length);
+            const coords = await generateFormationCoordinates(aiPrompt, selectedPerformerIds.length, aiConfig);
             onApplyPreset(coords);
         } catch (e) {
             console.error(e);
@@ -461,9 +619,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
     };
 
     return (
-        <div style={{ width: widthPx }} className="bg-slate-900 border-r border-slate-800 flex flex-col shadow-xl z-20">
+        <div style={{ width: widthPx, minWidth: widthPx, maxWidth: widthPx }} className="bg-slate-900 border-r border-slate-800 flex flex-col shadow-xl z-20 flex-shrink-0">
             {/* Top Tabs */}
             <div className="flex items-center bg-slate-950 border-b border-slate-800 px-1 pt-1">
+                <button onClick={() => setActiveTab('library')} className={`flex-1 py-3 flex justify-center ${activeTab === 'library' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="项目库">
+                    <Library size={18} />
+                </button>
                 <button onClick={() => setActiveTab('project')} className={`flex-1 py-3 flex justify-center ${activeTab === 'project' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="项目设置">
                     <Settings size={18} />
                 </button>
@@ -481,27 +642,68 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto custom-scrollbar bg-slate-900 p-4">
+            <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar bg-slate-900 p-4">
+
+                {/* LIBRARY TAB */}
+                {activeTab === 'library' && (
+                    <div className="h-full flex flex-col">
+                        <ProjectBrowser
+                            currentProjectId={currentProjectId || null}
+                            onLoadProject={onLoadProject || (() => {})}
+                            onCreateProject={onCreateProject || (async () => '')}
+                            onNewProject={onResetProject}
+                        />
+                        
+                        {/* Project Import/Export Section */}
+                        <div className="mt-4 pt-4 border-t border-slate-800">
+                            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">导入 / 导出</h3>
+                            <div className="space-y-2">
+                                <label className="w-full flex items-center gap-3 px-3 py-2 bg-slate-800 hover:bg-slate-700 rounded text-slate-300 transition-colors text-xs cursor-pointer">
+                                    <Upload size={14} /> 导入项目 (JSON)
+                                    <input type="file" accept=".json" className="hidden" onChange={onImportProject} />
+                                </label>
+                                <button onClick={onExport} className="w-full flex items-center gap-3 px-3 py-2 bg-slate-800 hover:bg-slate-700 rounded text-slate-300 transition-colors text-xs">
+                                    <Download size={14} /> 导出项目 (JSON)
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Storage Settings - Only in Electron */}
+                        {window.electronAPI?.isElectron && (
+                            <div className="mt-4 pt-4 border-t border-slate-800">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <Folder size={14} className="text-slate-500" />
+                                    <span className="text-xs font-bold text-slate-500 uppercase">存储设置</span>
+                                </div>
+                                <StorageSettings />
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 {/* PROJECT TAB */}
                 {activeTab === 'project' && (
                     <div className="space-y-6">
-                        <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">项目设置</h2>
-
-                        <div className="space-y-3">
-                            <button onClick={onResetProject} className="w-full flex items-center gap-3 px-4 py-3 bg-slate-800 hover:bg-slate-700 rounded text-slate-200 transition-colors text-sm">
-                                <FilePlus size={16} /> 新建项目
+                        {/* Save Button - Show when project has changes */}
+                        {currentProjectId && onSaveProject && (
+                            <button
+                                onClick={onSaveProject}
+                                className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded text-sm font-medium transition-colors ${
+                                    projectHasChanges
+                                        ? 'bg-green-600 hover:bg-green-500 text-white'
+                                        : 'bg-slate-800 text-slate-400 cursor-default'
+                                }`}
+                                disabled={!projectHasChanges}
+                            >
+                                <Save size={16} />
+                                {projectHasChanges ? '保存项目' : '已保存'}
                             </button>
-                            <label className="w-full flex items-center gap-3 px-4 py-3 bg-slate-800 hover:bg-slate-700 rounded text-slate-200 transition-colors text-sm cursor-pointer">
-                                <Upload size={16} /> 导入项目 (JSON)
-                                <input type="file" accept=".json" className="hidden" onChange={onImportProject} />
-                            </label>
-                            <button onClick={onExport} className="w-full flex items-center gap-3 px-4 py-3 bg-slate-800 hover:bg-slate-700 rounded text-slate-200 transition-colors text-sm">
-                                <Download size={16} /> 导出项目 (JSON)
-                            </button>
-                        </div>
+                        )}
+                        
+                        <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">舞台设置</h2>
 
-                        <div className="bg-slate-800 p-4 rounded-lg border border-slate-700 mt-4">
+                        {/* 配乐 */}
+                        <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
                             <div className="flex items-center justify-between mb-2">
                                 <label className="text-xs font-bold text-slate-400 uppercase flex items-center gap-1">
                                     <Music size={12} /> 配乐
@@ -519,7 +721,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         </div>
 
                         {/* 3D 舞台设置 */}
-                        <div className="bg-slate-800 p-4 rounded-lg border border-slate-700 mt-4">
+                        <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
                             <div className="flex items-center gap-2 mb-3">
                                 <span className="text-xs font-bold text-slate-400 uppercase">3D 舞台设置</span>
                             </div>
@@ -636,6 +838,40 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             ))}
                         </div>
 
+                        <div className="mt-4 bg-slate-800/50 border border-slate-700 rounded-lg p-3 space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                                <span className="text-xs text-slate-400">过渡运动</span>
+                                <select
+                                    value={currentFrame?.transitionMode || 'linear'}
+                                    onChange={(e) => onUpdateCurrentFrameTransition?.({ transitionMode: e.target.value as TransitionMode })}
+                                    className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-white"
+                                >
+                                    <option value="linear">直线</option>
+                                    <option value="rotate">旋转编队</option>
+                                    <option value="custom">自定义轨迹</option>
+                                </select>
+                            </div>
+                            {(currentFrame?.transitionMode || 'linear') === 'rotate' && (
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        type="range"
+                                        min="-720"
+                                        max="720"
+                                        step="15"
+                                        value={currentFrame?.transitionRotation ?? 180}
+                                        onChange={(e) => onUpdateCurrentFrameTransition?.({ transitionRotation: Number(e.target.value) })}
+                                        className="flex-1"
+                                    />
+                                    <span className="w-12 text-right text-xs font-mono text-blue-300">{currentFrame?.transitionRotation ?? 180}°</span>
+                                </div>
+                            )}
+                            <div className="grid grid-cols-3 gap-2">
+                                <button onClick={() => onRotateSelectedFormation?.(-15)} className="bg-slate-900 hover:bg-slate-700 border border-slate-700 rounded py-1 text-xs text-slate-200">左转</button>
+                                <button onClick={() => onRotateSelectedFormation?.(15)} className="bg-slate-900 hover:bg-slate-700 border border-slate-700 rounded py-1 text-xs text-slate-200">右转</button>
+                                <button onClick={onAddCustomPathWaypoint} className="bg-slate-900 hover:bg-slate-700 border border-slate-700 rounded py-1 text-xs text-slate-200">轨迹点</button>
+                            </div>
+                        </div>
+
                         <button onClick={onAddFrame} className="mt-4 w-full py-3 bg-green-600 hover:bg-green-500 rounded font-bold text-sm text-white shadow-lg shadow-green-900/20 uppercase tracking-wide">
                             创建队形
                         </button>
@@ -689,6 +925,42 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                         </div>
                                         <div className="w-px h-6 bg-slate-700 mx-1"></div>
                                         <input type="color" value={newPerformerColor} onChange={(e) => setNewPerformerColor(e.target.value)} className="w-8 h-8 rounded cursor-pointer bg-slate-900 p-0.5 border border-slate-600" title="道具颜色" />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <select
+                                            value={newPropShape}
+                                            onChange={(e) => setNewPropShape(e.target.value as PropShape)}
+                                            className="bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                                            title="道具形状"
+                                        >
+                                            <option value="rectangle">矩形</option>
+                                            <option value="ellipse">椭圆</option>
+                                            <option value="triangle">三角形</option>
+                                            <option value="diamond">菱形</option>
+                                            <option value="hexagon">六边形</option>
+                                            <option value="custom">图片异形</option>
+                                        </select>
+                                        <select
+                                            value={newPropBindTarget}
+                                            onChange={(e) => setNewPropBindTarget(e.target.value)}
+                                            className="bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                                            title="绑定到演员"
+                                        >
+                                            <option value="">不绑定</option>
+                                            {performers.filter(p => !p.type || p.type === 'performer').map(p => (
+                                                <option key={p.id} value={p.id}>绑定：{p.name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <label className="cursor-pointer bg-slate-900 hover:bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-xs text-slate-300 text-center">
+                                            {newPropTexture ? '已选择贴图' : '选择贴图'}
+                                            <input type="file" accept="image/*" className="hidden" onChange={handleNewPropTextureUpload} />
+                                        </label>
+                                        <label className="cursor-pointer bg-emerald-700/30 hover:bg-emerald-700/50 border border-emerald-600/60 rounded px-2 py-1.5 text-xs text-emerald-100 text-center">
+                                            图片生成道具
+                                            <input type="file" accept="image/*" className="hidden" onChange={handleCreatePropFromImage} />
+                                        </label>
                                     </div>
                                     <button onClick={handleAddProp} className="w-full bg-blue-600 hover:bg-blue-500 py-1.5 rounded text-white flex items-center justify-center gap-1 text-xs font-bold transition-all active:scale-95 shadow-lg shadow-blue-900/20">
                                         <Plus size={14} /> 添加道具
@@ -998,6 +1270,48 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 {/* PRESETS TAB */}
                 {activeTab === 'presets' && (
                     <div className="space-y-6">
+                        {/* AI Settings */}
+                        <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700/50">
+                            <div className="flex items-center justify-between mb-3 text-slate-400">
+                                <div className="flex items-center gap-2">
+                                    <Settings size={14} />
+                                    <span className="text-xs font-bold uppercase">AI 配置</span>
+                                </div>
+                            </div>
+                            <div className="space-y-3">
+                                <div className="space-y-1">
+                                    <label className="text-[10px] text-slate-500 uppercase">API Key</label>
+                                    <input
+                                        type="password"
+                                        className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                                        placeholder="输入 Google AI API Key"
+                                        value={aiConfig.apiKey}
+                                        onChange={(e) => onAiConfigChange({ ...aiConfig, apiKey: e.target.value })}
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-[10px] text-slate-500 uppercase">Base URL (可选代理)</label>
+                                    <input
+                                        type="text"
+                                        className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                                        placeholder="例如: https://proxy.com/"
+                                        value={aiConfig.baseUrl}
+                                        onChange={(e) => onAiConfigChange({ ...aiConfig, baseUrl: e.target.value })}
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-[10px] text-slate-500 uppercase">模型 (默认为 gemini-3-flash-preview)</label>
+                                    <input
+                                        type="text"
+                                        className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                                        placeholder="gemini-3-flash-preview"
+                                        value={aiConfig.model}
+                                        onChange={(e) => onAiConfigChange({ ...aiConfig, model: e.target.value })}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
                         {/* AI Box */}
                         <div className="bg-gradient-to-r from-slate-800 to-slate-900 p-4 rounded-lg border border-slate-700/50">
                             <div className="flex items-center gap-2 mb-2 text-purple-400">
@@ -1190,10 +1504,64 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 </div>
                             </div>
 
+                            <div className="grid grid-cols-2 gap-2">
+                                <div className="flex flex-col gap-1">
+                                    <label className="text-xs text-slate-400">旋转(度)</label>
+                                    <input
+                                        type="number"
+                                        step="5"
+                                        value={propEditState.rotation}
+                                        onChange={(e) => setPropEditState(prev => ({ ...prev, rotation: parseFloat(e.target.value) || 0 }))}
+                                        className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                                    />
+                                </div>
+                                <div className="flex flex-col gap-1">
+                                    <label className="text-xs text-slate-400">形状</label>
+                                    <select
+                                        value={propEditState.propShape}
+                                        onChange={(e) => setPropEditState(prev => ({ ...prev, propShape: e.target.value as PropShape }))}
+                                        className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                                    >
+                                        <option value="rectangle">矩形</option>
+                                        <option value="ellipse">椭圆</option>
+                                        <option value="triangle">三角形</option>
+                                        <option value="diamond">菱形</option>
+                                        <option value="hexagon">六边形</option>
+                                        <option value="custom">图片异形</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <select
+                                value={propEditState.boundToId || ''}
+                                onChange={(e) => setPropEditState(prev => ({ ...prev, boundToId: e.target.value || undefined }))}
+                                className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                            >
+                                <option value="">不绑定演员</option>
+                                {performers.filter(p => p.id !== propEditState.performerId && (!p.type || p.type === 'performer')).map(p => (
+                                    <option key={p.id} value={p.id}>绑定：{p.name}</option>
+                                ))}
+                            </select>
+
+                            <label className="cursor-pointer bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 text-center">
+                                {propEditState.textureDataUrl ? '替换贴图' : '添加贴图'}
+                                <input
+                                    type="file"
+                                    accept="image/*"
+                                    className="hidden"
+                                    onChange={async (e) => {
+                                        const file = e.target.files?.[0];
+                                        if (!file) return;
+                                        const dataUrl = await readImageFile(file);
+                                        setPropEditState(prev => ({ ...prev, textureDataUrl: dataUrl, propShape: prev.propShape === 'rectangle' ? 'custom' : prev.propShape }));
+                                    }}
+                                />
+                            </label>
+
                             {/* 按钮组 */}
                             <div className="flex gap-2 justify-end pt-4 border-t border-slate-800">
                                 <button
-                                    onClick={() => setPropEditState({ show: false, performerId: null, width: 0.5, depth: 0.5, height: 0.5, color: '#000000' })}
+                                    onClick={() => setPropEditState({ show: false, performerId: null, width: 0.5, depth: 0.5, height: 0.5, color: '#000000', rotation: 0, propShape: 'rectangle' })}
                                     className="px-4 py-2 rounded text-sm text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
                                 >
                                     取消

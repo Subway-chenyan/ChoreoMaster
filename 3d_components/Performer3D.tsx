@@ -69,7 +69,7 @@ const Performer3D: React.FC<Performer3DProps> = ({
       meshRef.current.position.copy(currentPositionRef.current);
 
       // Smoothly interpolate rotation
-      const targetRotation = new THREE.Euler(0, -degToRad(performer.rotation || 0), 0);
+      const targetRotation = new THREE.Euler(0, -degToRad(position.rotation ?? performer.rotation ?? 0), 0);
       const targetQ = new THREE.Quaternion().setFromEuler(targetRotation);
       currentRotationRef.current.slerp(targetQ, 0.1);
       meshRef.current.quaternion.copy(currentRotationRef.current);

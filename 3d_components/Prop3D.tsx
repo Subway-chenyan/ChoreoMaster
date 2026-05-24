@@ -31,6 +31,7 @@ const Prop3D: React.FC<Prop3DProps> = ({
   const dragContext = useDragContext();
   const meshRef = useRef<THREE.Group>(null);
   const [hovered, setHover] = useState(false);
+  const [texture, setTexture] = useState<THREE.Texture | null>(null);
   const currentPositionRef = useRef<THREE.Vector3>(new THREE.Vector3(0, 0, 0));
   const currentRotationRef = useRef<THREE.Quaternion>(new THREE.Quaternion());
 
@@ -40,6 +41,18 @@ const Prop3D: React.FC<Prop3DProps> = ({
   const dragOffsetRef = useRef<THREE.Vector3>(new THREE.Vector3());
 
   const dims = { width: performer.width || 1, height: performer.height || 1, depth: performer.depth || 1 };
+
+  useEffect(() => {
+    if (!performer.textureDataUrl) {
+      setTexture(null);
+      return;
+    }
+    const loader = new THREE.TextureLoader();
+    loader.load(performer.textureDataUrl, loaded => {
+      loaded.colorSpace = THREE.SRGBColorSpace;
+      setTexture(loaded);
+    });
+  }, [performer.textureDataUrl]);
 
   // Initialize position on mount or when position changes significantly
   useEffect(() => {
@@ -66,7 +79,7 @@ const Prop3D: React.FC<Prop3DProps> = ({
       meshRef.current.position.copy(currentPositionRef.current);
 
       // Smoothly interpolate rotation
-      const targetRotation = new THREE.Euler(0, -degToRad(performer.rotation || 0), 0);
+      const targetRotation = new THREE.Euler(0, -degToRad(position.rotation ?? performer.rotation ?? 0), 0);
       const targetQ = new THREE.Quaternion().setFromEuler(targetRotation);
       currentRotationRef.current.slerp(targetQ, 0.1);
       meshRef.current.quaternion.copy(currentRotationRef.current);
@@ -141,7 +154,7 @@ const Prop3D: React.FC<Prop3DProps> = ({
       <mesh castShadow receiveShadow>
         {/* boxGeometry args: [length(2Dx/3Dx), height(3D垂直), width(2Dy/3Dz)] */}
         <boxGeometry args={[dims.width, dims.height, dims.depth]} />
-        <meshStandardMaterial color={isSelected ? '#60a5fa' : performer.color} transparent opacity={hovered ? 0.9 : 1} />
+        <meshStandardMaterial color={isSelected ? '#60a5fa' : performer.color} map={texture || undefined} transparent opacity={hovered ? 0.9 : 1} />
       </mesh>
       {isSelected && (
         <lineSegments>

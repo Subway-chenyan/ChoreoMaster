@@ -8,27 +8,33 @@
     "dev": "vite",
     "dev:electron": "concurrently \"vite\" \"tsc -p tsconfig.electron.json && wait-on http://localhost:5173 && electron .\"",
     "build": "vite build",
-    "build:electron": "npm run build:main && npm run build && electron-builder",
+    "build:electron": "npm run build:main && npm run build && electron-builder --config electron-builder.config.cjs",
     "build:main": "tsc -p tsconfig.electron.json",
     "preview": "vite preview"
   },
   "dependencies": {
+    "electron-is-dev": "^3.0.1"
+  },
+  "devDependencies": {
     "@google/genai": "^1.30.0",
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.5.0",
-    "lucide-react": "^0.554.0",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "three": "^0.182.0"
-  },
-  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.18",
     "@types/node": "^22.14.0",
     "@types/three": "^0.182.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "autoprefixer": "^10.4.24",
     "concurrently": "^9.2.1",
-    "electron": "^34.5.8",
-    "electron-builder": "^25.1.8",
-    "electron-is-dev": "^3.0.1",
+    "electron": "^40.2.1",
+    "electron-builder": "^26.7.0",
+    "lucide-react": "^0.554.0",
+    "png-to-ico": "^3.0.1",
+    "postcss": "^8.5.6",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "sharp": "^0.34.5",
+    "tailwindcss": "^4.1.18",
+    "three": "^0.182.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0",
     "wait-on": "^8.0.5"
