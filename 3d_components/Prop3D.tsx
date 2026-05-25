@@ -1,10 +1,22 @@
-import React, { useRef, useState, useEffect, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { Performer, Position } from '../types';
 import { mapTo3D, degToRad } from '../utils/coordinates';
 import { useDragContext } from './Scene3D';
+import { denormalizePoints } from '../components/prop-editor/PolygonUtils';
+
+function createFaceMaterial(faceTexture?: { dataUrl?: string }, fallbackColor: string = '#475569'): THREE.MeshStandardMaterial {
+  const mat = new THREE.MeshStandardMaterial({ color: fallbackColor, transparent: true, opacity: 1, side: THREE.FrontSide });
+  if (faceTexture?.dataUrl) {
+    const texture = new THREE.TextureLoader().load(faceTexture.dataUrl);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    mat.map = texture;
+    mat.color.set('#ffffff');
+  }
+  return mat;
+}
 
 interface Prop3DProps {
   performer: Performer;
@@ -40,6 +52,41 @@ const Prop3D: React.FC<Prop3DProps> = ({
   const dragOffsetRef = useRef<THREE.Vector3>(new THREE.Vector3());
 
   const dims = { width: performer.width || 1, height: performer.height || 1, depth: performer.depth || 1 };
+
+  const isExtruded = performer.propGeometryType === 'extruded' &&
+    performer.polygonPoints && performer.polygonPoints.length >= 3;
+
+  const boxMaterials = useMemo(() => {
+    if (isExtruded) return null;
+    const hasTextures = performer.boxTextures && Object.keys(performer.boxTextures).length > 0;
+    if (!hasTextures) return null;
+    const c = isSelected ? '#60a5fa' : performer.color;
+    return [
+      createFaceMaterial(performer.boxTextures?.right, c),
+      createFaceMaterial(performer.boxTextures?.left, c),
+      createFaceMaterial(performer.boxTextures?.top, c),
+      createFaceMaterial(performer.boxTextures?.bottom, c),
+      createFaceMaterial(performer.boxTextures?.front, c),
+      createFaceMaterial(performer.boxTextures?.back, c),
+    ];
+  }, [performer.boxTextures, performer.color, isSelected]);
+
+  const extrudeGeometry = useMemo(() => {
+    if (!isExtruded || !performer.polygonPoints) return null;
+    const w = dims.width, d = dims.depth;
+    const h = performer.extrudeHeight || dims.height;
+    const denorm = denormalizePoints(performer.polygonPoints, w, d);
+    const cx = denorm.reduce((s, p) => s + p.x, 0) / denorm.length;
+    const cy = denorm.reduce((s, p) => s + p.y, 0) / denorm.length;
+    const shape = new THREE.Shape();
+    shape.moveTo(denorm[0].x - cx, denorm[0].y - cy);
+    for (let i = 1; i < denorm.length; i++) shape.lineTo(denorm[i].x - cx, denorm[i].y - cy);
+    shape.closePath();
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: h, bevelEnabled: false });
+    geo.rotateX(-Math.PI / 2);
+    geo.translate(0, h / 2, 0);
+    return geo;
+  }, [isExtruded, performer.polygonPoints, dims.width, dims.depth, performer.extrudeHeight, dims.height]);
 
   // Initialize position on mount or when position changes significantly
   useEffect(() => {
@@ -138,14 +185,23 @@ const Prop3D: React.FC<Prop3DProps> = ({
       onPointerDown={handlePlanePointerDown}
       onPointerUp={handlePlanePointerUp}
     >
-      <mesh castShadow receiveShadow>
-        {/* boxGeometry args: [length(2Dx/3Dx), height(3D垂直), width(2Dy/3Dz)] */}
-        <boxGeometry args={[dims.width, dims.height, dims.depth]} />
-        <meshStandardMaterial color={isSelected ? '#60a5fa' : performer.color} transparent opacity={hovered ? 0.9 : 1} />
-      </mesh>
+      {isExtruded && extrudeGeometry ? (
+        <mesh castShadow receiveShadow geometry={extrudeGeometry}>
+          <meshStandardMaterial color={isSelected ? '#60a5fa' : performer.color} transparent opacity={hovered ? 0.9 : 1} />
+        </mesh>
+      ) : (
+        <mesh castShadow receiveShadow>
+          <boxGeometry args={[dims.width, dims.height, dims.depth]} />
+          {boxMaterials ? (
+            boxMaterials.map((mat, i) => <primitive key={i} object={mat} attach={`material-${i}`} />)
+          ) : (
+            <meshStandardMaterial color={isSelected ? '#60a5fa' : performer.color} transparent opacity={hovered ? 0.9 : 1} />
+          )}
+        </mesh>
+      )}
       {isSelected && (
         <lineSegments>
-          <edgesGeometry args={[new THREE.BoxGeometry(dims.width, dims.height, dims.depth)]} />
+          <edgesGeometry args={isExtruded && extrudeGeometry ? [extrudeGeometry] : [new THREE.BoxGeometry(dims.width, dims.height, dims.depth)]} />
           <lineBasicMaterial color="#fbbf24" linewidth={2} />
         </lineSegments>
       )}

@@ -50,6 +50,11 @@ interface DragState {
   initialPositions: Record<string, Position>;
 }
 
+function getPolygonClipPath(points: { x: number; y: number }[] | undefined): string | undefined {
+  if (!points || points.length < 3) return undefined;
+  return `polygon(${points.map(p => `${p.x * 100}% ${p.y * 100}%`).join(', ')})`;
+}
+
 export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: number }> = ({
   performers,
   performerGroups = [],
@@ -394,7 +399,13 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
                   backgroundColor: performer.color,
                   transform: `translate(-50%, -50%) rotate(${performer.rotation || 0}deg)`,
                   border: isSelected ? '2px solid white' : '1px solid rgba(255,255,255,0.3)',
-                  boxShadow: isSelected ? '0 0 10px rgba(59,130,246,0.5)' : 'none'
+                  boxShadow: isSelected ? '0 0 10px rgba(59,130,246,0.5)' : 'none',
+                  backgroundImage: performer.boxTextures?.front?.dataUrl || performer.textureDataUrl
+                    ? `url(${performer.boxTextures?.front?.dataUrl || performer.textureDataUrl})`
+                    : undefined,
+                  backgroundSize: 'cover',
+                  backgroundPosition: 'center',
+                  clipPath: getPolygonClipPath(performer.polygonPoints),
                 }}
               >
                 {/* Prop Label (Optional, maybe small text inside or standard label above) */}

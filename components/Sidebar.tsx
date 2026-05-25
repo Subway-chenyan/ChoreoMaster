@@ -6,13 +6,14 @@ import { PRESET_SHAPES, DEFAULT_COLORS } from '../constants';
 import { generateFormationCoordinates } from '../services/geminiService';
 import { StageConfig } from '../types';
 import { ProjectBrowser } from './ProjectBrowser';
+import { PropEditorModal } from './PropEditorModal';
 
 interface SidebarProps {
     performers: Performer[];
     performerGroups: PerformerGroup[];
     frames: Frame[];
     currentFrameId: string;
-    onAddPerformer: (name: string, color: string, shape: PerformerShape, extra?: { type?: PerformerType, width?: number, depth?: number, height?: number, rotation?: number }) => void;
+    onAddPerformer: (name: string, color: string, shape: PerformerShape, extra?: Record<string, any>) => void;
     onRemovePerformer: (id: string) => void;
     onUpdatePerformer: (id: string, updates: Partial<Performer>) => void;
     onTogglePerformerInFrame: (id: string) => void;
@@ -245,6 +246,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
         height: number;
         color: string;
     }>({ show: false, performerId: null, width: 0.5, depth: 0.5, height: 0.5, color: '#000000' });
+
+    const [propEditorOpen, setPropEditorOpen] = useState(false);
+    const [propEditorPerformerId, setPropEditorPerformerId] = useState<string | null>(null);
 
     // Ref for context menu click outside detection
     const contextMenuRef = useRef<HTMLDivElement>(null);
@@ -1064,7 +1068,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                                 <button
                                                     onClick={() => {
                                                         if (contextMenuState.performerId) {
-                                                            openPropEditDialog(contextMenuState.performerId);
+                                                            setPropEditorPerformerId(contextMenuState.performerId);
+                                                            setPropEditorOpen(true);
                                                         }
                                                         closeContextMenu();
                                                     }}
@@ -1385,6 +1390,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     </div>
                 </div>
             )}
+
+            <PropEditorModal
+              isOpen={propEditorOpen}
+              performer={propEditorPerformerId ? performers.find(p => p.id === propEditorPerformerId) || null : null}
+              mode={propEditorPerformerId ? 'edit' : 'create'}
+              onSave={(updates) => {
+                if (propEditorPerformerId) {
+                  onUpdatePerformer(propEditorPerformerId, updates);
+                } else {
+                  onAddPerformer(updates.name || '道具', updates.color || '#475569', 'square', {
+                    type: 'prop',
+                    ...updates
+                  });
+                }
+                setPropEditorOpen(false);
+                setPropEditorPerformerId(null);
+              }}
+              onClose={() => {
+                setPropEditorOpen(false);
+                setPropEditorPerformerId(null);
+              }}
+            />
         </div>
     );
 };

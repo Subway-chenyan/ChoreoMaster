@@ -255,7 +255,7 @@ const App: React.FC = () => {
 
   // --- Actions ---
 
-  const handleAddPerformer = (name: string, color: string, shape: PerformerShape, extra?: { type?: PerformerType, width?: number, depth?: number, height?: number, rotation?: number }) => {
+  const handleAddPerformer = (name: string, color: string, shape: PerformerShape, extra?: Record<string, any>) => {
     const newPerformer: Performer = {
       id: generateId(),
       name,
@@ -263,10 +263,7 @@ const App: React.FC = () => {
       label: name.charAt(0).toUpperCase(),
       shape,
       type: extra?.type || 'performer',
-      width: extra?.width,
-      depth: extra?.depth,
-      height: extra?.height,
-      rotation: extra?.rotation
+      ...extra
     };
     setPerformers([...performers, newPerformer]);
 
