@@ -3,7 +3,7 @@
 // Shows either a box or an extruded polygon depending on propGeometryType.
 // ---------------------------------------------------------------------------
 
-import React, { useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
@@ -72,6 +72,16 @@ function BoxPreview({
       createFaceMaterial(boxTextures?.back, '#475569'),    // -Z back
     ];
   }, [boxTextures]);
+
+  // Dispose materials and their textures when they change
+  useEffect(() => {
+    return () => {
+      materials.forEach(mat => {
+        if (mat.map) mat.map.dispose();
+        mat.dispose();
+      });
+    };
+  }, [materials]);
 
   useFrame(() => {
     if (meshRef.current) {
@@ -152,6 +162,16 @@ function ExtrudedPreview({
       createFaceMaterial(bottomTexture, '#334155'),   // group 2 = bottom cap
     ];
   }, [sideTexture, topTexture, bottomTexture]);
+
+  // Dispose materials and their textures when they change
+  useEffect(() => {
+    return () => {
+      materials.forEach(mat => {
+        if (mat.map) mat.map.dispose();
+        mat.dispose();
+      });
+    };
+  }, [materials]);
 
   useFrame(() => {
     if (meshRef.current) {

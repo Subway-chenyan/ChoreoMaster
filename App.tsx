@@ -255,7 +255,7 @@ const App: React.FC = () => {
 
   // --- Actions ---
 
-  const handleAddPerformer = (name: string, color: string, shape: PerformerShape, extra?: Record<string, any>) => {
+  const handleAddPerformer = (name: string, color: string, shape: PerformerShape, extra?: Partial<Performer>) => {
     const newPerformer: Performer = {
       id: generateId(),
       name,

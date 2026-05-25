@@ -58,7 +58,7 @@ const Prop3D: React.FC<Prop3DProps> = ({
 
   const boxMaterials = useMemo(() => {
     if (isExtruded) return null;
-    const hasTextures = performer.boxTextures && Object.keys(performer.boxTextures).length > 0;
+    const hasTextures = (performer.boxTextures && Object.keys(performer.boxTextures).length > 0) || performer.textureDataUrl;
     if (!hasTextures) return null;
     const c = isSelected ? '#60a5fa' : performer.color;
     return [
@@ -66,10 +66,10 @@ const Prop3D: React.FC<Prop3DProps> = ({
       createFaceMaterial(performer.boxTextures?.left, c),
       createFaceMaterial(performer.boxTextures?.top, c),
       createFaceMaterial(performer.boxTextures?.bottom, c),
-      createFaceMaterial(performer.boxTextures?.front, c),
+      createFaceMaterial(performer.boxTextures?.front || (performer.textureDataUrl ? { dataUrl: performer.textureDataUrl } : undefined), c),
       createFaceMaterial(performer.boxTextures?.back, c),
     ];
-  }, [performer.boxTextures, performer.color, isSelected]);
+  }, [performer.boxTextures, performer.textureDataUrl, performer.color, isSelected]);
 
   const extrudeGeometry = useMemo(() => {
     if (!isExtruded || !performer.polygonPoints) return null;
@@ -99,6 +99,30 @@ const Prop3D: React.FC<Prop3DProps> = ({
       createFaceMaterial(hasTextures.bottom, c), // group 2 = bottom cap
     ];
   }, [isExtruded, performer.extrudedTextures, performer.color, isSelected]);
+
+  // Collect materials for cleanup
+  const materialsToCleanup = useMemo(() => {
+    const mats: THREE.MeshStandardMaterial[] = [];
+    if (boxMaterials) mats.push(...boxMaterials);
+    if (extrudeMaterials) mats.push(...extrudeMaterials);
+    return mats;
+  }, [boxMaterials, extrudeMaterials]);
+
+  // Dispose materials and their textures when they change
+  useEffect(() => {
+    return () => {
+      materialsToCleanup.forEach(mat => {
+        if (mat.map) mat.map.dispose();
+        mat.dispose();
+      });
+    };
+  }, [materialsToCleanup]);
+
+  // Memoize edges geometry instead of creating every render
+  const edgesGeometry = useMemo(() => {
+    if (isExtruded && extrudeGeometry) return new THREE.EdgesGeometry(extrudeGeometry);
+    return new THREE.EdgesGeometry(new THREE.BoxGeometry(dims.width, dims.height, dims.depth));
+  }, [isExtruded, extrudeGeometry, dims.width, dims.height, dims.depth]);
 
   // Initialize position on mount or when position changes significantly
   useEffect(() => {
@@ -215,9 +239,8 @@ const Prop3D: React.FC<Prop3DProps> = ({
           )}
         </mesh>
       )}
-      {isSelected && (
-        <lineSegments>
-          <edgesGeometry args={isExtruded && extrudeGeometry ? [extrudeGeometry] : [new THREE.BoxGeometry(dims.width, dims.height, dims.depth)]} />
+      {isSelected && edgesGeometry && (
+        <lineSegments geometry={edgesGeometry}>
           <lineBasicMaterial color="#fbbf24" linewidth={2} />
         </lineSegments>
       )}

@@ -140,6 +140,7 @@ export const PropEditorModal: React.FC<PropEditorModalProps> = ({
       updates.boxTextures = Object.keys(boxTextures).length > 0 ? boxTextures : undefined;
       updates.polygonPoints = undefined;
       updates.extrudeHeight = undefined;
+      updates.extrudedTextures = undefined;
     } else {
       updates.width = extWidth;
       updates.depth = extDepth;

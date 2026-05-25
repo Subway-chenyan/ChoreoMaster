@@ -52,7 +52,9 @@ interface DragState {
 
 function getPolygonClipPath(points: { x: number; y: number }[] | undefined): string | undefined {
   if (!points || points.length < 3) return undefined;
-  return `polygon(${points.map(p => `${p.x * 100}% ${p.y * 100}%`).join(', ')})`;
+  return `polygon(${points.map(p =>
+    `${Math.max(0, Math.min(100, p.x * 100))}% ${Math.max(0, Math.min(100, p.y * 100))}%`
+  ).join(', ')})`;
 }
 
 export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: number }> = ({

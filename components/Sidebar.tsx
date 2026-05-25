@@ -13,7 +13,7 @@ interface SidebarProps {
     performerGroups: PerformerGroup[];
     frames: Frame[];
     currentFrameId: string;
-    onAddPerformer: (name: string, color: string, shape: PerformerShape, extra?: Record<string, any>) => void;
+    onAddPerformer: (name: string, color: string, shape: PerformerShape, extra?: Partial<Performer>) => void;
     onRemovePerformer: (id: string) => void;
     onUpdatePerformer: (id: string, updates: Partial<Performer>) => void;
     onTogglePerformerInFrame: (id: string) => void;
@@ -237,16 +237,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         color: string;
     }>({ show: false, groupId: null, color: '#000000' });
 
-    // Prop Edit Dialog State
-    const [propEditState, setPropEditState] = useState<{
-        show: boolean;
-        performerId: string | null;
-        width: number;
-        depth: number;
-        height: number;
-        color: string;
-    }>({ show: false, performerId: null, width: 0.5, depth: 0.5, height: 0.5, color: '#000000' });
-
     const [propEditorOpen, setPropEditorOpen] = useState(false);
     const [propEditorPerformerId, setPropEditorPerformerId] = useState<string | null>(null);
 
@@ -322,32 +312,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
             const nextColorIndex = (DEFAULT_COLORS.indexOf(newPerformerColor) + 1) % DEFAULT_COLORS.length;
             setNewPerformerColor(DEFAULT_COLORS[nextColorIndex]);
         }
-    };
-
-    const openPropEditDialog = (performerId: string) => {
-        const performer = performers.find(p => p.id === performerId);
-        if (performer) {
-            setPropEditState({
-                show: true,
-                performerId,
-                width: performer.width || 0.5,
-                depth: performer.depth || 0.5,
-                height: performer.height || 0.5,
-                color: performer.color
-            });
-        }
-    };
-
-    const handleSavePropEdit = () => {
-        if (propEditState.performerId) {
-            onUpdatePerformer(propEditState.performerId, {
-                width: propEditState.width,
-                depth: propEditState.depth,
-                height: propEditState.height,
-                color: propEditState.color
-            });
-        }
-        setPropEditState({ show: false, performerId: null, width: 0.5, depth: 0.5, height: 0.5, color: '#000000' });
     };
 
     const handlePerformerClick = (e: React.MouseEvent, id: string) => {
@@ -1300,90 +1264,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                     className="px-4 py-2 rounded text-sm bg-blue-600 hover:bg-blue-500 text-white font-medium shadow-lg shadow-blue-900/20 transition-all hover:scale-105 active:scale-95"
                                 >
                                     确定应用
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Prop Edit Dialog */}
-            {propEditState.show && (
-                <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 backdrop-blur-sm"
-                    onClick={(e) => e.stopPropagation()}>
-                    <div className="bg-slate-900 border border-slate-700 p-6 rounded-lg shadow-2xl w-80">
-                        <h3 className="text-lg font-bold text-white mb-4">编辑道具</h3>
-
-                        <div className="flex flex-col gap-4">
-                            {/* 长宽高输入 */}
-                            <div className="grid grid-cols-3 gap-2">
-                                <div className="flex flex-col gap-1">
-                                    <label className="text-xs text-slate-400">长 (米)</label>
-                                    <input
-                                        type="number"
-                                        step="0.1"
-                                        min="0.1"
-                                        max="10"
-                                        value={propEditState.width}
-                                        onChange={(e) => setPropEditState(prev => ({ ...prev, width: parseFloat(e.target.value) || 0.1 }))}
-                                        className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
-                                    />
-                                </div>
-                                <div className="flex flex-col gap-1">
-                                    <label className="text-xs text-slate-400">宽 (米)</label>
-                                    <input
-                                        type="number"
-                                        step="0.1"
-                                        min="0.1"
-                                        max="10"
-                                        value={propEditState.depth}
-                                        onChange={(e) => setPropEditState(prev => ({ ...prev, depth: parseFloat(e.target.value) || 0.1 }))}
-                                        className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
-                                    />
-                                </div>
-                                <div className="flex flex-col gap-1">
-                                    <label className="text-xs text-slate-400">高 (米)</label>
-                                    <input
-                                        type="number"
-                                        step="0.1"
-                                        min="0.1"
-                                        max="10"
-                                        value={propEditState.height}
-                                        onChange={(e) => setPropEditState(prev => ({ ...prev, height: parseFloat(e.target.value) || 0.1 }))}
-                                        className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
-                                    />
-                                </div>
-                            </div>
-
-                            {/* 颜色选择 */}
-                            <div className="flex gap-4 items-center">
-                                <input
-                                    type="color"
-                                    value={propEditState.color}
-                                    onChange={(e) => setPropEditState(prev => ({ ...prev, color: e.target.value }))}
-                                    className="w-16 h-16 rounded cursor-pointer border-0 p-0 bg-transparent"
-                                />
-                                <div className="text-sm flex flex-col gap-1">
-                                    <div className="text-slate-400">道具颜色</div>
-                                    <div className="font-mono bg-slate-800 px-2 py-1 rounded text-slate-300 border border-slate-700 select-all">
-                                        {propEditState.color}
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* 按钮组 */}
-                            <div className="flex gap-2 justify-end pt-4 border-t border-slate-800">
-                                <button
-                                    onClick={() => setPropEditState({ show: false, performerId: null, width: 0.5, depth: 0.5, height: 0.5, color: '#000000' })}
-                                    className="px-4 py-2 rounded text-sm text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
-                                >
-                                    取消
-                                </button>
-                                <button
-                                    onClick={handleSavePropEdit}
-                                    className="px-4 py-2 rounded text-sm bg-blue-600 hover:bg-blue-500 text-white font-medium shadow-lg shadow-blue-900/20 transition-all hover:scale-105 active:scale-95"
-                                >
-                                    保存
                                 </button>
                             </div>
                         </div>
