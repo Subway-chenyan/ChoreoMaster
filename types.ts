@@ -9,6 +9,22 @@ export type PerformerShape = 'circle' | 'square' | 'triangle';
 
 export type PerformerType = 'performer' | 'prop';
 
+export type PropGeometryType = 'box' | 'extruded';
+
+export interface FaceTexture {
+  dataUrl: string;
+  fileName?: string;
+}
+
+export interface BoxTextures {
+  front?: FaceTexture;
+  back?: FaceTexture;
+  left?: FaceTexture;
+  right?: FaceTexture;
+  top?: FaceTexture;
+  bottom?: FaceTexture;
+}
+
 export interface Performer {
   id: string;
   name: string;
@@ -21,6 +37,13 @@ export interface Performer {
   height?: number; // Height in meters
   depth?: number; // Depth in meters (for 3D props)
   rotation?: number; // Rotation in degrees
+  propGeometryType?: PropGeometryType;
+  boxTextures?: BoxTextures;
+  extrudeHeight?: number;
+  polygonPoints?: { x: number; y: number }[];
+  textureDataUrl?: string;
+  propShape?: 'rectangle' | 'ellipse' | 'triangle' | 'diamond' | 'hexagon' | 'custom';
+  boundToId?: string;
 }
 
 export interface PerformerGroup {
