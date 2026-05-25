@@ -2,7 +2,7 @@ import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react'
 import { useFrame, useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
-import { Performer, Position } from '../types';
+import { Performer, Position, ExtrudedTextures } from '../types';
 import { mapTo3D, degToRad } from '../utils/coordinates';
 import { useDragContext } from './Scene3D';
 import { denormalizePoints } from '../components/prop-editor/PolygonUtils';
@@ -87,6 +87,18 @@ const Prop3D: React.FC<Prop3DProps> = ({
     geo.translate(0, h / 2, 0);
     return geo;
   }, [isExtruded, performer.polygonPoints, dims.width, dims.depth, performer.extrudeHeight, dims.height]);
+
+  const extrudeMaterials = useMemo(() => {
+    if (!isExtruded) return null;
+    const c = isSelected ? '#60a5fa' : performer.color;
+    const hasTextures = performer.extrudedTextures;
+    if (!hasTextures) return null;
+    return [
+      createFaceMaterial(hasTextures.side, c),   // group 0 = sides
+      createFaceMaterial(hasTextures.top, c),    // group 1 = top cap
+      createFaceMaterial(hasTextures.bottom, c), // group 2 = bottom cap
+    ];
+  }, [isExtruded, performer.extrudedTextures, performer.color, isSelected]);
 
   // Initialize position on mount or when position changes significantly
   useEffect(() => {
@@ -187,7 +199,11 @@ const Prop3D: React.FC<Prop3DProps> = ({
     >
       {isExtruded && extrudeGeometry ? (
         <mesh castShadow receiveShadow geometry={extrudeGeometry}>
-          <meshStandardMaterial color={isSelected ? '#60a5fa' : performer.color} transparent opacity={hovered ? 0.9 : 1} />
+          {extrudeMaterials ? (
+            extrudeMaterials.map((mat, i) => <primitive key={i} object={mat} attach={`material-${i}`} />)
+          ) : (
+            <meshStandardMaterial color={isSelected ? '#60a5fa' : performer.color} transparent opacity={hovered ? 0.9 : 1} />
+          )}
         </mesh>
       ) : (
         <mesh castShadow receiveShadow>

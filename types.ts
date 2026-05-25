@@ -25,6 +25,12 @@ export interface BoxTextures {
   bottom?: FaceTexture;
 }
 
+export interface ExtrudedTextures {
+  side?: FaceTexture;
+  top?: FaceTexture;
+  bottom?: FaceTexture;
+}
+
 export interface Performer {
   id: string;
   name: string;
@@ -39,6 +45,7 @@ export interface Performer {
   rotation?: number; // Rotation in degrees
   propGeometryType?: PropGeometryType;
   boxTextures?: BoxTextures;
+  extrudedTextures?: ExtrudedTextures;
   extrudeHeight?: number;
   polygonPoints?: { x: number; y: number }[];
   textureDataUrl?: string;

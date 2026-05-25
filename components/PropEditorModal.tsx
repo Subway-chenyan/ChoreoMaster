@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { X, Box as BoxIcon, Pentagon } from 'lucide-react';
-import { Performer, PropGeometryType, BoxTextures, FaceTexture } from '../types';
+import { Performer, PropGeometryType, BoxTextures, FaceTexture, ExtrudedTextures } from '../types';
 import { Point } from './prop-editor/PolygonUtils';
 import { ShapeEditor2D } from './prop-editor/ShapeEditor2D';
 import { BoxTextureEditor } from './prop-editor/BoxTextureEditor';
@@ -76,6 +76,10 @@ export const PropEditorModal: React.FC<PropEditorModalProps> = ({
         setExtDepth(performer.depth ?? 2);
         setExtHeight(performer.extrudeHeight ?? performer.height ?? 1);
         setPolygonPoints(performer.polygonPoints || []);
+        const extTextures = performer.extrudedTextures;
+        setSideTexture(extTextures?.side);
+        setTopTexture(extTextures?.top);
+        setBottomTexture(extTextures?.bottom);
       } else {
         setBoxWidth(performer.width ?? 1);
         setBoxDepth(performer.depth ?? 1);
@@ -143,6 +147,9 @@ export const PropEditorModal: React.FC<PropEditorModalProps> = ({
       updates.extrudeHeight = extHeight;
       updates.polygonPoints = polygonPoints.length > 0 ? polygonPoints : undefined;
       updates.boxTextures = undefined;
+      updates.extrudedTextures = (sideTexture || topTexture || bottomTexture)
+        ? { side: sideTexture, top: topTexture, bottom: bottomTexture }
+        : undefined;
     }
 
     onSave(updates);
@@ -150,6 +157,7 @@ export const PropEditorModal: React.FC<PropEditorModalProps> = ({
     name, color, rotation, geometryType,
     boxWidth, boxDepth, boxHeight, boxTextures,
     extWidth, extDepth, extHeight, polygonPoints,
+    sideTexture, topTexture, bottomTexture,
     onSave,
   ]);
 

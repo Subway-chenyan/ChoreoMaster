@@ -426,6 +426,27 @@ export const ShapeEditor2D: React.FC<ShapeEditor2DProps> = ({
         setDrawingPoints((prev) => [...prev, meter]);
         setStatus(`已添加顶点 (${drawingPoints.length + 1} 个)`);
       } else if (mode === 'select') {
+        // Right-click to delete vertex in select mode
+        if (e.button === 2) {
+          const vi = findNearestVertex(pos.x, pos.y);
+          if (vi !== null) {
+            const mp = meterPoints();
+            if (mp.length <= 3) {
+              setStatus('多边形至少需要 3 个顶点');
+              return;
+            }
+            const newPoints = mp.filter((_, i) => i !== vi);
+            if (!isSimplePolygon(newPoints)) {
+              setStatus('删除此顶点会导致多边形自相交');
+              return;
+            }
+            onChange(normalizePoints(newPoints));
+            setStatus(`已删除顶点 (剩余 ${newPoints.length} 个)`);
+            return;
+          }
+          return;
+        }
+
         const vi = findNearestVertex(pos.x, pos.y);
         if (vi !== null) {
           setSelectedVertex(vi);
@@ -695,6 +716,7 @@ export const ShapeEditor2D: React.FC<ShapeEditor2DProps> = ({
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onDoubleClick={handleDoubleClick}
+          onContextMenu={(e) => e.preventDefault()}
           onMouseLeave={() => {
             setHoveredVertex(null);
             setHoveredEdgeMid(null);
