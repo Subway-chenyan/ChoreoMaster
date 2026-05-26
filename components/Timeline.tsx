@@ -30,7 +30,8 @@ interface TimelineProps {
     onToggleExportIncludeGrid?: () => void;
     exportWidthPx?: number;
     exportHeightPx?: number;
-    
+    exportResolution?: '1080p' | '2k' | '4k';
+    onSetExportResolution?: (v: '1080p' | '2k' | '4k') => void;
 }
 
 export const Timeline: React.FC<TimelineProps> = ({
@@ -60,7 +61,8 @@ export const Timeline: React.FC<TimelineProps> = ({
     , onToggleExportIncludeGrid
     , exportWidthPx
     , exportHeightPx
-    
+    , exportResolution
+    , onSetExportResolution
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -291,8 +293,17 @@ export const Timeline: React.FC<TimelineProps> = ({
                             className={`text-xs ml-1 px-2 py-1 rounded border ${exportIncludeGrid ? 'bg-blue-600 text-white border-blue-500' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'}`}
                             title="切换导出时是否显示网格"
                         >显示网格</button>
-                        <span className="text-[11px] ml-2 px-2 py-1 rounded border bg-slate-800 text-slate-300 border-slate-700">
-                            分辨率: {Math.round(exportWidthPx || 0)}x{Math.round(exportHeightPx || 0)}（固定720p）
+                        <span className="text-[11px] ml-2 flex items-center gap-1 text-slate-300">分辨率:
+                            <select
+                                value={exportResolution ?? '1080p'}
+                                onChange={(e) => onSetExportResolution?.(e.target.value as '1080p' | '2k' | '4k')}
+                                className="bg-slate-800 text-slate-300 border border-slate-700 rounded px-1 py-0.5 text-[11px] focus:outline-none focus:border-blue-500"
+                                disabled={isExporting}
+                            >
+                                <option value="1080p">1080p (1920×1080)</option>
+                                <option value="2k">2K (2560×1440)</option>
+                                <option value="4k">4K (3840×2160)</option>
+                            </select>
                         </span>
                     <button
                         onClick={onExportVideo}

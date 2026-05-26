@@ -40,6 +40,7 @@ const App: React.FC = () => {
   const [exportProgress, setExportProgress] = useState(0);
   const [exportIncludeLabels, setExportIncludeLabels] = useState<boolean>(true);
   const [exportIncludeGrid, setExportIncludeGrid] = useState<boolean>(true);
+  const [exportResolution, setExportResolution] = useState<'1080p' | '2k' | '4k'>('1080p');
 
   // Stage View State
   const [showLabels, setShowLabels] = useState(true);
@@ -1283,16 +1284,17 @@ const App: React.FC = () => {
     const bgColor = opts?.bgColor ?? '#1f2937';
     const w = canvas.width;
     const h = canvas.height;
+    const scale = w / 1280; // baseline: 1280px wide
     ctx.fillStyle = bgColor;
     ctx.fillRect(0, 0, w, h);
     ctx.strokeStyle = '#334155';
-    ctx.lineWidth = 1;
+    ctx.lineWidth = scale;
     ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
 
     if (includeGrid) {
       const divisions = Math.round(4 * gridScale);
       ctx.strokeStyle = '#94a3b8';
-      ctx.lineWidth = 1;
+      ctx.lineWidth = scale;
       ctx.globalAlpha = 0.2;
       for (let i = 0; i <= divisions; i++) {
         const gx = (i / divisions) * w;
@@ -1322,7 +1324,6 @@ const App: React.FC = () => {
       const cy = (pos.y / 100) * h;
 
       if (p.type === 'prop') {
-        // Prop rendering: size from width/depth in meters, rotation, texture, clipPath
         const propW = (p.width || 1) / stageW * w;
         const propD = (p.depth || 1) / stageD * h;
         const rot = (p.rotation || 0) * Math.PI / 180;
@@ -1331,7 +1332,6 @@ const App: React.FC = () => {
         ctx.translate(cx, cy);
         ctx.rotate(-rot);
 
-        // Clip path for custom polygon props
         if (p.polygonPoints && p.polygonPoints.length >= 3) {
           ctx.beginPath();
           p.polygonPoints.forEach((pt, i) => {
@@ -1343,7 +1343,6 @@ const App: React.FC = () => {
           ctx.clip();
         }
 
-        // Texture or solid color
         const texUrl = p.boxTextures?.front?.dataUrl || p.textureDataUrl;
         if (texUrl && (texUrl as any).loaded) {
           ctx.drawImage((texUrl as any), -propW / 2, -propD / 2, propW, propD);
@@ -1353,27 +1352,26 @@ const App: React.FC = () => {
         }
 
         ctx.strokeStyle = 'rgba(255,255,255,0.3)';
-        ctx.lineWidth = 1;
+        ctx.lineWidth = scale;
         ctx.strokeRect(-propW / 2, -propD / 2, propW, propD);
 
         ctx.restore();
 
         if (includeLabels) {
           ctx.fillStyle = '#ffffff';
-          ctx.font = '9px sans-serif';
+          ctx.font = `${Math.round(9 * scale)}px sans-serif`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'top';
-          ctx.fillText(p.name, cx, cy + Math.max(propW, propD) / 2 + 2);
+          ctx.fillText(p.name, cx, cy + propD / 2 + 4 * scale);
         }
       } else {
-        // Performer rendering
         ctx.fillStyle = p.color;
         ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 2;
-        const shapeSize = 32;
+        ctx.lineWidth = 2 * scale;
+        const shapeSize = 32 * scale;
         if (p.shape === 'circle') {
           ctx.beginPath();
-          ctx.arc(cx, cy, Math.floor(shapeSize / 2 - 7), 0, Math.PI * 2);
+          ctx.arc(cx, cy, Math.floor(shapeSize / 2 - 7 * scale), 0, Math.PI * 2);
           ctx.fill();
           ctx.stroke();
         } else if (p.shape === 'square') {
@@ -1381,7 +1379,7 @@ const App: React.FC = () => {
           ctx.fillRect(cx - s / 2, cy - s / 2, s, s);
           ctx.strokeRect(cx - s / 2, cy - s / 2, s, s);
         } else {
-          const s = shapeSize + 6;
+          const s = shapeSize + 6 * scale;
           ctx.beginPath();
           ctx.moveTo(cx, cy - s / 2);
           ctx.lineTo(cx + s / 2, cy + s / 2);
@@ -1392,7 +1390,7 @@ const App: React.FC = () => {
         }
         if (includeLabels) {
           ctx.fillStyle = '#ffffff';
-          ctx.font = '10px sans-serif';
+          ctx.font = `${Math.round(10 * scale)}px sans-serif`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'top';
           ctx.fillText(p.name, cx, cy + Math.floor(shapeSize / 2));
@@ -1401,12 +1399,12 @@ const App: React.FC = () => {
     });
 
     ctx.fillStyle = 'rgba(100,116,139,0.5)';
-    ctx.fillRect(0, h - 8, w, 8);
+    ctx.fillRect(0, h - 8 * scale, w, 8 * scale);
     ctx.fillStyle = '#ffffff';
-    ctx.font = '10px sans-serif';
+    ctx.font = `${Math.round(10 * scale)}px sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'alphabetic';
-    ctx.fillText('舞台前沿', Math.floor(w / 2), h - 2);
+    ctx.fillText('舞台前沿', Math.floor(w / 2), h - 2 * scale);
   };
 
   const handleSetInPoint = () => { setInPointMs(currentTime); };
@@ -1417,25 +1415,15 @@ const App: React.FC = () => {
       alert('请先设置有效的入点与出点（出点必须大于入点）。');
       return;
     }
-    const width = 1280;
-    const height = 720;
+    const width = exportResolution === '4k' ? 3840 : exportResolution === '2k' ? 2560 : 1920;
+    const height = exportResolution === '4k' ? 2160 : exportResolution === '2k' ? 1440 : 1080;
     const fps = 30;
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-
     const totalMs = outPointMs - inPointMs;
     const totalFrames = Math.ceil(totalMs / 1000 * fps);
     const stepMs = 1000 / fps;
 
     setIsExporting(true);
     setExportProgress(0);
-
-    // Phase 1: Pre-render all frames to ImageBitmaps (fast, no I/O wait)
-    const tmpCanvas = document.createElement('canvas');
-    tmpCanvas.width = width;
-    tmpCanvas.height = height;
-    const frames: ImageBitmap[] = [];
 
     // Pre-load prop textures
     const texturePromises = performers
@@ -1452,18 +1440,158 @@ const App: React.FC = () => {
       });
     await Promise.all(texturePromises);
 
+    // Phase 1: Pre-render all frames
+    const tmpCanvas = document.createElement('canvas');
+    tmpCanvas.width = width;
+    tmpCanvas.height = height;
+    const bitmaps: ImageBitmap[] = [];
+
     for (let i = 0; i <= totalFrames; i++) {
       const t = inPointMs + i * stepMs;
       renderFrameToCanvas(tmpCanvas, Math.min(t, outPointMs), { includeLabels: exportIncludeLabels, includeGrid: exportIncludeGrid });
-      frames.push(await createImageBitmap(tmpCanvas));
-      setExportProgress(Math.min(0.5, i / totalFrames * 0.5));
-      // Yield every 20 frames to keep UI responsive during pre-render
-      if (i % 20 === 0) {
-        await new Promise(r => setTimeout(r, 0));
+      bitmaps.push(await createImageBitmap(tmpCanvas));
+      setExportProgress(i / (totalFrames + 1) * 0.7);
+      if (i % 20 === 0) await new Promise(r => setTimeout(r, 0));
+    }
+
+    // Check WebCodecs support
+    const hasWebCodecs = typeof VideoEncoder !== 'undefined';
+
+    if (hasWebCodecs) {
+      // --- WebCodecs + mp4-muxer (fast, offline) ---
+      try {
+        const { Muxer, ArrayBufferTarget } = await import('mp4-muxer');
+
+        const hasAudio = audioBuffer != null && typeof AudioEncoder !== 'undefined';
+        const sampleRate = audioBuffer?.sampleRate ?? 44100;
+        const numChannels = audioBuffer?.numberOfChannels ?? 1;
+
+        const target = new ArrayBufferTarget();
+        const muxer = new Muxer({
+          target,
+          video: { codec: 'avc', width, height },
+          audio: hasAudio ? {
+            codec: 'aac',
+            numberOfChannels: numChannels,
+            sampleRate,
+          } : undefined,
+          fastStart: 'in-memory',
+          firstTimestampBehavior: 'offset',
+        });
+
+        // --- Step 1: Encode video ---
+        const videoEncoder = new VideoEncoder({
+          output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+          error: (e) => console.error('VideoEncoder error:', e),
+        });
+        videoEncoder.configure({
+          codec: exportResolution === '4k' ? 'avc1.640033' : exportResolution === '2k' ? 'avc1.640032' : 'avc1.640028',
+          width,
+          height,
+          bitrate: exportResolution === '4k' ? 20_000_000 : exportResolution === '2k' ? 10_000_000 : 5_000_000,
+          bitrateMode: 'constant',
+          framerate: fps,
+        });
+
+        for (let i = 0; i < bitmaps.length; i++) {
+          const frame = new VideoFrame(bitmaps[i], {
+            timestamp: (i * 1_000_000) / fps,
+            duration: 1_000_000 / fps,
+          });
+          videoEncoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
+          frame.close();
+          setExportProgress(0.7 + (i / bitmaps.length) * 0.15);
+          if (i % 30 === 0) await new Promise(r => setTimeout(r, 0));
+        }
+
+        await videoEncoder.flush();
+        videoEncoder.close();
+
+        // --- Step 2: Encode audio (after video is fully flushed) ---
+        if (hasAudio) {
+          const audioEncoder = new AudioEncoder({
+            output: (chunk, meta) => muxer.addAudioChunk(chunk, meta),
+            error: (e) => console.error('AudioEncoder error:', e),
+          });
+          audioEncoder.configure({
+            codec: 'mp4a.40.2',
+            numberOfChannels: numChannels,
+            sampleRate,
+            bitrate: 128_000,
+          });
+
+          const audioInSamples = Math.floor(inPointMs / 1000 * sampleRate);
+          const audioOutSamples = Math.floor(outPointMs / 1000 * sampleRate);
+          const aacFrameSize = 1024;
+          const totalAudioChunks = Math.ceil((audioOutSamples - audioInSamples) / aacFrameSize);
+
+          const channelData: Float32Array[] = [];
+          for (let ch = 0; ch < numChannels; ch++) {
+            channelData.push(audioBuffer!.getChannelData(ch));
+          }
+
+          for (let base = 0; base < totalAudioChunks; base++) {
+            const sampleStart = audioInSamples + base * aacFrameSize;
+            if (sampleStart >= audioOutSamples) break;
+
+            const data = new Float32Array(numChannels * aacFrameSize);
+            for (let ch = 0; ch < numChannels; ch++) {
+              const src = channelData[ch];
+              const off = ch * aacFrameSize;
+              for (let s = 0; s < aacFrameSize; s++) {
+                data[off + s] = (sampleStart + s < src.length) ? src[sampleStart + s] : 0;
+              }
+            }
+
+            const audioData = new AudioData({
+              format: 'f32-planar',
+              sampleRate,
+              numberOfFrames: aacFrameSize,
+              numberOfChannels: numChannels,
+              timestamp: (base * aacFrameSize * 1_000_000) / sampleRate,
+              data,
+            });
+            audioEncoder.encode(audioData);
+            audioData.close();
+
+            if (base % 100 === 0) {
+              setExportProgress(0.85 + (base / totalAudioChunks) * 0.1);
+              await new Promise(r => setTimeout(r, 0));
+            }
+          }
+
+          setExportProgress(0.95);
+          await audioEncoder.flush();
+          audioEncoder.close();
+        }
+
+        muxer.finalize();
+        bitmaps.forEach(b => b.close());
+
+        const blob = new Blob([target.buffer], { type: 'video/mp4' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `choreomaster-export-${Math.round(inPointMs)}-${Math.round(outPointMs)}.mp4`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+
+        setIsExporting(false);
+        setExportProgress(1);
+        return;
+      } catch (err) {
+        console.error('WebCodecs export failed, falling back to MediaRecorder:', err);
+        alert('高速导出失败，已回退到实时录制模式。\n错误: ' + (err instanceof Error ? err.message : String(err)));
       }
     }
 
-    // Phase 2: Play back pre-rendered frames at real-time speed into MediaRecorder
+    // --- Fallback: MediaRecorder (real-time playback) ---
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+
     const streamV = (canvas as any).captureStream ? (canvas as any).captureStream(fps) : null;
     if (!streamV) { setIsExporting(false); return; }
 
@@ -1494,12 +1622,10 @@ const App: React.FC = () => {
     const recordStart = performance.now();
     const drawFrame = () => {
       const elapsed = performance.now() - recordStart;
-      const frameIdx = Math.min(Math.floor(elapsed / stepMs), frames.length - 1);
+      const frameIdx = Math.min(Math.floor(elapsed / stepMs), bitmaps.length - 1);
       const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(frames[frameIdx], 0, 0);
-      }
-      setExportProgress(0.5 + Math.min(0.5, (frameIdx / totalFrames) * 0.5));
+      if (ctx) ctx.drawImage(bitmaps[frameIdx], 0, 0);
+      setExportProgress(0.7 + Math.min(0.3, (frameIdx / totalFrames) * 0.3));
 
       if (elapsed < totalMs + stepMs) {
         requestAnimationFrame(drawFrame);
@@ -1512,12 +1638,13 @@ const App: React.FC = () => {
 
     const blob = await new Promise<Blob>(resolve => {
       recorder.onstop = () => {
-        const b = new Blob(chunks, { type: mime });
-        setIsExporting(false);
-        frames.forEach(f => f.close());
-        resolve(b);
+        resolve(new Blob(chunks, { type: mime }));
       };
     });
+
+    bitmaps.forEach(b => b.close());
+    setIsExporting(false);
+    setExportProgress(1);
 
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -1869,8 +1996,10 @@ const App: React.FC = () => {
         exportIncludeGrid={exportIncludeGrid}
         onToggleExportIncludeLabels={() => setExportIncludeLabels(v => !v)}
         onToggleExportIncludeGrid={() => setExportIncludeGrid(v => !v)}
-        exportWidthPx={1280}
-        exportHeightPx={720}
+        exportWidthPx={exportResolution === '4k' ? 3840 : exportResolution === '2k' ? 2560 : 1920}
+        exportHeightPx={exportResolution === '4k' ? 2160 : exportResolution === '2k' ? 1440 : 1080}
+        exportResolution={exportResolution}
+        onSetExportResolution={setExportResolution}
       />
     </div>
   );
