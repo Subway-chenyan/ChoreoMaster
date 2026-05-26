@@ -1423,9 +1423,49 @@ const App: React.FC = () => {
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
-    const streamV = (canvas as any).captureStream ? (canvas as any).captureStream(0) : null;
-    if (!streamV) return;
-    const videoTrack = streamV.getVideoTracks()[0];
+
+    const totalMs = outPointMs - inPointMs;
+    const totalFrames = Math.ceil(totalMs / 1000 * fps);
+    const stepMs = 1000 / fps;
+
+    setIsExporting(true);
+    setExportProgress(0);
+
+    // Phase 1: Pre-render all frames to ImageBitmaps (fast, no I/O wait)
+    const tmpCanvas = document.createElement('canvas');
+    tmpCanvas.width = width;
+    tmpCanvas.height = height;
+    const frames: ImageBitmap[] = [];
+
+    // Pre-load prop textures
+    const texturePromises = performers
+      .filter(p => p.type === 'prop')
+      .map(async (p) => {
+        const texUrl = p.boxTextures?.front?.dataUrl || p.textureDataUrl;
+        if (!texUrl) return;
+        const img = new Image();
+        await new Promise<void>((resolve, reject) => {
+          img.onload = () => { (texUrl as any).loaded = img; resolve(); };
+          img.onerror = reject;
+          img.src = texUrl;
+        });
+      });
+    await Promise.all(texturePromises);
+
+    for (let i = 0; i <= totalFrames; i++) {
+      const t = inPointMs + i * stepMs;
+      renderFrameToCanvas(tmpCanvas, Math.min(t, outPointMs), { includeLabels: exportIncludeLabels, includeGrid: exportIncludeGrid });
+      frames.push(await createImageBitmap(tmpCanvas));
+      setExportProgress(Math.min(0.5, i / totalFrames * 0.5));
+      // Yield every 20 frames to keep UI responsive during pre-render
+      if (i % 20 === 0) {
+        await new Promise(r => setTimeout(r, 0));
+      }
+    }
+
+    // Phase 2: Play back pre-rendered frames at real-time speed into MediaRecorder
+    const streamV = (canvas as any).captureStream ? (canvas as any).captureStream(fps) : null;
+    if (!streamV) { setIsExporting(false); return; }
 
     const audioCtx = audioContextRef.current;
     let stream: MediaStream = streamV;
@@ -1441,59 +1481,40 @@ const App: React.FC = () => {
       source.connect(audioCtx.destination);
       stream = new MediaStream([...streamV.getVideoTracks(), ...dest.stream.getAudioTracks()]);
     }
+
     const mimeCandidates = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
     const mime = mimeCandidates.find(m => MediaRecorder.isTypeSupported(m)) || 'video/webm';
     const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 5000000 });
     const chunks: Blob[] = [];
     recorder.ondataavailable = (e: any) => { if (e.data && e.data.size > 0) chunks.push(e.data); };
 
-    const totalMs = outPointMs - inPointMs;
-    const totalFrames = Math.ceil(totalMs / 1000 * fps);
-    const stepMs = 1000 / fps;
-
-    setIsExporting(true);
-    setExportProgress(0);
-
-    // Pre-load prop textures for export
-    const texturePromises = performers
-      .filter(p => p.type === 'prop')
-      .map(async (p) => {
-        const texUrl = p.boxTextures?.front?.dataUrl || p.textureDataUrl;
-        if (!texUrl) return;
-        const img = new Image();
-        await new Promise<void>((resolve, reject) => {
-          img.onload = () => { (texUrl as any).loaded = img; resolve(); };
-          img.onerror = reject;
-          img.src = texUrl;
-        });
-      });
-    await Promise.all(texturePromises);
-
-    // Offline render loop: render all frames as fast as possible
     recorder.start(100);
     if (source) source.start(0, inPointMs / 1000);
 
-    for (let i = 0; i <= totalFrames; i++) {
-      const t = inPointMs + i * stepMs;
-      renderFrameToCanvas(canvas, Math.min(t, outPointMs), { includeLabels: exportIncludeLabels, includeGrid: exportIncludeGrid });
-      // Request the video track to capture the current canvas frame
-      if (videoTrack && (videoTrack as any).requestFrame) {
-        (videoTrack as any).requestFrame();
+    const recordStart = performance.now();
+    const drawFrame = () => {
+      const elapsed = performance.now() - recordStart;
+      const frameIdx = Math.min(Math.floor(elapsed / stepMs), frames.length - 1);
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(frames[frameIdx], 0, 0);
       }
-      setExportProgress(Math.min(1, i / totalFrames));
-      // Yield to browser every 10 frames so UI updates and MediaRecorder can process
-      if (i % 10 === 0) {
-        await new Promise(r => setTimeout(r, 0));
-      }
-    }
+      setExportProgress(0.5 + Math.min(0.5, (frameIdx / totalFrames) * 0.5));
 
-    recorder.stop();
-    if (source) { try { source.stop(); } catch { } }
+      if (elapsed < totalMs + stepMs) {
+        requestAnimationFrame(drawFrame);
+      } else {
+        recorder.stop();
+        if (source) { try { source.stop(); } catch { } }
+      }
+    };
+    requestAnimationFrame(drawFrame);
 
     const blob = await new Promise<Blob>(resolve => {
       recorder.onstop = () => {
         const b = new Blob(chunks, { type: mime });
         setIsExporting(false);
+        frames.forEach(f => f.close());
         resolve(b);
       };
     });
