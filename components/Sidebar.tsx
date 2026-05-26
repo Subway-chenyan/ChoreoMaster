@@ -55,6 +55,7 @@ interface SidebarProps {
     currentProjectId?: string | null;
     onLoadProject?: (projectId: string) => void;
     onCreateProject?: (name: string) => Promise<string>;
+    onCreateFromTemplate?: (templateData: any) => Promise<string>;
     onSaveProject?: () => void;
     projectHasChanges?: boolean;
 }
@@ -190,6 +191,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     currentProjectId,
     onLoadProject,
     onCreateProject,
+    onCreateFromTemplate,
     onSaveProject,
     projectHasChanges,
 }) => {
@@ -551,6 +553,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             currentProjectId={currentProjectId || null}
                             onLoadProject={onLoadProject || (() => {})}
                             onCreateProject={onCreateProject || (async () => '')}
+                            onCreateFromTemplate={onCreateFromTemplate}
                             onNewProject={onResetProject}
                         />
                         

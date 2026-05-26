@@ -1,0 +1,198 @@
+{
+  "$schema": "none",
+  "template": true,
+  "version": "2.0",
+  "name": "教学示例 — 队形变换",
+  "createdAt": "2026-05-26T00:00:00.000Z",
+  "updatedAt": "2026-05-26T00:00:00.000Z",
+  "musicName": null,
+  "performers": [
+    {
+      "id": "p1",
+      "name": "演员1",
+      "color": "#EF4444",
+      "label": "演",
+      "shape": "circle",
+      "type": "performer"
+    },
+    {
+      "id": "p2",
+      "name": "演员2",
+      "color": "#F59E0B",
+      "label": "演",
+      "shape": "circle",
+      "type": "performer"
+    },
+    {
+      "id": "p3",
+      "name": "演员3",
+      "color": "#22C55E",
+      "label": "演",
+      "shape": "circle",
+      "type": "performer"
+    },
+    {
+      "id": "p4",
+      "name": "演员4",
+      "color": "#3B82F6",
+      "label": "演",
+      "shape": "circle",
+      "type": "performer"
+    },
+    {
+      "id": "p5",
+      "name": "演员5",
+      "color": "#A855F7",
+      "label": "演",
+      "shape": "circle",
+      "type": "performer"
+    },
+    {
+      "id": "prop-door-1",
+      "name": "门板A",
+      "color": "#78716C",
+      "label": "门",
+      "shape": "square",
+      "type": "prop",
+      "width": 1.8,
+      "height": 2.5,
+      "depth": 0.15,
+      "rotation": 0
+    },
+    {
+      "id": "prop-door-2",
+      "name": "门板B",
+      "color": "#78716C",
+      "label": "门",
+      "shape": "square",
+      "type": "prop",
+      "width": 1.8,
+      "height": 2.5,
+      "depth": 0.15,
+      "rotation": 0
+    },
+    {
+      "id": "prop-door-3",
+      "name": "门板C",
+      "color": "#78716C",
+      "label": "门",
+      "shape": "square",
+      "type": "prop",
+      "width": 1.8,
+      "height": 2.5,
+      "depth": 0.15,
+      "rotation": 0
+    }
+  ],
+  "performerGroups": [
+    {
+      "id": "g-actors",
+      "name": "演员组",
+      "color": "#3B82F6",
+      "collapsed": false,
+      "type": "performer"
+    },
+    {
+      "id": "g-props",
+      "name": "道具组",
+      "color": "#78716C",
+      "collapsed": false,
+      "type": "prop"
+    }
+  ],
+  "frames": [
+    {
+      "id": "f1",
+      "name": "开场 — 一字排列",
+      "startTime": 0,
+      "duration": 3000,
+      "notes": "5名演员等距一字排开，3块门板排列在后方",
+      "positions": {
+        "p1": { "x": 20, "y": 50 },
+        "p2": { "x": 35, "y": 50 },
+        "p3": { "x": 50, "y": 50 },
+        "p4": { "x": 65, "y": 50 },
+        "p5": { "x": 80, "y": 50 },
+        "prop-door-1": { "x": 25, "y": 20 },
+        "prop-door-2": { "x": 50, "y": 20 },
+        "prop-door-3": { "x": 75, "y": 20 }
+      }
+    },
+    {
+      "id": "f2",
+      "name": "V字形展开",
+      "startTime": 3000,
+      "duration": 3000,
+      "notes": "演员从中间向两侧展开成V字，门板向中间聚拢",
+      "positions": {
+        "p1": { "x": 15, "y": 35 },
+        "p2": { "x": 30, "y": 42 },
+        "p3": { "x": 50, "y": 55 },
+        "p4": { "x": 70, "y": 42 },
+        "p5": { "x": 85, "y": 35 },
+        "prop-door-1": { "x": 40, "y": 22 },
+        "prop-door-2": { "x": 50, "y": 18 },
+        "prop-door-3": { "x": 60, "y": 22 }
+      }
+    },
+    {
+      "id": "f3",
+      "name": "门板前推 — 间隔站位",
+      "startTime": 6000,
+      "duration": 3000,
+      "notes": "门板移至舞台最前方，演员在门板后方散开",
+      "positions": {
+        "p1": { "x": 20, "y": 40 },
+        "p2": { "x": 35, "y": 35 },
+        "p3": { "x": 50, "y": 42 },
+        "p4": { "x": 65, "y": 35 },
+        "p5": { "x": 80, "y": 40 },
+        "prop-door-1": { "x": 25, "y": 85 },
+        "prop-door-2": { "x": 50, "y": 85 },
+        "prop-door-3": { "x": 75, "y": 85 }
+      }
+    },
+    {
+      "id": "f4",
+      "name": "圆形包围",
+      "startTime": 9000,
+      "duration": 3000,
+      "notes": "演员围成半圆，门板在后方一字排列形成背景",
+      "positions": {
+        "p1": { "x": 30, "y": 35 },
+        "p2": { "x": 42, "y": 55 },
+        "p3": { "x": 50, "y": 65 },
+        "p4": { "x": 58, "y": 55 },
+        "p5": { "x": 70, "y": 35 },
+        "prop-door-1": { "x": 25, "y": 15 },
+        "prop-door-2": { "x": 50, "y": 15 },
+        "prop-door-3": { "x": 75, "y": 15 }
+      }
+    },
+    {
+      "id": "f5",
+      "name": "收尾 — 聚拢",
+      "startTime": 12000,
+      "duration": 3000,
+      "notes": "全体向中心聚拢，演员在前门板在后",
+      "positions": {
+        "p1": { "x": 38, "y": 48 },
+        "p2": { "x": 45, "y": 52 },
+        "p3": { "x": 50, "y": 55 },
+        "p4": { "x": 55, "y": 52 },
+        "p5": { "x": 62, "y": 48 },
+        "prop-door-1": { "x": 35, "y": 30 },
+        "prop-door-2": { "x": 50, "y": 28 },
+        "prop-door-3": { "x": 65, "y": 30 }
+      }
+    }
+  ],
+  "stageConfig": {
+    "width": 20,
+    "depth": 11.25,
+    "ledHeight": 6,
+    "ledContent": {
+      "type": "none"
+    }
+  }
+}

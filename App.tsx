@@ -473,6 +473,50 @@ const App: React.FC = () => {
     }
   };
 
+  const handleCreateFromTemplate = async (templateData: any): Promise<string> => {
+    if (!window.electronAPI?.isElectron) return '';
+
+    // Auto-save current project before switching
+    if (currentProjectId && projectHasChanges) {
+      try {
+        const projectData = { version: '2.0', name: '', performers, performerGroups, frames, stageConfig, musicName };
+        await window.electronAPI.project.save(currentProjectId, projectData);
+      } catch (error) { /* ignore */ }
+    }
+
+    try {
+      const name = templateData.name || '教学示例';
+      const { id, path } = await window.electronAPI.project.create(name);
+
+      // Save template data into the new project
+      const saveData = { version: '2.0', name: '', performers: templateData.performers || [], performerGroups: templateData.performerGroups || [], frames: templateData.frames || [], stageConfig: templateData.stageConfig || stageConfig, musicName: null };
+      await window.electronAPI.project.save(id, saveData);
+
+      setCurrentProjectId(id);
+      setCurrentProjectPath(path);
+
+      // Load template data into state
+      setPerformers(saveData.performers);
+      setPerformerGroups(saveData.performerGroups);
+      setFrames(saveData.frames);
+      setStageConfig(saveData.stageConfig);
+      setCurrentFrameId(saveData.frames[0]?.id || '');
+      setMusicName(null);
+      setAudioBuffer(null);
+      setMusicUrl(null);
+      setCurrentTime(0);
+      setSelectedPerformerIds([]);
+
+      setLastSavedState(JSON.stringify({ performers: saveData.performers, performerGroups: saveData.performerGroups, frames: saveData.frames, stageConfig: saveData.stageConfig, musicName: null }));
+      setProjectHasChanges(false);
+
+      return id;
+    } catch (error) {
+      console.error('Failed to create from template:', error);
+      return '';
+    }
+  };
+
   // Load a project
   const handleLoadProject = async (projectId: string) => {
     if (!window.electronAPI?.isElectron) return;
@@ -1495,6 +1539,7 @@ const App: React.FC = () => {
             currentProjectId={currentProjectId}
             onLoadProject={handleLoadProject}
             onCreateProject={handleCreateProject}
+            onCreateFromTemplate={handleCreateFromTemplate}
             onSaveProject={handleSaveProject}
             projectHasChanges={projectHasChanges}
           />)}

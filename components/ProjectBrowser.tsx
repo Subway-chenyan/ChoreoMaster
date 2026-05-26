@@ -13,6 +13,7 @@ import {
   MoreVertical,
   Check,
   X,
+  GraduationCap,
 } from 'lucide-react';
 
 interface ProjectMeta {
@@ -28,6 +29,7 @@ interface ProjectBrowserProps {
   onLoadProject: (projectId: string) => void;
   onCreateProject: (name: string) => Promise<string>;
   onNewProject: () => void;
+  onCreateFromTemplate?: (templateData: any) => Promise<string>;
 }
 
 export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
@@ -35,6 +37,7 @@ export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
   onLoadProject,
   onCreateProject,
   onNewProject,
+  onCreateFromTemplate,
 }) => {
   const [projects, setProjects] = useState<ProjectMeta[]>([]);
   const [loading, setLoading] = useState(true);
@@ -143,6 +146,19 @@ export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
       await window.electronAPI.project.openStorageFolder();
     } catch (error) {
       console.error('Failed to open storage folder:', error);
+    }
+  };
+
+  const handleUseTemplate = async () => {
+    if (!onCreateFromTemplate) return;
+    try {
+      const resp = await fetch('/tutorial-project.json');
+      const templateData = await resp.json();
+      const projectId = await onCreateFromTemplate(templateData);
+      await loadProjects();
+      onLoadProject(projectId);
+    } catch (error) {
+      console.error('Failed to load template:', error);
     }
   };
 
@@ -264,6 +280,25 @@ export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
           <Plus size={16} />
           新建项目
         </button>
+      )}
+
+      {/* Template Section */}
+      {onCreateFromTemplate && (
+        <div className="mb-3">
+          <div className="text-xs text-slate-500 uppercase tracking-wider mb-2">快速开始</div>
+          <button
+            onClick={handleUseTemplate}
+            className="w-full flex items-center gap-3 p-3 rounded-lg border border-emerald-700/50 bg-emerald-900/20 hover:bg-emerald-900/40 transition-colors group"
+          >
+            <div className="p-2 rounded-lg bg-emerald-600/20 text-emerald-400 group-hover:bg-emerald-600/30 transition-colors">
+              <GraduationCap size={18} />
+            </div>
+            <div className="text-left flex-1 min-w-0">
+              <div className="text-sm font-medium text-emerald-300">教学示例</div>
+              <div className="text-[11px] text-slate-500 truncate">5名演员 + 3块门板道具，5个队形变换</div>
+            </div>
+          </button>
+        </div>
       )}
 
       {/* Projects List */}
