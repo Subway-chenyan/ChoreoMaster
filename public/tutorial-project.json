@@ -121,7 +121,7 @@
     {
       "id": "f2",
       "name": "V字形展开",
-      "startTime": 3000,
+      "startTime": 5000,
       "duration": 3000,
       "notes": "演员从中间向两侧展开成V字，门板向中间聚拢",
       "positions": {
@@ -138,7 +138,7 @@
     {
       "id": "f3",
       "name": "门板前推 — 间隔站位",
-      "startTime": 6000,
+      "startTime": 10000,
       "duration": 3000,
       "notes": "门板移至舞台最前方，演员在门板后方散开",
       "positions": {
@@ -155,7 +155,7 @@
     {
       "id": "f4",
       "name": "圆形包围",
-      "startTime": 9000,
+      "startTime": 15000,
       "duration": 3000,
       "notes": "演员围成半圆，门板在后方一字排列形成背景",
       "positions": {
@@ -172,7 +172,7 @@
     {
       "id": "f5",
       "name": "收尾 — 聚拢",
-      "startTime": 12000,
+      "startTime": 20000,
       "duration": 3000,
       "notes": "全体向中心聚拢，演员在前门板在后",
       "positions": {
