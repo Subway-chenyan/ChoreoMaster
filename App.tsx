@@ -6,7 +6,7 @@ import Stage3D from './components/Stage3D';
 import { Timeline } from './components/Timeline';
 import { HelpModal } from './components/HelpModal';
 import { useTheme } from './contexts/ThemeContext';
-import { DEFAULT_COLORS } from './constants';
+import { DEFAULT_COLORS, STAGE_ASPECT_RATIO } from './constants';
 import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, Maximize2, ChevronDown, ChevronUp } from 'lucide-react';
 import { StageConfig } from './types';
 
@@ -1285,75 +1285,123 @@ const App: React.FC = () => {
     const h = canvas.height;
     ctx.fillStyle = bgColor;
     ctx.fillRect(0, 0, w, h);
-    // Stage border to match editor
     ctx.strokeStyle = '#334155';
     ctx.lineWidth = 1;
     ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
 
     if (includeGrid) {
       const divisions = Math.round(4 * gridScale);
-      const alpha = 0.2;
       ctx.strokeStyle = '#94a3b8';
       ctx.lineWidth = 1;
-      ctx.globalAlpha = alpha;
+      ctx.globalAlpha = 0.2;
       for (let i = 0; i <= divisions; i++) {
-        const x = (i / divisions) * w;
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, h);
-        ctx.stroke();
-      }
-      for (let i = 0; i <= divisions; i++) {
-        const y = (i / divisions) * h;
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(w, y);
-        ctx.stroke();
+        const gx = (i / divisions) * w;
+        ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, h); ctx.stroke();
+        const gy = (i / divisions) * h;
+        ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(w, gy); ctx.stroke();
       }
       ctx.globalAlpha = 1;
     }
+
+    // Compute hidden groups at this time
+    const sortedFrames = [...frames].sort((a, b) => a.startTime - b.startTime);
+    const frame = sortedFrames.find(f => timeMs >= f.startTime && timeMs < f.startTime + f.duration)
+      || [...sortedFrames].reverse().find(f => f.startTime + f.duration <= timeMs);
+    const hiddenGroupIds = frame?.hiddenGroupIds || [];
+
     const positions = computePositionsAtTime(timeMs);
+    const stageW = stageConfig.width || 20;
+    const stageD = stageConfig.depth || stageW / STAGE_ASPECT_RATIO;
+
+    // Draw performers
     performers.forEach(p => {
+      if (p.groupId && hiddenGroupIds.includes(p.groupId)) return;
       const pos = positions[p.id];
       if (!pos) return;
-      const x = (pos.x / 100) * w;
-      const y = (pos.y / 100) * h;
-      ctx.fillStyle = p.color;
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 2;
-      const shapeSize = 32;
-      if (p.shape === 'circle') {
-        ctx.beginPath();
-        ctx.arc(x, y, Math.floor(shapeSize / 2 - 7), 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-      } else if (p.shape === 'square') {
-        const s = shapeSize;
-        ctx.fillRect(x - s / 2, y - s / 2, s, s);
-        ctx.strokeRect(x - s / 2, y - s / 2, s, s);
+      const cx = (pos.x / 100) * w;
+      const cy = (pos.y / 100) * h;
+
+      if (p.type === 'prop') {
+        // Prop rendering: size from width/depth in meters, rotation, texture, clipPath
+        const propW = (p.width || 1) / stageW * w;
+        const propD = (p.depth || 1) / stageD * h;
+        const rot = (p.rotation || 0) * Math.PI / 180;
+
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(-rot);
+
+        // Clip path for custom polygon props
+        if (p.polygonPoints && p.polygonPoints.length >= 3) {
+          ctx.beginPath();
+          p.polygonPoints.forEach((pt, i) => {
+            const px = (pt.x - 0.5) * propW;
+            const py = (pt.y - 0.5) * propD;
+            i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+          });
+          ctx.closePath();
+          ctx.clip();
+        }
+
+        // Texture or solid color
+        const texUrl = p.boxTextures?.front?.dataUrl || p.textureDataUrl;
+        if (texUrl && (texUrl as any).loaded) {
+          ctx.drawImage((texUrl as any), -propW / 2, -propD / 2, propW, propD);
+        } else {
+          ctx.fillStyle = p.color;
+          ctx.fillRect(-propW / 2, -propD / 2, propW, propD);
+        }
+
+        ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(-propW / 2, -propD / 2, propW, propD);
+
+        ctx.restore();
+
+        if (includeLabels) {
+          ctx.fillStyle = '#ffffff';
+          ctx.font = '9px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'top';
+          ctx.fillText(p.name, cx, cy + Math.max(propW, propD) / 2 + 2);
+        }
       } else {
-        const s = shapeSize + 6;
-        ctx.beginPath();
-        ctx.moveTo(x, y - s / 2);
-        ctx.lineTo(x + s / 2, y + s / 2);
-        ctx.lineTo(x - s / 2, y + s / 2);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-      }
-      if (includeLabels) {
-        ctx.fillStyle = '#ffffff';
-        ctx.font = `10px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'top';
-        ctx.fillText(p.name, x, y + Math.floor(shapeSize / 2));
+        // Performer rendering
+        ctx.fillStyle = p.color;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        const shapeSize = 32;
+        if (p.shape === 'circle') {
+          ctx.beginPath();
+          ctx.arc(cx, cy, Math.floor(shapeSize / 2 - 7), 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        } else if (p.shape === 'square') {
+          const s = shapeSize;
+          ctx.fillRect(cx - s / 2, cy - s / 2, s, s);
+          ctx.strokeRect(cx - s / 2, cy - s / 2, s, s);
+        } else {
+          const s = shapeSize + 6;
+          ctx.beginPath();
+          ctx.moveTo(cx, cy - s / 2);
+          ctx.lineTo(cx + s / 2, cy + s / 2);
+          ctx.lineTo(cx - s / 2, cy + s / 2);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+        }
+        if (includeLabels) {
+          ctx.fillStyle = '#ffffff';
+          ctx.font = '10px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'top';
+          ctx.fillText(p.name, cx, cy + Math.floor(shapeSize / 2));
+        }
       }
     });
 
-    // Stage front indicator to match editor
     ctx.fillStyle = 'rgba(100,116,139,0.5)';
-    const frontH = 8;
-    ctx.fillRect(0, h - frontH, w, frontH);
+    ctx.fillRect(0, h - 8, w, 8);
     ctx.fillStyle = '#ffffff';
     ctx.font = '10px sans-serif';
     ctx.textAlign = 'center';
@@ -1375,8 +1423,10 @@ const App: React.FC = () => {
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
-    const streamV = (canvas as any).captureStream ? (canvas as any).captureStream(fps) : null;
+    const streamV = (canvas as any).captureStream ? (canvas as any).captureStream(0) : null;
     if (!streamV) return;
+    const videoTrack = streamV.getVideoTracks()[0];
+
     const audioCtx = audioContextRef.current;
     let stream: MediaStream = streamV;
     let source: AudioBufferSourceNode | null = null;
@@ -1392,39 +1442,63 @@ const App: React.FC = () => {
       stream = new MediaStream([...streamV.getVideoTracks(), ...dest.stream.getAudioTracks()]);
     }
     const mimeCandidates = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
-    const mime = mimeCandidates.find(m => (window as any).MediaRecorder && (MediaRecorder as any).isTypeSupported && MediaRecorder.isTypeSupported(m)) || 'video/webm';
-    const recorder = new MediaRecorder(stream, { mimeType: mime });
+    const mime = mimeCandidates.find(m => MediaRecorder.isTypeSupported(m)) || 'video/webm';
+    const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 5000000 });
     const chunks: Blob[] = [];
     recorder.ondataavailable = (e: any) => { if (e.data && e.data.size > 0) chunks.push(e.data); };
+
     const totalMs = outPointMs - inPointMs;
-    let startTs = performance.now();
+    const totalFrames = Math.ceil(totalMs / 1000 * fps);
+    const stepMs = 1000 / fps;
+
     setIsExporting(true);
     setExportProgress(0);
-    recorder.start();
+
+    // Pre-load prop textures for export
+    const texturePromises = performers
+      .filter(p => p.type === 'prop')
+      .map(async (p) => {
+        const texUrl = p.boxTextures?.front?.dataUrl || p.textureDataUrl;
+        if (!texUrl) return;
+        const img = new Image();
+        await new Promise<void>((resolve, reject) => {
+          img.onload = () => { (texUrl as any).loaded = img; resolve(); };
+          img.onerror = reject;
+          img.src = texUrl;
+        });
+      });
+    await Promise.all(texturePromises);
+
+    // Offline render loop: render all frames as fast as possible
+    recorder.start(100);
     if (source) source.start(0, inPointMs / 1000);
-    const step = 1000 / fps;
-    const tick = () => {
-      const elapsed = performance.now() - startTs;
-      const t = inPointMs + elapsed;
-      renderFrameToCanvas(canvas, t, { includeLabels: exportIncludeLabels, includeGrid: exportIncludeGrid });
-      setExportProgress(Math.max(0, Math.min(1, elapsed / totalMs)));
-      if (elapsed < totalMs) {
-        setTimeout(tick, step);
-      } else {
-        recorder.stop();
-        if (source) { try { source.stop(); } catch { } }
+
+    for (let i = 0; i <= totalFrames; i++) {
+      const t = inPointMs + i * stepMs;
+      renderFrameToCanvas(canvas, Math.min(t, outPointMs), { includeLabels: exportIncludeLabels, includeGrid: exportIncludeGrid });
+      // Request the video track to capture the current canvas frame
+      if (videoTrack && (videoTrack as any).requestFrame) {
+        (videoTrack as any).requestFrame();
       }
-    };
-    tick();
-    const urlPromise = new Promise<string>(resolve => {
+      setExportProgress(Math.min(1, i / totalFrames));
+      // Yield to browser every 10 frames so UI updates and MediaRecorder can process
+      if (i % 10 === 0) {
+        await new Promise(r => setTimeout(r, 0));
+      }
+    }
+
+    recorder.stop();
+    if (source) { try { source.stop(); } catch { } }
+
+    const blob = await new Promise<Blob>(resolve => {
       recorder.onstop = () => {
-        const blob = new Blob(chunks, { type: mime });
-        const url = URL.createObjectURL(blob);
+        const b = new Blob(chunks, { type: mime });
         setIsExporting(false);
-        resolve(url);
+        resolve(b);
       };
     });
-    const url = await urlPromise;
+
+    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = `choreomaster-export-${Math.round(inPointMs)}-${Math.round(outPointMs)}.webm`;
