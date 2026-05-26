@@ -517,6 +517,25 @@ const App: React.FC = () => {
     }
   };
 
+  const handleLoadTemplate = (templateData: any) => {
+    const performers = templateData.performers || [];
+    const groups = templateData.performerGroups || [];
+    const frames = templateData.frames || [];
+    const config = templateData.stageConfig || stageConfig;
+
+    setPerformers(performers);
+    setPerformerGroups(groups);
+    setFrames(frames);
+    setStageConfig(config);
+    setCurrentFrameId(frames[0]?.id || '');
+    setMusicName(null);
+    setAudioBuffer(null);
+    setMusicUrl(null);
+    setCurrentTime(0);
+    setSelectedPerformerIds([]);
+    setProjectHasChanges(true);
+  };
+
   // Load a project
   const handleLoadProject = async (projectId: string) => {
     if (!window.electronAPI?.isElectron) return;
@@ -1540,6 +1559,7 @@ const App: React.FC = () => {
             onLoadProject={handleLoadProject}
             onCreateProject={handleCreateProject}
             onCreateFromTemplate={handleCreateFromTemplate}
+            onLoadTemplate={handleLoadTemplate}
             onSaveProject={handleSaveProject}
             projectHasChanges={projectHasChanges}
           />)}

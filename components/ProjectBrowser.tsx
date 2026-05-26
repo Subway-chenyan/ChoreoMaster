@@ -30,6 +30,7 @@ interface ProjectBrowserProps {
   onCreateProject: (name: string) => Promise<string>;
   onNewProject: () => void;
   onCreateFromTemplate?: (templateData: any) => Promise<string>;
+  onLoadTemplate?: (templateData: any) => void;
 }
 
 export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
@@ -38,6 +39,7 @@ export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
   onCreateProject,
   onNewProject,
   onCreateFromTemplate,
+  onLoadTemplate,
 }) => {
   const [projects, setProjects] = useState<ProjectMeta[]>([]);
   const [loading, setLoading] = useState(true);
@@ -150,13 +152,17 @@ export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
   };
 
   const handleUseTemplate = async () => {
-    if (!onCreateFromTemplate) return;
     try {
       const resp = await fetch('/tutorial-project.json');
       const templateData = await resp.json();
-      const projectId = await onCreateFromTemplate(templateData);
-      await loadProjects();
-      onLoadProject(projectId);
+
+      if (isElectron && onCreateFromTemplate) {
+        const projectId = await onCreateFromTemplate(templateData);
+        await loadProjects();
+        onLoadProject(projectId);
+      } else if (onLoadTemplate) {
+        onLoadTemplate(templateData);
+      }
     } catch (error) {
       console.error('Failed to load template:', error);
     }
@@ -194,9 +200,31 @@ export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
 
   if (!isElectron) {
     return (
-      <div className="text-center py-8 text-slate-500">
-        <FolderOpen size={32} className="mx-auto mb-2 opacity-50" />
-        <p className="text-sm">本地项目存储仅在桌面应用中可用</p>
+      <div className="h-full flex flex-col">
+        {onLoadTemplate && (
+          <div className="mb-3">
+            <div className="text-xs text-slate-500 uppercase tracking-wider mb-2">快速开始</div>
+            <button
+              onClick={handleUseTemplate}
+              className="w-full flex items-center gap-3 p-3 rounded-lg border border-emerald-700/50 bg-emerald-900/20 hover:bg-emerald-900/40 transition-colors group"
+            >
+              <div className="p-2 rounded-lg bg-emerald-600/20 text-emerald-400 group-hover:bg-emerald-600/30 transition-colors">
+                <GraduationCap size={18} />
+              </div>
+              <div className="text-left flex-1 min-w-0">
+                <div className="text-sm font-medium text-emerald-300">教学示例</div>
+                <div className="text-[11px] text-slate-500 truncate">5名演员 + 3块门板道具，5个队形变换</div>
+              </div>
+            </button>
+          </div>
+        )}
+        <div className="flex-1 flex items-center justify-center text-slate-500">
+          <div className="text-center">
+            <FolderOpen size={32} className="mx-auto mb-2 opacity-50" />
+            <p className="text-sm">本地项目存储仅在桌面应用中可用</p>
+            <p className="text-xs mt-1 text-slate-600">使用上方教学模板快速体验</p>
+          </div>
+        </div>
       </div>
     );
   }
@@ -283,7 +311,7 @@ export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
       )}
 
       {/* Template Section */}
-      {onCreateFromTemplate && (
+      {(onCreateFromTemplate || onLoadTemplate) && (
         <div className="mb-3">
           <div className="text-xs text-slate-500 uppercase tracking-wider mb-2">快速开始</div>
           <button
