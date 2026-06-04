@@ -118,8 +118,71 @@ export interface Entity {
     depth: number;
   };
 }
+export type AIChoreoTaskType = 'auto' | 'initialize_project' | 'create_entities' | 'generate_formation' | 'generate_motion_frames';
+
 export interface AIConfig {
-  apiKey: string;
-  baseUrl: string;
-  model: string;
+  backendUrl: string;
+  memberToken: string;
+}
+
+export interface AIProjectSnapshot {
+  performers: Performer[];
+  performerGroups: PerformerGroup[];
+  frames: Frame[];
+  stageConfig: StageConfig;
+}
+
+export interface AIChoreoRequest {
+  prompt: string;
+  taskType?: AIChoreoTaskType;
+  project: AIProjectSnapshot;
+  selectedPerformerIds: string[];
+  currentFrameId: string | null;
+  applyMode?: 'preview' | 'direct';
+}
+
+export interface AIGroupCreate {
+  tempId: string;
+  name: string;
+  color: string;
+  type?: 'performer' | 'prop';
+}
+
+export interface AIEntityCreate {
+  tempId: string;
+  type: 'performer' | 'prop';
+  name: string;
+  color: string;
+  label?: string;
+  shape?: PerformerShape;
+  groupTempId?: string;
+  width?: number;
+  height?: number;
+  depth?: number;
+  rotation?: number;
+  propGeometryType?: PropGeometryType;
+}
+
+export interface AIFrameCreate {
+  tempId: string;
+  name: string;
+  startTime: number;
+  duration: number;
+  positions: Record<string, Position>;
+  notes?: string;
+}
+
+export interface AIPositionUpdate {
+  frameId: string;
+  positions: Record<string, Position>;
+}
+
+export interface AIChoreoPlan {
+  intent: Exclude<AIChoreoTaskType, 'auto'>;
+  summary: string;
+  groupsToCreate: AIGroupCreate[];
+  entitiesToCreate: AIEntityCreate[];
+  framesToCreate: AIFrameCreate[];
+  positionUpdates: AIPositionUpdate[];
+  warnings: string[];
 }

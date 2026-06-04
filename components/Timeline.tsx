@@ -172,6 +172,19 @@ export const Timeline: React.FC<TimelineProps> = ({
         return `${min}:${sec.toString().padStart(2, '0')}.${dec}`;
     };
 
+    const hasInPoint = typeof inPointMs === 'number';
+    const hasOutPoint = typeof outPointMs === 'number';
+    const hasValidExportRange = hasInPoint && hasOutPoint && outPointMs! > inPointMs!;
+    const exportGuideText = !hasInPoint && !hasOutPoint
+        ? '先移动播放头到开始位置，点击“设为入点”；再移动到结束位置，点击“设为出点”。'
+        : !hasInPoint
+            ? '还缺入点：移动播放头到导出开始位置，然后点击“设为入点”。'
+            : !hasOutPoint
+                ? '还缺出点：移动播放头到导出结束位置，然后点击“设为出点”。'
+                : !hasValidExportRange
+                    ? '出点必须晚于入点：移动播放头到更靠后的位置，重新点击“设为出点”。'
+                    : '';
+
     const handleMouseDown = (e: React.MouseEvent) => {
         if (draggingState) return;
 
@@ -266,8 +279,20 @@ export const Timeline: React.FC<TimelineProps> = ({
                     </button>
                     <span className="font-mono text-slate-300 ml-4 text-sm">{formatTime(currentTime)}</span>
                     <span className="text-[10px] text-slate-500 ml-2">(空格键)</span>
-                    <button className="ml-3 text-[11px] px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300" onClick={onSetInPoint}>设为入点</button>
-                    <button className="text-[11px] px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300" onClick={onSetOutPoint}>设为出点</button>
+                    <button
+                        className={`ml-3 text-[11px] px-2 py-1 rounded border transition-colors ${!hasInPoint
+                            ? 'bg-blue-600/20 hover:bg-blue-600/30 border-blue-400 text-blue-100'
+                            : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300'
+                            }`}
+                        onClick={onSetInPoint}
+                    >设为入点</button>
+                    <button
+                        className={`text-[11px] px-2 py-1 rounded border transition-colors ${hasInPoint && (!hasOutPoint || !hasValidExportRange)
+                            ? 'bg-red-600/20 hover:bg-red-600/30 border-red-400 text-red-100'
+                            : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300'
+                            }`}
+                        onClick={onSetOutPoint}
+                    >设为出点</button>
                 </div>
                 <div className="flex items-center gap-4">
                     <button
@@ -307,9 +332,14 @@ export const Timeline: React.FC<TimelineProps> = ({
                         </span>
                     <button
                         onClick={onExportVideo}
-                        disabled={isExporting || !(typeof inPointMs === 'number' && typeof outPointMs === 'number' && outPointMs > inPointMs)}
-                        className={`text-xs px-3 py-1 rounded border ${isExporting ? 'bg-gray-500 text-white border-gray-500' : 'bg-green-600 hover:bg-green-500 text-white border-green-500'}`}
-                        title={isExporting ? '导出中...' : '导出视频'}
+                        disabled={isExporting}
+                        className={`text-xs px-3 py-1 rounded border ${isExporting
+                            ? 'bg-gray-500 text-white border-gray-500'
+                            : hasValidExportRange
+                                ? 'bg-green-600 hover:bg-green-500 text-white border-green-500'
+                                : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-amber-500'
+                            }`}
+                        title={isExporting ? '导出中...' : hasValidExportRange ? '导出视频' : '请先设置入点和出点'}
                     >{isExporting ? '导出中…' : '导出视频'}</button>
                     {isExporting && (
                         <div className="flex items-center gap-2 ml-2">
@@ -324,8 +354,20 @@ export const Timeline: React.FC<TimelineProps> = ({
                         </div>
                     )}
                 </div>
+                </div>
             </div>
-            </div>
+            {exportGuideText && !isExporting && (
+                <div className="min-h-8 flex items-center gap-2 px-4 bg-amber-950/40 border-b border-amber-900/60 text-[12px] text-amber-100">
+                    <span className="h-2 w-2 rounded-full bg-amber-400 flex-shrink-0" />
+                    <span>{exportGuideText}</span>
+                    {hasInPoint && (
+                        <span className="ml-auto font-mono text-amber-200">入点 {formatTime(inPointMs!)}</span>
+                    )}
+                    {hasOutPoint && (
+                        <span className="font-mono text-amber-200">出点 {formatTime(outPointMs!)}</span>
+                    )}
+                </div>
+            )}
 
             {/* Scrollable Timeline Area */}
             <div

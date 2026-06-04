@@ -1,9 +1,9 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { Performer, Frame, PerformerShape, PerformerGroup, PerformerType, AIConfig } from '../types';
+import { Performer, Frame, PerformerShape, PerformerGroup, PerformerType, AIConfig, AIChoreoPlan } from '../types';
 import { Plus, Users, Trash2, Download, Grid, Music, Sparkles, Wand2, Film, Copy, Search, Settings, Scaling, Upload, FilePlus, Circle, Square, Triangle, UserCheck, UserX, Eye, EyeOff, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreVertical, Palette, Edit2, Box, Library, Save } from 'lucide-react';
 import { PRESET_SHAPES, DEFAULT_COLORS } from '../constants';
-import { generateFormationCoordinates } from '../services/geminiService';
+import { createChoreoPlan } from '../services/choreoAgentService';
 import { StageConfig } from '../types';
 import { ProjectBrowser } from './ProjectBrowser';
 import { PropEditorModal } from './PropEditorModal';
@@ -19,6 +19,7 @@ interface SidebarProps {
     onTogglePerformerInFrame: (id: string) => void;
     onDuplicateSelected: () => void;
     onApplyPreset: (coords: { x: number, y: number }[]) => void;
+    onApplyAIPlan: (plan: AIChoreoPlan) => void;
     onImportMusic: (e: React.ChangeEvent<HTMLInputElement>) => void;
     onExport: () => void;
     onImportProject: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -157,6 +158,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     onTogglePerformerInFrame,
     onDuplicateSelected,
     onApplyPreset,
+    onApplyAIPlan,
     onImportMusic,
     onExport,
     onImportProject,
@@ -218,6 +220,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const [searchQuery, setSearchQuery] = useState('');
     const [aiPrompt, setAiPrompt] = useState('');
     const [isGenerating, setIsGenerating] = useState(false);
+    const [aiPlan, setAiPlan] = useState<AIChoreoPlan | null>(null);
+    const [aiError, setAiError] = useState<string | null>(null);
 
     // Group State
     const [showNewGroupForm, setShowNewGroupForm] = useState(false);
@@ -331,16 +335,38 @@ export const Sidebar: React.FC<SidebarProps> = ({
     };
 
     const handleAiGenerate = async () => {
-        if (!aiPrompt.trim() || selectedPerformerIds.length === 0) return;
+        if (!aiPrompt.trim()) return;
         setIsGenerating(true);
+        setAiError(null);
+        setAiPlan(null);
         try {
-            const coords = await generateFormationCoordinates(aiPrompt, selectedPerformerIds.length, aiConfig);
-            onApplyPreset(coords);
+            const plan = await createChoreoPlan({
+                prompt: aiPrompt,
+                taskType: 'auto',
+                project: {
+                    performers,
+                    performerGroups,
+                    frames,
+                    stageConfig: stageConfig || { width: 20, depth: 20 / (16 / 9) },
+                },
+                selectedPerformerIds,
+                currentFrameId,
+                applyMode: 'preview',
+            }, aiConfig);
+            setAiPlan(plan);
         } catch (e) {
             console.error(e);
+            setAiError(e instanceof Error ? e.message : 'AI generation failed.');
         } finally {
             setIsGenerating(false);
         }
+    };
+
+    const handleApplyGeneratedPlan = () => {
+        if (!aiPlan) return;
+        onApplyAIPlan(aiPlan);
+        setAiPlan(null);
+        setAiPrompt('');
     };
 
     // define filtered groups based on active tab
@@ -1117,33 +1143,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             </div>
                             <div className="space-y-3">
                                 <div className="space-y-1">
-                                    <label className="text-[10px] text-slate-500 uppercase">API Key</label>
+                                    <label className="text-[10px] text-slate-500 uppercase">Backend URL</label>
+                                    <input
+                                        type="text"
+                                        className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                                        placeholder="http://localhost:8000"
+                                        value={aiConfig.backendUrl}
+                                        onChange={(e) => onAiConfigChange({ ...aiConfig, backendUrl: e.target.value })}
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-[10px] text-slate-500 uppercase">Member Token</label>
                                     <input
                                         type="password"
                                         className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
-                                        placeholder="输入 Google AI API Key"
-                                        value={aiConfig.apiKey}
-                                        onChange={(e) => onAiConfigChange({ ...aiConfig, apiKey: e.target.value })}
-                                    />
-                                </div>
-                                <div className="space-y-1">
-                                    <label className="text-[10px] text-slate-500 uppercase">Base URL (可选代理)</label>
-                                    <input
-                                        type="text"
-                                        className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
-                                        placeholder="例如: https://proxy.com/"
-                                        value={aiConfig.baseUrl}
-                                        onChange={(e) => onAiConfigChange({ ...aiConfig, baseUrl: e.target.value })}
-                                    />
-                                </div>
-                                <div className="space-y-1">
-                                    <label className="text-[10px] text-slate-500 uppercase">模型 (默认为 gemini-3-flash-preview)</label>
-                                    <input
-                                        type="text"
-                                        className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
-                                        placeholder="gemini-3-flash-preview"
-                                        value={aiConfig.model}
-                                        onChange={(e) => onAiConfigChange({ ...aiConfig, model: e.target.value })}
+                                        placeholder="会员凭证"
+                                        value={aiConfig.memberToken}
+                                        onChange={(e) => onAiConfigChange({ ...aiConfig, memberToken: e.target.value })}
                                     />
                                 </div>
                             </div>
@@ -1166,8 +1182,46 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 disabled={isGenerating}
                                 className="w-full py-1.5 bg-purple-600 hover:bg-purple-500 rounded text-xs font-bold text-white flex items-center justify-center gap-2"
                             >
-                                <Wand2 size={12} /> {isGenerating ? '思考中...' : '生成'}
+                                <Wand2 size={12} /> {isGenerating ? '思考中...' : '生成计划'}
                             </button>
+                            {aiError && (
+                                <div className="mt-2 text-[11px] text-red-300 bg-red-950/40 border border-red-900 rounded p-2">
+                                    {aiError}
+                                </div>
+                            )}
+                            {aiPlan && (
+                                <div className="mt-3 bg-slate-950/70 border border-purple-500/30 rounded p-3 space-y-2">
+                                    <div className="text-xs text-slate-200 leading-relaxed">{aiPlan.summary}</div>
+                                    <div className="grid grid-cols-3 gap-2 text-[10px] text-slate-400">
+                                        <div className="bg-slate-900 rounded px-2 py-1">Groups: {aiPlan.groupsToCreate.length}</div>
+                                        <div className="bg-slate-900 rounded px-2 py-1">Items: {aiPlan.entitiesToCreate.length}</div>
+                                        <div className="bg-slate-900 rounded px-2 py-1">Frames: {aiPlan.framesToCreate.length}</div>
+                                    </div>
+                                    {aiPlan.warnings.length > 0 && (
+                                        <div className="space-y-1">
+                                            {aiPlan.warnings.map((warning, index) => (
+                                                <div key={index} className="text-[10px] text-amber-300 bg-amber-950/30 border border-amber-900/60 rounded px-2 py-1">
+                                                    {warning}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={handleApplyGeneratedPlan}
+                                            className="flex-1 py-1.5 bg-green-600 hover:bg-green-500 rounded text-xs font-bold text-white"
+                                        >
+                                            应用
+                                        </button>
+                                        <button
+                                            onClick={() => setAiPlan(null)}
+                                            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-xs text-slate-300"
+                                        >
+                                            取消
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         {/* Preset Size Slider */}

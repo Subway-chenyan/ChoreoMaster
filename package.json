@@ -6,11 +6,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:backend": "node scripts/run-backend-dev.cjs",
     "dev:electron": "concurrently \"vite\" \"tsc -p tsconfig.electron.json && wait-on http://localhost:5173 && electron .\"",
     "build": "vite build",
     "build:electron": "npm run build:main && npm run build && electron-builder --config electron-builder.config.cjs",
     "build:main": "tsc -p tsconfig.electron.json",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:backend": "node scripts/run-backend-pytest.cjs",
+    "test": "npm run test:backend && npm run build"
   },
   "dependencies": {
     "electron-is-dev": "^3.0.1",

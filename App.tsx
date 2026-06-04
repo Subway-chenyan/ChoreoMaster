@@ -1536,7 +1536,15 @@ const App: React.FC = () => {
 
   const handleExportVideo = async () => {
     if (inPointMs == null || outPointMs == null || outPointMs <= inPointMs) {
-      alert('请先设置有效的入点与出点（出点必须大于入点）。');
+      if (inPointMs == null && outPointMs == null) {
+        alert('请先设置导出范围。\n\n1. 将播放头移动到视频开始位置，点击“设为入点”。\n2. 将播放头移动到视频结束位置，点击“设为出点”。\n3. 再点击“导出视频”。');
+      } else if (inPointMs == null) {
+        alert('还没有设置入点。\n\n将播放头移动到导出开始位置，然后点击时间轴上的“设为入点”。');
+      } else if (outPointMs == null) {
+        alert('还没有设置出点。\n\n将播放头移动到导出结束位置，然后点击时间轴上的“设为出点”。');
+      } else {
+        alert('导出范围无效：出点必须晚于入点。\n\n请把播放头移动到更靠后的位置，重新点击“设为出点”。');
+      }
       return;
     }
     const width = exportResolution === '4k' ? 3840 : exportResolution === '2k' ? 2560 : 1920;
@@ -1545,6 +1553,35 @@ const App: React.FC = () => {
     const totalMs = outPointMs - inPointMs;
     const totalFrames = Math.ceil(totalMs / 1000 * fps);
     const stepMs = 1000 / fps;
+    const downloadBaseName = `choreomaster-export-${Math.round(inPointMs)}-${Math.round(outPointMs)}`;
+    const hasWebCodecs = typeof VideoEncoder !== 'undefined';
+    const showSaveFilePicker = (window as any).showSaveFilePicker as
+      | ((options?: any) => Promise<any>)
+      | undefined;
+    let mp4Writable: any = null;
+    let webmWritable: any = null;
+
+    if (showSaveFilePicker) {
+      try {
+        const handle = await showSaveFilePicker({
+          suggestedName: `${downloadBaseName}.${hasWebCodecs ? 'mp4' : 'webm'}`,
+          types: [{
+            description: hasWebCodecs ? 'MP4 video' : 'WebM video',
+            accept: hasWebCodecs
+              ? { 'video/mp4': ['.mp4'] }
+              : { 'video/webm': ['.webm'] },
+          }],
+        });
+        if (hasWebCodecs) {
+          mp4Writable = await handle.createWritable();
+        } else {
+          webmWritable = await handle.createWritable();
+        }
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        console.warn('Streaming file picker unavailable, falling back to in-memory download:', err);
+      }
+    }
 
     setIsExporting(true);
     setExportProgress(0);
@@ -1564,24 +1601,66 @@ const App: React.FC = () => {
       });
     await Promise.all(texturePromises);
 
-    // Check WebCodecs support
-    const hasWebCodecs = typeof VideoEncoder !== 'undefined';
-
     // Shared canvas for rendering (reused across both paths to avoid holding all frames in memory)
     const tmpCanvas = document.createElement('canvas');
     tmpCanvas.width = width;
     tmpCanvas.height = height;
 
+    const waitForEncoderQueueBelow = async (encoder: VideoEncoder | AudioEncoder, maxQueueSize: number) => {
+      while (encoder.encodeQueueSize > maxQueueSize) {
+        await new Promise<void>(resolve => {
+          let settled = false;
+          const cleanup = () => {
+            if (settled) return;
+            settled = true;
+            encoder.removeEventListener('dequeue', onDequeue);
+            clearTimeout(timeoutId);
+            resolve();
+          };
+          const onDequeue = () => cleanup();
+          const timeoutId = window.setTimeout(cleanup, 50);
+          encoder.addEventListener('dequeue', onDequeue, { once: true });
+        });
+      }
+    };
+
+    const createFrameFromCanvas = async (timestamp: number, duration: number) => {
+      try {
+        return new VideoFrame(tmpCanvas, { timestamp, duration });
+      } catch {
+        const bitmap = await createImageBitmap(tmpCanvas);
+        try {
+          return new VideoFrame(bitmap, { timestamp, duration });
+        } finally {
+          bitmap.close();
+        }
+      }
+    };
+
     if (hasWebCodecs) {
       // --- WebCodecs + mp4-muxer (fast, offline) ---
       try {
-        const { Muxer, ArrayBufferTarget } = await import('mp4-muxer');
+        const { Muxer, StreamTarget, FileSystemWritableFileStreamTarget } = await import('mp4-muxer');
 
         const hasAudio = audioBuffer != null && typeof AudioEncoder !== 'undefined';
         const sampleRate = audioBuffer?.sampleRate ?? 44100;
         const numChannels = audioBuffer?.numberOfChannels ?? 1;
+        const mp4Chunks: Uint8Array[] = [];
+        let mp4BytesWritten = 0;
 
-        const target = new ArrayBufferTarget();
+        const target = mp4Writable
+          ? new FileSystemWritableFileStreamTarget(mp4Writable, { chunkSize: 16 * 1024 * 1024 })
+          : new StreamTarget({
+            onData: (data: Uint8Array, position: number) => {
+              if (position !== mp4BytesWritten) {
+                throw new Error('MP4 stream wrote non-sequential data; cannot build download blob safely.');
+              }
+              mp4Chunks.push(data);
+              mp4BytesWritten += data.byteLength;
+            },
+            chunked: true,
+            chunkSize: 16 * 1024 * 1024,
+          });
         const muxer = new Muxer({
           target,
           video: { codec: 'avc', width, height },
@@ -1590,7 +1669,7 @@ const App: React.FC = () => {
             numberOfChannels: numChannels,
             sampleRate,
           } : undefined,
-          fastStart: 'in-memory',
+          fastStart: false,
           firstTimestampBehavior: 'offset',
         });
 
@@ -1611,14 +1690,10 @@ const App: React.FC = () => {
         for (let i = 0; i <= totalFrames; i++) {
           const t = inPointMs + i * stepMs;
           renderFrameToCanvas(tmpCanvas, Math.min(t, outPointMs), { includeLabels: exportIncludeLabels, includeGrid: exportIncludeGrid });
-          const bitmap = await createImageBitmap(tmpCanvas);
-          const frame = new VideoFrame(bitmap, {
-            timestamp: (i * 1_000_000) / fps,
-            duration: 1_000_000 / fps,
-          });
+          const frame = await createFrameFromCanvas((i * 1_000_000) / fps, 1_000_000 / fps);
           videoEncoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
           frame.close();
-          bitmap.close();
+          await waitForEncoderQueueBelow(videoEncoder, 8);
           setExportProgress((i / (totalFrames + 1)) * 0.7);
           if (i % 30 === 0) await new Promise(r => setTimeout(r, 0));
         }
@@ -1672,6 +1747,7 @@ const App: React.FC = () => {
             });
             audioEncoder.encode(audioData);
             audioData.close();
+            await waitForEncoderQueueBelow(audioEncoder, 32);
 
             if (base % 100 === 0) {
               setExportProgress(0.85 + (base / totalAudioChunks) * 0.1);
@@ -1685,21 +1761,28 @@ const App: React.FC = () => {
         }
 
         muxer.finalize();
-
-        const blob = new Blob([target.buffer], { type: 'video/mp4' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `choreomaster-export-${Math.round(inPointMs)}-${Math.round(outPointMs)}.mp4`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
+        if (mp4Writable) {
+          await mp4Writable.close();
+        } else {
+          const blob = new Blob(mp4Chunks, { type: 'video/mp4' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `${downloadBaseName}.mp4`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+        }
 
         setIsExporting(false);
         setExportProgress(1);
         return;
       } catch (err) {
+        if (mp4Writable) {
+          try { await mp4Writable.abort?.(); } catch { }
+          mp4Writable = null;
+        }
         console.error('WebCodecs export failed, falling back to MediaRecorder:', err);
         alert('高速导出失败，已回退到实时录制模式。\n错误: ' + (err instanceof Error ? err.message : String(err)));
       }
@@ -1707,7 +1790,13 @@ const App: React.FC = () => {
 
     // --- Fallback: MediaRecorder (real-time playback, render on-the-fly) ---
     const streamV = (tmpCanvas as any).captureStream ? (tmpCanvas as any).captureStream(fps) : null;
-    if (!streamV) { setIsExporting(false); return; }
+    if (!streamV) {
+      if (webmWritable) {
+        try { await webmWritable.abort?.(); } catch { }
+      }
+      setIsExporting(false);
+      return;
+    }
 
     const audioCtx = audioContextRef.current;
     let stream: MediaStream = streamV;
@@ -1728,7 +1817,15 @@ const App: React.FC = () => {
     const mime = mimeCandidates.find(m => MediaRecorder.isTypeSupported(m)) || 'video/webm';
     const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 5000000 });
     const chunks: Blob[] = [];
-    recorder.ondataavailable = (e: any) => { if (e.data && e.data.size > 0) chunks.push(e.data); };
+    let webmWriteChain = Promise.resolve();
+    recorder.ondataavailable = (e: any) => {
+      if (!e.data || e.data.size <= 0) return;
+      if (webmWritable) {
+        webmWriteChain = webmWriteChain.then(() => webmWritable.write(e.data));
+      } else {
+        chunks.push(e.data);
+      }
+    };
 
     recorder.start(100);
     if (source) source.start(0, inPointMs / 1000);
@@ -1750,23 +1847,46 @@ const App: React.FC = () => {
     };
     requestAnimationFrame(drawFrame);
 
-    const blob = await new Promise<Blob>(resolve => {
-      recorder.onstop = () => {
-        resolve(new Blob(chunks, { type: mime }));
-      };
-    });
+    let blob: Blob;
+    try {
+      blob = await new Promise<Blob>((resolve, reject) => {
+        recorder.onstop = () => {
+          webmWriteChain
+            .then(async () => {
+              if (webmWritable) {
+                await webmWritable.close();
+                resolve(new Blob([], { type: mime }));
+              } else {
+                resolve(new Blob(chunks, { type: mime }));
+              }
+            })
+            .catch(async err => {
+              if (webmWritable) {
+                try { await webmWritable.abort?.(); } catch { }
+              }
+              reject(err);
+            });
+        };
+      });
+    } catch (err) {
+      setIsExporting(false);
+      alert('实时录制导出失败：' + (err instanceof Error ? err.message : String(err)));
+      return;
+    }
 
     setIsExporting(false);
     setExportProgress(1);
 
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `choreomaster-export-${Math.round(inPointMs)}-${Math.round(outPointMs)}.webm`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    if (!webmWritable) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${downloadBaseName}.webm`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
   };
 
   const handleSelectFrame = (id: string) => {
