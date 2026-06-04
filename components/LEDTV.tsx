@@ -1,20 +1,36 @@
-import React, { useRef, useEffect, useState, useMemo } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
+import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { StageConfig } from '../types';
 
 interface LEDTVProps {
   config: StageConfig;
   mediaCache?: Record<string, string>;
+  currentTime?: number;
+  isPlaying?: boolean;
 }
 
-const LEDTV: React.FC<LEDTVProps> = ({ config, mediaCache = {} }) => {
+const LEDTV: React.FC<LEDTVProps> = ({ config, mediaCache = {}, currentTime = 0, isPlaying = false }) => {
   const meshRef = useRef<THREE.Mesh>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const videoTextureRef = useRef<THREE.VideoTexture | null>(null);
+  const desiredTimeRef = useRef(0);
+  const isPlayingRef = useRef(false);
   const [videoTexture, setVideoTexture] = useState<THREE.VideoTexture | null>(null);
+  const [imageTexture, setImageTexture] = useState<THREE.Texture | null>(null);
 
   const height = config.ledHeight || 6;
   const width = config.width;
   const depth = config.depth;
   const content = config.ledContent;
+
+  useEffect(() => {
+    desiredTimeRef.current = currentTime / 1000;
+  }, [currentTime]);
+
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
 
   // Configure texture to stretch to fill the LED screen
   const configureTexture = (texture: THREE.Texture) => {
@@ -24,6 +40,7 @@ const LEDTV: React.FC<LEDTVProps> = ({ config, mediaCache = {} }) => {
     texture.minFilter = THREE.LinearFilter;
     texture.magFilter = THREE.LinearFilter;
     texture.colorSpace = THREE.SRGBColorSpace;
+    texture.generateMipmaps = false;
     // Center the texture and repeat once (full stretch)
     texture.center.set(0.5, 0.5);
     texture.repeat.set(1, 1);
@@ -37,37 +54,124 @@ const LEDTV: React.FC<LEDTVProps> = ({ config, mediaCache = {} }) => {
       video.loop = content.loop ?? true;
       video.muted = true;
       video.playsInline = true;
-
-      const onLoadedData = () => { video.play().catch(console.error); };
-      video.addEventListener('loadeddata', onLoadedData);
+      video.preload = 'auto';
+      video.crossOrigin = 'anonymous';
 
       const texture = new THREE.VideoTexture(video);
       configureTexture(texture);
-      setVideoTexture(texture);
+      videoTextureRef.current = texture;
+
+      let textureAttached = false;
+      const attachVideoTexture = () => {
+        if (textureAttached) return;
+        textureAttached = true;
+        setVideoTexture(texture);
+      };
+      const syncVideoToTimeline = () => {
+        const desired = getTimelineVideoTime(video, desiredTimeRef.current, video.loop);
+        if (Number.isFinite(desired)) {
+          try { video.currentTime = desired; } catch { }
+        }
+        if (!isPlayingRef.current) video.pause();
+        texture.needsUpdate = true;
+      };
+      const refreshTexture = () => {
+        attachVideoTexture();
+        texture.needsUpdate = true;
+      };
+      video.addEventListener('loadedmetadata', syncVideoToTimeline);
+      video.addEventListener('loadeddata', syncVideoToTimeline);
+      video.addEventListener('seeked', refreshTexture);
+
+      videoRef.current = video;
+      video.load();
 
       return () => {
-        video.removeEventListener('loadeddata', onLoadedData);
+        video.removeEventListener('loadedmetadata', syncVideoToTimeline);
+        video.removeEventListener('loadeddata', syncVideoToTimeline);
+        video.removeEventListener('seeked', refreshTexture);
         video.pause();
+        video.removeAttribute('src');
+        video.load();
+        if (videoRef.current === video) videoRef.current = null;
+        if (videoTextureRef.current === texture) videoTextureRef.current = null;
+        setVideoTexture(current => current === texture ? null : current);
         texture.dispose();
       };
     } else {
+      if (videoRef.current) {
+        videoRef.current.pause();
+        videoRef.current = null;
+      }
+      videoTextureRef.current = null;
       setVideoTexture(null);
     }
   }, [content, mediaCache]);
 
-  const imageTexture = useMemo(() => {
-    if (content?.type === 'image' && content.value && mediaCache[content.value]) {
-      const loader = new THREE.TextureLoader();
-      try {
-        const texture = loader.load(mediaCache[content.value]);
-        configureTexture(texture);
-        return texture;
-      } catch (e) {
-        console.error('Failed to load image texture:', e);
-      }
+  useEffect(() => {
+    if (content?.type !== 'image' || !content.value || !mediaCache[content.value]) {
+      setImageTexture(null);
+      return;
     }
-    return null;
+
+    let texture: THREE.CanvasTexture | null = null;
+    const image = new Image();
+    image.onload = () => {
+      texture = new THREE.CanvasTexture(image);
+      configureTexture(texture);
+      texture.needsUpdate = true;
+      setImageTexture(texture);
+    };
+    image.onerror = error => {
+      console.error('Failed to load image texture:', error);
+    };
+    image.src = mediaCache[content.value];
+
+    return () => {
+      image.onload = null;
+      image.onerror = null;
+      setImageTexture(current => current === texture ? null : current);
+      texture?.dispose();
+    };
   }, [content, mediaCache]);
+
+  const getTimelineVideoTime = (video: HTMLVideoElement, timelineTimeSec: number, shouldLoop: boolean) => {
+    const duration = video.duration;
+    if (!Number.isFinite(duration) || duration <= 0) return Math.max(0, timelineTimeSec);
+    if (shouldLoop) return timelineTimeSec % duration;
+    return Math.min(Math.max(0, timelineTimeSec), Math.max(0, duration - 0.001));
+  };
+
+  useFrame(() => {
+    const video = videoRef.current;
+    if (!video || content?.type !== 'video') return;
+    if (video.readyState < HTMLMediaElement.HAVE_METADATA) return;
+
+    const desired = getTimelineVideoTime(video, desiredTimeRef.current, video.loop);
+    if (!Number.isFinite(desired)) return;
+
+    const drift = Math.abs(video.currentTime - desired);
+    if (!isPlayingRef.current) {
+      if (!video.paused) video.pause();
+      if (drift > 0.03) {
+        try { video.currentTime = desired; } catch { }
+        if (videoTextureRef.current) videoTextureRef.current.needsUpdate = true;
+      }
+      return;
+    }
+
+    if (drift > 0.08) {
+      try { video.currentTime = desired; } catch { }
+      if (videoTextureRef.current) videoTextureRef.current.needsUpdate = true;
+    }
+    if (video.paused) {
+      video.play().catch(() => {
+        if (Math.abs(video.currentTime - desired) > 0.03) {
+          try { video.currentTime = desired; } catch { }
+        }
+      });
+    }
+  });
 
   const getTexture = () => {
     if (content?.type === 'video') return videoTexture;
@@ -79,17 +183,19 @@ const LEDTV: React.FC<LEDTVProps> = ({ config, mediaCache = {} }) => {
     if (content?.type === 'color' && content.value) return content.value;
     return '#111111';
   };
+  const texture = getTexture();
+  const color = texture ? '#ffffff' : getColor();
+  const materialKey = `${content?.type || 'none'}-${content?.value || 'empty'}-${texture?.uuid || 'no-texture'}`;
 
   return (
     <mesh ref={meshRef} position={[0, height / 2, -depth / 2 - 0.1]} receiveShadow>
       <planeGeometry args={[width, height]} />
-      <meshStandardMaterial
-        map={getTexture() || undefined}
-        color={getColor()}
-        emissive={getTexture() ? '#ffffff' : '#222222'}
-        emissiveIntensity={getTexture() ? 1 : 0.3}
-        emissiveMap={getTexture() || undefined}
+      <meshBasicMaterial
+        key={materialKey}
+        map={texture || undefined}
+        color={color}
         side={THREE.DoubleSide}
+        toneMapped={false}
       />
     </mesh>
   );

@@ -392,18 +392,37 @@ const App: React.FC = () => {
 
     const url = URL.createObjectURL(file);
     const fileName = `led_${Date.now()}_${file.name}`;
+    const previousValue = stageConfig.ledContent?.value;
 
-    setMediaCache(prev => ({ ...prev, [fileName]: url }));
+    setMediaCache(prev => {
+      const next = { ...prev, [fileName]: url };
+      if (previousValue && next[previousValue]) {
+        URL.revokeObjectURL(next[previousValue]);
+        delete next[previousValue];
+      }
+      return next;
+    });
 
     const type = file.type.startsWith('video') ? 'video' : 'image';
     setStageConfig(prev => ({
       ...prev,
       ledContent: { type, value: fileName, loop: true }
     }));
+    e.target.value = '';
   };
 
   // 清除 LED 内容
   const handleClearLEDContent = () => {
+    const previousValue = stageConfig.ledContent?.value;
+    if (previousValue) {
+      setMediaCache(prev => {
+        if (!prev[previousValue]) return prev;
+        URL.revokeObjectURL(prev[previousValue]);
+        const next = { ...prev };
+        delete next[previousValue];
+        return next;
+      });
+    }
     setStageConfig(prev => ({
       ...prev,
       ledContent: { type: 'none' }
@@ -2090,6 +2109,8 @@ const App: React.FC = () => {
               onRemovePerformer={handleRemovePerformer}
               stageConfig={stageConfig}
               mediaCache={mediaCache}
+              currentTime={currentTime}
+              isPlaying={isPlaying}
               gridScale={gridScale}
               readonly={isPlaying}
             />

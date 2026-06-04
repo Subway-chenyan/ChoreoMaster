@@ -26,6 +26,8 @@ interface Scene3DProps {
   onSelect: (id: string) => void;
   stageConfig: StageConfig;
   mediaCache?: Record<string, string>;
+  currentTime?: number;
+  isPlaying?: boolean;
   hiddenGroupIds?: string[];
   gridScale?: number;
   onDragStart?: () => void;
@@ -64,6 +66,8 @@ const Scene3D: React.FC<Scene3DProps> = ({
   onSelect,
   stageConfig,
   mediaCache,
+  currentTime = 0,
+  isPlaying = false,
   hiddenGroupIds = [],
   gridScale = 1,
   onDragStart,
@@ -154,7 +158,12 @@ const Scene3D: React.FC<Scene3DProps> = ({
         enableRotate={!contextValue.isDragging && !contextValue.hasSelection}
         enablePan={!contextValue.isDragging}
       />
-      <LEDTV config={stageConfig} mediaCache={mediaCache} />
+      <LEDTV
+        config={stageConfig}
+        mediaCache={mediaCache}
+        currentTime={currentTime}
+        isPlaying={isPlaying}
+      />
       <StageFloor width={stageConfig.width} depth={stageConfig.depth} gridScale={gridScale} />
       {visiblePerformers.map(p => {
         const pos = positions[p.id]; if (!pos) return null;
