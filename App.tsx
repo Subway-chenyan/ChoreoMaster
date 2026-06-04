@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Frame, Performer, Position, PerformerShape, PerformerGroup, PerformerType, AIConfig } from './types';
+import { Frame, Performer, Position, PerformerShape, PerformerGroup, PerformerType, AIConfig, AIChoreoPlan } from './types';
 import { Sidebar } from './components/Sidebar';
 import { Stage } from './components/Stage';
 import Stage3D from './components/Stage3D';
@@ -75,10 +75,16 @@ const App: React.FC = () => {
   
   const [aiConfig, setAiConfig] = useState<AIConfig>(() => {
     const saved = localStorage.getItem('choreo-ai-config');
-    return saved ? JSON.parse(saved) : {
-      apiKey: '',
-      baseUrl: 'https://generativelanguage.googleapis.com/',
-      model: 'gemini-3-flash-preview'
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      return {
+        backendUrl: parsed.backendUrl || 'http://localhost:8000',
+        memberToken: parsed.memberToken || '',
+      };
+    }
+    return {
+      backendUrl: 'http://localhost:8000',
+      memberToken: ''
     };
   });
 
@@ -118,6 +124,19 @@ const App: React.FC = () => {
       return crypto.randomUUID();
     }
     return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+  };
+
+  const createGridPosition = (index: number, count: number): Position => {
+    const cols = Math.ceil(Math.sqrt(Math.max(count, 1)));
+    const rows = Math.ceil(count / cols);
+    const spreadX = Math.min(70, Math.max(20, cols * 12));
+    const spreadY = Math.min(70, Math.max(20, rows * 12));
+    const col = index % cols;
+    const row = Math.floor(index / cols);
+    return {
+      x: 50 - spreadX / 2 + (cols > 1 ? (spreadX / (cols - 1)) * col : spreadX / 2),
+      y: 50 - spreadY / 2 + (rows > 1 ? (spreadY / (rows - 1)) * row : spreadY / 2),
+    };
   };
 
   // Initialize Audio Context
@@ -739,6 +758,111 @@ const App: React.FC = () => {
       }
       return f;
     }));
+  };
+
+  const handleApplyAIPlan = (plan: AIChoreoPlan) => {
+    if (isPlaying) handlePlayPause();
+
+    const hasExistingContent = performers.length > 0 || performerGroups.length > 0 || frames.some(f => Object.keys(f.positions).length > 0);
+    const shouldOverwrite = plan.intent === 'initialize_project' && hasExistingContent
+      ? window.confirm('AI initialization found existing project content. Click OK to overwrite, or Cancel to append.')
+      : false;
+
+    const baseFrames: Frame[] = shouldOverwrite
+      ? [{ ...DEFAULT_FRAME, positions: {} }]
+      : JSON.parse(JSON.stringify(frames));
+    const basePerformers: Performer[] = shouldOverwrite ? [] : JSON.parse(JSON.stringify(performers));
+    const baseGroups: PerformerGroup[] = shouldOverwrite ? [] : JSON.parse(JSON.stringify(performerGroups));
+
+    const groupIdByTempId = new Map<string, string>();
+    const performerIdByTempId = new Map<string, string>();
+
+    const newGroups: PerformerGroup[] = plan.groupsToCreate.map(group => {
+      const id = generateId();
+      groupIdByTempId.set(group.tempId, id);
+      return {
+        id,
+        name: group.name,
+        color: group.color,
+        collapsed: false,
+        type: group.type || 'performer',
+      };
+    });
+
+    const newPerformers: Performer[] = plan.entitiesToCreate.map(entity => {
+      const id = generateId();
+      performerIdByTempId.set(entity.tempId, id);
+      return {
+        id,
+        name: entity.name,
+        color: entity.color,
+        label: entity.label || entity.name.charAt(0).toUpperCase(),
+        shape: entity.shape || (entity.type === 'prop' ? 'square' : 'circle'),
+        type: entity.type,
+        groupId: entity.groupTempId ? groupIdByTempId.get(entity.groupTempId) : undefined,
+        width: entity.width,
+        height: entity.height,
+        depth: entity.depth,
+        rotation: entity.rotation,
+        propGeometryType: entity.propGeometryType || (entity.type === 'prop' ? 'box' : undefined),
+      };
+    });
+
+    const allPerformers = [...basePerformers, ...newPerformers];
+    const allGroups = [...baseGroups, ...newGroups];
+    const framesWithEntities = baseFrames.map(frame => {
+      const positions = { ...frame.positions };
+      newPerformers.forEach((performer, index) => {
+        positions[performer.id] = createGridPosition(basePerformers.length + index, allPerformers.length);
+      });
+      return { ...frame, positions };
+    });
+
+    const remapPositions = (positions: Record<string, Position>) => {
+      const remapped: Record<string, Position> = {};
+      Object.entries(positions).forEach(([id, pos]) => {
+        remapped[performerIdByTempId.get(id) || id] = {
+          x: Math.max(2, Math.min(98, pos.x)),
+          y: Math.max(2, Math.min(98, pos.y)),
+          ...(pos.z !== undefined ? { z: pos.z } : {}),
+        };
+      });
+      return remapped;
+    };
+
+    const createdFrames: Frame[] = plan.framesToCreate.map(frame => ({
+      id: generateId(),
+      name: frame.name,
+      startTime: frame.startTime,
+      duration: frame.duration,
+      positions: remapPositions(frame.positions),
+      notes: frame.notes,
+    }));
+
+    let nextFrames = [...framesWithEntities, ...createdFrames];
+    plan.positionUpdates.forEach(update => {
+      nextFrames = nextFrames.map(frame => {
+        if (frame.id !== update.frameId) return frame;
+        return {
+          ...frame,
+          positions: {
+            ...frame.positions,
+            ...remapPositions(update.positions),
+          },
+        };
+      });
+    });
+    nextFrames.sort((a, b) => a.startTime - b.startTime);
+
+    setPerformerGroups(allGroups);
+    setPerformers(allPerformers);
+    setFrames(nextFrames);
+    if (shouldOverwrite) {
+      setCurrentFrameId(DEFAULT_FRAME.id);
+    } else if (createdFrames.length > 0) {
+      setCurrentFrameId(createdFrames[0].id);
+    }
+    setSelectedPerformerIds(newPerformers.map(p => p.id));
   };
 
   // --- Frame Management ---
@@ -1440,22 +1564,13 @@ const App: React.FC = () => {
       });
     await Promise.all(texturePromises);
 
-    // Phase 1: Pre-render all frames
+    // Check WebCodecs support
+    const hasWebCodecs = typeof VideoEncoder !== 'undefined';
+
+    // Shared canvas for rendering (reused across both paths to avoid holding all frames in memory)
     const tmpCanvas = document.createElement('canvas');
     tmpCanvas.width = width;
     tmpCanvas.height = height;
-    const bitmaps: ImageBitmap[] = [];
-
-    for (let i = 0; i <= totalFrames; i++) {
-      const t = inPointMs + i * stepMs;
-      renderFrameToCanvas(tmpCanvas, Math.min(t, outPointMs), { includeLabels: exportIncludeLabels, includeGrid: exportIncludeGrid });
-      bitmaps.push(await createImageBitmap(tmpCanvas));
-      setExportProgress(i / (totalFrames + 1) * 0.7);
-      if (i % 20 === 0) await new Promise(r => setTimeout(r, 0));
-    }
-
-    // Check WebCodecs support
-    const hasWebCodecs = typeof VideoEncoder !== 'undefined';
 
     if (hasWebCodecs) {
       // --- WebCodecs + mp4-muxer (fast, offline) ---
@@ -1479,7 +1594,7 @@ const App: React.FC = () => {
           firstTimestampBehavior: 'offset',
         });
 
-        // --- Step 1: Encode video ---
+        // --- Step 1: Render + Encode video (one frame at a time, no batch pre-render) ---
         const videoEncoder = new VideoEncoder({
           output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
           error: (e) => console.error('VideoEncoder error:', e),
@@ -1493,14 +1608,18 @@ const App: React.FC = () => {
           framerate: fps,
         });
 
-        for (let i = 0; i < bitmaps.length; i++) {
-          const frame = new VideoFrame(bitmaps[i], {
+        for (let i = 0; i <= totalFrames; i++) {
+          const t = inPointMs + i * stepMs;
+          renderFrameToCanvas(tmpCanvas, Math.min(t, outPointMs), { includeLabels: exportIncludeLabels, includeGrid: exportIncludeGrid });
+          const bitmap = await createImageBitmap(tmpCanvas);
+          const frame = new VideoFrame(bitmap, {
             timestamp: (i * 1_000_000) / fps,
             duration: 1_000_000 / fps,
           });
           videoEncoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
           frame.close();
-          setExportProgress(0.7 + (i / bitmaps.length) * 0.15);
+          bitmap.close();
+          setExportProgress((i / (totalFrames + 1)) * 0.7);
           if (i % 30 === 0) await new Promise(r => setTimeout(r, 0));
         }
 
@@ -1566,7 +1685,6 @@ const App: React.FC = () => {
         }
 
         muxer.finalize();
-        bitmaps.forEach(b => b.close());
 
         const blob = new Blob([target.buffer], { type: 'video/mp4' });
         const url = URL.createObjectURL(blob);
@@ -1587,12 +1705,8 @@ const App: React.FC = () => {
       }
     }
 
-    // --- Fallback: MediaRecorder (real-time playback) ---
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-
-    const streamV = (canvas as any).captureStream ? (canvas as any).captureStream(fps) : null;
+    // --- Fallback: MediaRecorder (real-time playback, render on-the-fly) ---
+    const streamV = (tmpCanvas as any).captureStream ? (tmpCanvas as any).captureStream(fps) : null;
     if (!streamV) { setIsExporting(false); return; }
 
     const audioCtx = audioContextRef.current;
@@ -1622,10 +1736,10 @@ const App: React.FC = () => {
     const recordStart = performance.now();
     const drawFrame = () => {
       const elapsed = performance.now() - recordStart;
-      const frameIdx = Math.min(Math.floor(elapsed / stepMs), bitmaps.length - 1);
-      const ctx = canvas.getContext('2d');
-      if (ctx) ctx.drawImage(bitmaps[frameIdx], 0, 0);
-      setExportProgress(0.7 + Math.min(0.3, (frameIdx / totalFrames) * 0.3));
+      const currentFrameIdx = Math.min(Math.floor(elapsed / stepMs), totalFrames);
+      const t = Math.min(inPointMs + currentFrameIdx * stepMs, outPointMs);
+      renderFrameToCanvas(tmpCanvas, t, { includeLabels: exportIncludeLabels, includeGrid: exportIncludeGrid });
+      setExportProgress(0.7 + Math.min(0.3, (currentFrameIdx / totalFrames) * 0.3));
 
       if (elapsed < totalMs + stepMs) {
         requestAnimationFrame(drawFrame);
@@ -1642,7 +1756,6 @@ const App: React.FC = () => {
       };
     });
 
-    bitmaps.forEach(b => b.close());
     setIsExporting(false);
     setExportProgress(1);
 
@@ -1745,6 +1858,7 @@ const App: React.FC = () => {
             onTogglePerformerInFrame={handleTogglePerformerInFrame}
             onDuplicateSelected={handleDuplicateSelected}
             onApplyPreset={handleApplyPreset}
+            onApplyAIPlan={handleApplyAIPlan}
             onImportMusic={handleImportMusic}
             onExport={handleExportProject}
             onImportProject={handleImportProject}
