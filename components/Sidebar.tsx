@@ -3,10 +3,11 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Performer, Frame, PerformerShape, PerformerGroup, PerformerType, AIConfig, AIChoreoPlan } from '../types';
 import { Plus, Users, Trash2, Download, Grid, Music, Sparkles, Wand2, Film, Copy, Search, Settings, Scaling, Upload, FilePlus, Circle, Square, Triangle, UserCheck, UserX, Eye, EyeOff, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreVertical, Palette, Edit2, Box, Library, Save } from 'lucide-react';
 import { PRESET_SHAPES, DEFAULT_COLORS } from '../constants';
-import { createChoreoPlan } from '../services/choreoAgentService';
 import { StageConfig } from '../types';
 import { ProjectBrowser } from './ProjectBrowser';
 import { PropEditorModal } from './PropEditorModal';
+import { ChoreoAgentModal } from './ChoreoAgentModal';
+import { validateAgentAccess } from '../services/choreoAgentService';
 
 interface SidebarProps {
     performers: Performer[];
@@ -218,10 +219,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const [presetScale, setPresetScale] = useState(0.8); // Default 80% size to be safe
 
     const [searchQuery, setSearchQuery] = useState('');
-    const [aiPrompt, setAiPrompt] = useState('');
-    const [isGenerating, setIsGenerating] = useState(false);
-    const [aiPlan, setAiPlan] = useState<AIChoreoPlan | null>(null);
-    const [aiError, setAiError] = useState<string | null>(null);
+    const [choreoAgentOpen, setChoreoAgentOpen] = useState(false);
+    const [agentAccessError, setAgentAccessError] = useState<string | null>(null);
+    const [isValidatingAgentAccess, setIsValidatingAgentAccess] = useState(false);
 
     // Group State
     const [showNewGroupForm, setShowNewGroupForm] = useState(false);
@@ -322,6 +322,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
         }
     };
 
+    const handleOpenChoreoAgent = async () => {
+        if (!aiConfig.memberToken.trim()) {
+            setAgentAccessError('请输入管理员发放的 Agent 访问 Key。');
+            return;
+        }
+        setIsValidatingAgentAccess(true);
+        setAgentAccessError(null);
+        try {
+            await validateAgentAccess(aiConfig);
+            setChoreoAgentOpen(true);
+        } catch (error) {
+            setAgentAccessError(error instanceof Error ? error.message : 'Agent 访问 Key 校验失败。');
+        } finally {
+            setIsValidatingAgentAccess(false);
+        }
+    };
+
     const handlePerformerClick = (e: React.MouseEvent, id: string) => {
         if (e.ctrlKey || e.metaKey) {
             if (selectedPerformerIds.includes(id)) {
@@ -332,41 +349,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         } else {
             onSelectionChange([id]);
         }
-    };
-
-    const handleAiGenerate = async () => {
-        if (!aiPrompt.trim()) return;
-        setIsGenerating(true);
-        setAiError(null);
-        setAiPlan(null);
-        try {
-            const plan = await createChoreoPlan({
-                prompt: aiPrompt,
-                taskType: 'auto',
-                project: {
-                    performers,
-                    performerGroups,
-                    frames,
-                    stageConfig: stageConfig || { width: 20, depth: 20 / (16 / 9) },
-                },
-                selectedPerformerIds,
-                currentFrameId,
-                applyMode: 'preview',
-            }, aiConfig);
-            setAiPlan(plan);
-        } catch (e) {
-            console.error(e);
-            setAiError(e instanceof Error ? e.message : 'AI generation failed.');
-        } finally {
-            setIsGenerating(false);
-        }
-    };
-
-    const handleApplyGeneratedPlan = () => {
-        if (!aiPlan) return;
-        onApplyAIPlan(aiPlan);
-        setAiPlan(null);
-        setAiPrompt('');
     };
 
     // define filtered groups based on active tab
@@ -720,7 +702,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                         setEditingFrameId(f.id);
                                         setEditingFrameName(f.name);
                                     }}
-                                    className={`group relative flex gap-3 p-2 rounded-lg border transition-all cursor-pointer ${f.id === currentFrameId ? 'bg-slate-800 border-blue-500 shadow-md' : 'bg-slate-900 border-slate-800 hover:bg-slate-800'}`}
+                                    className={`group relative flex gap-3 p-2 rounded-lg border transition-all cursor-pointer ${f.id === currentFrameId && selectedPerformerIds.length === 0 ? 'bg-slate-800 border-blue-500 shadow-md' : 'bg-slate-900 border-slate-800 hover:bg-slate-800'}`}
                                 >
                                     {/* Thumbnail */}
                                     <div className="w-16 h-12 shrink-0">
@@ -729,7 +711,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
                                     {/* Info */}
                                     <div className="flex-1 min-w-0 flex flex-col justify-center">
-                                        <div className={`text-sm font-medium truncate ${f.id === currentFrameId ? 'text-blue-400' : 'text-slate-300'}`}>
+                                        <div className={`text-sm font-medium truncate ${f.id === currentFrameId && selectedPerformerIds.length === 0 ? 'text-blue-400' : 'text-slate-300'}`}>
                                             {editingFrameId === f.id ? (
                                                 <input
                                                     autoFocus
@@ -749,7 +731,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                                             setEditingFrameId(null);
                                                         }
                                                     }}
-                                                    className={`w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs ${f.id === currentFrameId ? 'text-blue-400' : 'text-slate-300'}`}
+                                                    className={`w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs ${f.id === currentFrameId && selectedPerformerIds.length === 0 ? 'text-blue-400' : 'text-slate-300'}`}
                                                 />
                                             ) : (
                                                 f.name
@@ -1143,83 +1125,45 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             </div>
                             <div className="space-y-3">
                                 <div className="space-y-1">
-                                    <label className="text-[10px] text-slate-500 uppercase">Backend URL</label>
-                                    <input
-                                        type="text"
-                                        className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
-                                        placeholder="http://localhost:8000"
-                                        value={aiConfig.backendUrl}
-                                        onChange={(e) => onAiConfigChange({ ...aiConfig, backendUrl: e.target.value })}
-                                    />
-                                </div>
-                                <div className="space-y-1">
-                                    <label className="text-[10px] text-slate-500 uppercase">Member Token</label>
+                                    <label className="text-[10px] text-slate-500 uppercase">Agent 访问 Key</label>
                                     <input
                                         type="password"
                                         className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
-                                        placeholder="会员凭证"
+                                        placeholder="请输入管理员发放的 Key"
                                         value={aiConfig.memberToken}
-                                        onChange={(e) => onAiConfigChange({ ...aiConfig, memberToken: e.target.value })}
+                                        onChange={(e) => {
+                                            setAgentAccessError(null);
+                                            onAiConfigChange({ ...aiConfig, memberToken: e.target.value });
+                                        }}
                                     />
+                                    <p className="text-[10px] leading-4 text-slate-600">访问地址由应用统一管理，无需手动配置。</p>
                                 </div>
                             </div>
                         </div>
 
-                        {/* AI Box */}
-                        <div className="bg-gradient-to-r from-slate-800 to-slate-900 p-4 rounded-lg border border-slate-700/50">
-                            <div className="flex items-center gap-2 mb-2 text-purple-400">
-                                <Sparkles size={14} />
-                                <span className="text-xs font-bold uppercase">AI 编舞</span>
-                            </div>
-                            <textarea
-                                className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-xs text-white mb-2 focus:outline-none focus:border-purple-500 resize-none h-16"
-                                placeholder="例如：“飞行楔形队形”"
-                                value={aiPrompt}
-                                onChange={(e) => setAiPrompt(e.target.value)}
-                            />
-                            <button
-                                onClick={handleAiGenerate}
-                                disabled={isGenerating}
-                                className="w-full py-1.5 bg-purple-600 hover:bg-purple-500 rounded text-xs font-bold text-white flex items-center justify-center gap-2"
-                            >
-                                <Wand2 size={12} /> {isGenerating ? '思考中...' : '生成计划'}
-                            </button>
-                            {aiError && (
-                                <div className="mt-2 text-[11px] text-red-300 bg-red-950/40 border border-red-900 rounded p-2">
-                                    {aiError}
+                        {/* Multimodal Agent */}
+                        <div className="rounded-lg border border-cyan-500/20 bg-slate-900 p-4">
+                            <div className="mb-3 flex items-start gap-3">
+                                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-cyan-500/10 text-cyan-400">
+                                    <Sparkles size={15} />
                                 </div>
-                            )}
-                            {aiPlan && (
-                                <div className="mt-3 bg-slate-950/70 border border-purple-500/30 rounded p-3 space-y-2">
-                                    <div className="text-xs text-slate-200 leading-relaxed">{aiPlan.summary}</div>
-                                    <div className="grid grid-cols-3 gap-2 text-[10px] text-slate-400">
-                                        <div className="bg-slate-900 rounded px-2 py-1">Groups: {aiPlan.groupsToCreate.length}</div>
-                                        <div className="bg-slate-900 rounded px-2 py-1">Items: {aiPlan.entitiesToCreate.length}</div>
-                                        <div className="bg-slate-900 rounded px-2 py-1">Frames: {aiPlan.framesToCreate.length}</div>
-                                    </div>
-                                    {aiPlan.warnings.length > 0 && (
-                                        <div className="space-y-1">
-                                            {aiPlan.warnings.map((warning, index) => (
-                                                <div key={index} className="text-[10px] text-amber-300 bg-amber-950/30 border border-amber-900/60 rounded px-2 py-1">
-                                                    {warning}
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                    <div className="flex gap-2">
-                                        <button
-                                            onClick={handleApplyGeneratedPlan}
-                                            className="flex-1 py-1.5 bg-green-600 hover:bg-green-500 rounded text-xs font-bold text-white"
-                                        >
-                                            应用
-                                        </button>
-                                        <button
-                                            onClick={() => setAiPlan(null)}
-                                            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-xs text-slate-300"
-                                        >
-                                            取消
-                                        </button>
-                                    </div>
+                                <div>
+                                    <div className="text-xs font-bold text-slate-200">智能队形编排 Agent</div>
+                                    <p className="mt-1 text-[11px] leading-5 text-slate-500">
+                                        结合音乐、队形草图和你的创作要求，分阶段完成队形设计。
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={handleOpenChoreoAgent}
+                                disabled={isValidatingAgentAccess}
+                                className="flex w-full items-center justify-center gap-2 rounded-md bg-cyan-500 py-2 text-xs font-bold text-slate-950 transition-colors hover:bg-cyan-400 disabled:cursor-wait disabled:opacity-60"
+                            >
+                                <Wand2 size={13} /> {isValidatingAgentAccess ? '正在校验 Key...' : '打开编舞 Agent'}
+                            </button>
+                            {agentAccessError && (
+                                <div className="mt-2 rounded border border-red-900/60 bg-red-950/30 px-2.5 py-2 text-[11px] leading-5 text-red-300">
+                                    {agentAccessError}
                                 </div>
                             )}
                         </div>
@@ -1281,6 +1225,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         ))}
                     </div>
                 )}
+                <ChoreoAgentModal
+                    isOpen={choreoAgentOpen}
+                    aiConfig={aiConfig}
+                    onClose={() => setChoreoAgentOpen(false)}
+                    onApplyPlan={onApplyAIPlan}
+                />
             </div>
 
             {/* Custom Color Picker Modal */}

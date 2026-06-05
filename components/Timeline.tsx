@@ -172,6 +172,13 @@ export const Timeline: React.FC<TimelineProps> = ({
         return `${min}:${sec.toString().padStart(2, '0')}.${dec}`;
     };
 
+    const rulerIntervalSeconds = useMemo(() => {
+        const minimumLabelSpacing = 56;
+        const candidates = [1, 2, 5, 10, 15, 30, 60, 120, 300];
+        return candidates.find((seconds) => seconds * zoom >= minimumLabelSpacing)
+            || candidates[candidates.length - 1];
+    }, [zoom]);
+
     const hasInPoint = typeof inPointMs === 'number';
     const hasOutPoint = typeof outPointMs === 'number';
     const hasValidExportRange = hasInPoint && hasOutPoint && outPointMs! > inPointMs!;
@@ -387,9 +394,9 @@ export const Timeline: React.FC<TimelineProps> = ({
 
                     {/* Ruler */}
                     <div className="h-6 bg-slate-900/80 border-b border-slate-800 relative text-[10px] text-slate-500 z-10 pointer-events-none">
-                        {Array.from({ length: Math.ceil(duration / 1000) + 1 }).map((_, i) => (
-                            <div key={i} className="absolute top-0 bottom-0 border-l border-slate-700 pl-1 select-none" style={{ left: i * zoom }}>
-                                {formatTime(i * 1000)}
+                        {Array.from({ length: Math.ceil(duration / 1000 / rulerIntervalSeconds) + 1 }).map((_, i) => (
+                            <div key={i} className="absolute top-0 bottom-0 border-l border-slate-700 pl-1 select-none whitespace-nowrap" style={{ left: i * rulerIntervalSeconds * zoom }}>
+                                {formatTime(i * rulerIntervalSeconds * 1000)}
                             </div>
                         ))}
                     </div>

@@ -78,13 +78,13 @@ const App: React.FC = () => {
     if (saved) {
       const parsed = JSON.parse(saved);
       return {
-        backendUrl: parsed.backendUrl || 'http://localhost:8000',
-        memberToken: parsed.memberToken || '',
+        backendUrl: parsed.backendUrl || import.meta.env.VITE_AI_BACKEND_URL || 'http://localhost:8000',
+        memberToken: parsed.memberToken || import.meta.env.VITE_MEMBER_TOKEN || '',
       };
     }
     return {
-      backendUrl: 'http://localhost:8000',
-      memberToken: ''
+      backendUrl: import.meta.env.VITE_AI_BACKEND_URL || 'http://localhost:8000',
+      memberToken: import.meta.env.VITE_MEMBER_TOKEN || ''
     };
   });
 
@@ -819,9 +819,9 @@ const App: React.FC = () => {
         shape: entity.shape || (entity.type === 'prop' ? 'square' : 'circle'),
         type: entity.type,
         groupId: entity.groupTempId ? groupIdByTempId.get(entity.groupTempId) : undefined,
-        width: entity.width,
-        height: entity.height,
-        depth: entity.depth,
+        width: entity.type === 'prop' ? (entity.width ?? 1) : entity.width,
+        height: entity.type === 'prop' ? (entity.height ?? 2) : entity.height,
+        depth: entity.type === 'prop' ? (entity.depth ?? 0.3) : entity.depth,
         rotation: entity.rotation,
         propGeometryType: entity.propGeometryType || (entity.type === 'prop' ? 'box' : undefined),
       };
@@ -1237,6 +1237,16 @@ const App: React.FC = () => {
     pastePerformers(items);
   };
 
+  const getPlaybackEndMs = useCallback(() => {
+    const lastFrameEnd = frames.reduce(
+      (maximum, frame) => Math.max(maximum, frame.startTime + frame.duration),
+      0,
+    );
+    const visualTimelineEnd = Math.max(lastFrameEnd + 10000, 30000);
+    const audioEnd = audioBuffer ? audioBuffer.duration * 1000 : 0;
+    return Math.max(visualTimelineEnd, audioEnd);
+  }, [frames, audioBuffer]);
+
   // Keyboard Shortcuts
   const handlePlayPause = useCallback(() => {
     if (isPlaying) {
@@ -1245,6 +1255,9 @@ const App: React.FC = () => {
       stopAudio();
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     } else {
+      const playbackEnd = getPlaybackEndMs();
+      const restartTime = currentTime >= playbackEnd - 50 ? 0 : currentTime;
+
       // Play
       if (audioContextRef.current?.state === 'suspended') {
         audioContextRef.current.resume();
@@ -1254,8 +1267,11 @@ const App: React.FC = () => {
       isPlayingRef.current = true; // Force Ref True immediately for loop
 
       // Important: Start from CURRENT Time
-      startTimeRef.current = performance.now() - currentTime;
-      playAudio(currentTime);
+      if (restartTime !== currentTime) {
+        setCurrentTime(restartTime);
+      }
+      startTimeRef.current = performance.now() - restartTime;
+      playAudio(restartTime);
 
       const loop = () => {
         // Critical: Check ref, not state variable which is stale in closure
@@ -1264,16 +1280,12 @@ const App: React.FC = () => {
         const now = performance.now();
         let newTime = now - startTimeRef.current;
 
-        // Auto-stop at end
-        if (frames.length > 0) {
-          const lastFrame = frames[frames.length - 1];
-          const end = lastFrame.startTime + lastFrame.duration + 2000; // stop 2s after last frame
-          if (newTime > end && end > 10000) {
-            newTime = end;
-            setIsPlaying(false);
-            stopAudio();
-            return; // Stop animation
-          }
+        if (newTime >= playbackEnd) {
+          setCurrentTime(playbackEnd);
+          setIsPlaying(false);
+          isPlayingRef.current = false;
+          stopAudio();
+          return;
         }
 
         rafRef.current = requestAnimationFrame(loop);
@@ -1281,7 +1293,7 @@ const App: React.FC = () => {
       };
       rafRef.current = requestAnimationFrame(loop);
     }
-  }, [isPlaying, currentTime, frames]);
+  }, [isPlaying, currentTime, getPlaybackEndMs]);
 
   // Separate effect for spacebar to ensure latest handlePlayPause closure is used
   useEffect(() => {
@@ -1313,12 +1325,13 @@ const App: React.FC = () => {
         if (selectedPerformerIds.length > 0) {
           e.preventDefault();
           copyPerformersToClipboard();
-        }
-        // Copy selected frame
-        if (currentFrameId) {
+          setFrameClipboard(null);
+        } else if (currentFrameId) {
+          // Copy the current frame only when no performer is selected.
           const f = frames.find(fr => fr.id === currentFrameId);
           if (f) {
             e.preventDefault();
+            setClipboard([]);
             setFrameClipboard(JSON.parse(JSON.stringify(f)));
           }
         }
@@ -1328,9 +1341,8 @@ const App: React.FC = () => {
         if (clipboard.length > 0) {
           e.preventDefault();
           pastePerformers();
-        }
-        // Paste frame at playhead
-        if (frameClipboard) {
+        } else if (frameClipboard) {
+          // Paste a frame only when the performer clipboard is empty.
           e.preventDefault();
           const newFrame: Frame = {
             ...frameClipboard,
@@ -1386,6 +1398,11 @@ const App: React.FC = () => {
 
     if (audioSourceRef.current) {
       try { audioSourceRef.current.stop(); } catch (e) { }
+    }
+
+    if (offset >= audioBuffer.duration * 1000) {
+      audioSourceRef.current = null;
+      return;
     }
 
     const source = audioContextRef.current.createBufferSource();
@@ -1909,6 +1926,7 @@ const App: React.FC = () => {
   };
 
   const handleSelectFrame = (id: string) => {
+    setSelectedPerformerIds([]);
     setCurrentFrameId(id);
     const f = frames.find(fr => fr.id === id);
     if (f) {
@@ -1939,9 +1957,10 @@ const App: React.FC = () => {
   const displayedPositions = currentPositions();
 
   // Determine total duration for Timeline rendering
-  const totalDuration = frames.length > 0
-    ? frames[frames.length - 1].startTime + frames[frames.length - 1].duration
-    : 0;
+  const totalDuration = frames.reduce(
+    (maximum, frame) => Math.max(maximum, frame.startTime + frame.duration),
+    0,
+  );
 
   return (
     <div className={`h-screen w-screen flex flex-col ${theme === 'dark' ? 'bg-slate-950 text-slate-200' : 'bg-gray-50 text-gray-900'} overflow-hidden`}>
@@ -2228,7 +2247,11 @@ const App: React.FC = () => {
 
       <Timeline
         frames={frames}
-        duration={Math.max(totalDuration + 10000, 30000)}
+        duration={Math.max(
+          totalDuration + 10000,
+          audioBuffer ? audioBuffer.duration * 1000 : 0,
+          30000,
+        )}
         currentTime={currentTime}
         audioBuffer={audioBuffer}
         isPlaying={isPlaying}
@@ -2237,7 +2260,7 @@ const App: React.FC = () => {
         onFrameUpdate={setFrames}
         onAddFrame={handleAddFrame}
         onSelectFrame={handleSelectFrame}
-        selectedFrameId={currentFrameId}
+        selectedFrameId={selectedPerformerIds.length > 0 ? null : currentFrameId}
         heightPx={timelineHeight}
         onRenameFrame={handleRenameFrame}
         inPointMs={inPointMs}

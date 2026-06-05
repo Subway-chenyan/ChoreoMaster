@@ -4,6 +4,7 @@
 // ---------------------------------------------------------------------------
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Box as BoxIcon, Pentagon } from 'lucide-react';
 import { Performer, PropGeometryType, BoxTextures, FaceTexture, ExtrudedTextures } from '../types';
 import { Point } from './prop-editor/PolygonUtils';
@@ -175,8 +176,8 @@ export const PropEditorModal: React.FC<PropEditorModalProps> = ({
 
   if (!isOpen) return null;
 
-  return (
-    <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+  return createPortal(
+    <div className="fixed inset-0 z-[2147483000] flex items-center justify-center bg-black/60 backdrop-blur-sm">
       <div
         className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl flex flex-col overflow-hidden"
         style={{ width: 900, height: 620 }}
@@ -412,7 +413,8 @@ export const PropEditorModal: React.FC<PropEditorModalProps> = ({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };
 

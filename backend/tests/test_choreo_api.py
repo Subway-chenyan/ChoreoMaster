@@ -13,6 +13,26 @@ def test_health():
     assert response.json() == {"status": "ok"}
 
 
+def test_agent_access_key_validation(monkeypatch):
+    monkeypatch.setenv("AGENT_ACCESS_KEYS", "admin-key-1,admin-key-2")
+    monkeypatch.setenv("ALLOW_DEV_MEMBER_TOKEN", "false")
+    client = TestClient(app)
+
+    valid = client.get(
+        "/api/auth/validate",
+        headers={"Authorization": "Bearer admin-key-2"},
+    )
+    invalid = client.get(
+        "/api/auth/validate",
+        headers={"Authorization": "Bearer wrong-key"},
+    )
+
+    assert valid.status_code == 200
+    assert valid.json() == {"valid": True}
+    assert invalid.status_code == 401
+    assert "Key 无效" in invalid.json()["detail"]
+
+
 def test_choreo_plan_requires_member_credential():
     response = client.post(
         "/api/ai/choreo-plan",

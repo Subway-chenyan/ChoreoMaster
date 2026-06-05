@@ -6,6 +6,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "start": "node scripts/start-dev.cjs",
+    "start:setup": "node scripts/start-dev.cjs --install",
     "dev:backend": "node scripts/run-backend-dev.cjs",
     "dev:electron": "concurrently \"vite\" \"tsc -p tsconfig.electron.json && wait-on http://localhost:5173 && electron .\"",
     "build": "vite build",

@@ -13,6 +13,9 @@ dist-ssr
 dist-electron
 release
 *.local
+.env
+.env.*
+!.env.example
 __pycache__/
 .pytest_cache/
 *.py[cod]

@@ -186,3 +186,96 @@ export interface AIChoreoPlan {
   positionUpdates: AIPositionUpdate[];
   warnings: string[];
 }
+
+export interface ChoreoTimedInsight {
+  timestampMs: number;
+  label: string;
+  description: string;
+  confidence: number;
+}
+
+export interface ChoreoAudioAnalysis {
+  segmentStartMs: number;
+  segmentEndMs: number;
+  estimatedBpm: number;
+  rhythmicFeel: string;
+  dynamics: string;
+  emotion: string;
+  significantMoments: ChoreoTimedInsight[];
+  formationChangeCandidates: ChoreoTimedInsight[];
+}
+
+export interface ChoreoSketchElement {
+  id: string;
+  shape: 'ellipse' | 'triangle' | 'rectangle' | 'square' | 'line' | 'other';
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  label?: string | null;
+  possibleRole: 'actor' | 'prop' | 'unknown';
+  confidence: number;
+}
+
+export interface ChoreoSketchAnalysis {
+  stageOrientation: 'top_is_back' | 'bottom_is_back' | 'left_is_back' | 'right_is_back' | 'unknown';
+  elements: ChoreoSketchElement[];
+  spatialSummary: string;
+  ambiguities: string[];
+  questions: string[];
+}
+
+export interface ChoreoPropDimensions {
+  width: number;
+  depth: number;
+  height: number;
+}
+
+export interface ChoreoInitialProposal {
+  summary: string;
+  formations: Array<{
+    id: string;
+    name: string;
+    timeMs: number;
+    description: string;
+    sourceElementIds: string[];
+  }>;
+  questions: string[];
+  risks: string[];
+}
+
+export interface ChoreoDesignSummary {
+  summary: string;
+  musicRationale: string;
+  sketchRationale: string;
+  formationSequence: string[];
+  risks: string[];
+}
+
+export interface ChoreoAgentSession {
+  id: string;
+  status: string;
+  phase: string;
+  interrupt?: {
+    type: 'initial_approval' | 'final_approval';
+    message: string;
+    allowedActions: Array<'approve' | 'edit' | 'reject'>;
+  } | null;
+  audioAnalysis?: ChoreoAudioAnalysis | null;
+  sketchAnalysis?: ChoreoSketchAnalysis | null;
+  initialProposal?: ChoreoInitialProposal | null;
+  designSummary?: ChoreoDesignSummary | null;
+  draft?: {
+    id: string;
+    sessionId: string;
+    plan: AIChoreoPlan;
+    validation: {
+      valid: boolean;
+      segmentStartMs: number;
+      segmentEndMs: number;
+      entityCount: number;
+      frameCount: number;
+    };
+  } | null;
+  callLog: Array<{ model: string; purpose: string }>;
+}
