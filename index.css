@@ -66,10 +66,13 @@ button {
   }
 
   .app-sidebar {
-    position: relative;
+    position: absolute;
+    left: 0;
+    top: 0;
+    height: 100%;
     width: clamp(210px, 36vw, 320px) !important;
     min-width: clamp(210px, 36vw, 320px) !important;
-    max-width: clamp(210px, 36vw, 320px) !important;
+    max-width: 85vw !important;
     z-index: 20;
     box-shadow: 8px 0 24px rgb(2 6 23 / 0.22);
   }

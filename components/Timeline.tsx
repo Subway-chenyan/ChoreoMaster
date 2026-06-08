@@ -32,6 +32,9 @@ interface TimelineProps {
     exportHeightPx?: number;
     exportResolution?: '1080p' | '2k' | '4k';
     onSetExportResolution?: (v: '1080p' | '2k' | '4k') => void;
+    exportCameraAngle?: 'judge' | 'overhead';
+    onSetExportCameraAngle?: (v: 'judge' | 'overhead') => void;
+    viewMode?: '2d' | '3d';
 }
 
 export const Timeline: React.FC<TimelineProps> = ({
@@ -63,6 +66,9 @@ export const Timeline: React.FC<TimelineProps> = ({
     , exportHeightPx
     , exportResolution
     , onSetExportResolution
+    , exportCameraAngle
+    , onSetExportCameraAngle
+    , viewMode
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -357,6 +363,19 @@ export const Timeline: React.FC<TimelineProps> = ({
                                 <option value="4k">4K (3840×2160)</option>
                             </select>
                         </span>
+                        {viewMode === '3d' && (
+                            <span className="desktop-only text-[11px] ml-2 flex items-center gap-1 text-slate-300">机位:
+                                <select
+                                    value={exportCameraAngle ?? 'judge'}
+                                    onChange={(e) => onSetExportCameraAngle?.(e.target.value as 'judge' | 'overhead')}
+                                    className="bg-slate-800 text-slate-300 border border-slate-700 rounded px-1 py-0.5 text-[11px] focus:outline-none focus:border-blue-500"
+                                    disabled={isExporting}
+                                >
+                                    <option value="judge">评委视角</option>
+                                    <option value="overhead">45°俯视</option>
+                                </select>
+                            </span>
+                        )}
                     <button
                         onClick={onExportVideo}
                         disabled={isExporting}
@@ -366,8 +385,8 @@ export const Timeline: React.FC<TimelineProps> = ({
                                 ? 'bg-green-600 hover:bg-green-500 text-white border-green-500'
                                 : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-amber-500'
                             }`}
-                        title={isExporting ? '导出中...' : hasValidExportRange ? '导出视频' : '请先设置入点和出点'}
-                    >{isExporting ? '导出中…' : '导出视频'}</button>
+                        title={isExporting ? '导出中...' : hasValidExportRange ? (viewMode === '3d' ? '导出3D视频' : '导出视频') : '请先设置入点和出点'}
+                    >{isExporting ? '导出中…' : (viewMode === '3d' ? '导出3D' : '导出视频')}</button>
                     {isExporting && (
                         <div className="flex items-center gap-2 ml-2">
                             <div className="w-32 h-2 bg-slate-700 rounded overflow-hidden">

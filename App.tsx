@@ -7,6 +7,7 @@ import { Timeline } from './components/Timeline';
 import { HelpModal } from './components/HelpModal';
 import { useTheme } from './contexts/ThemeContext';
 import { DEFAULT_COLORS, STAGE_ASPECT_RATIO } from './constants';
+import { createOfflineScene, preloadPropTextures, preloadLEDVideo, type CameraAngle } from './utils/OfflineRenderer3D';
 import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, Maximize2, ChevronDown, ChevronUp, Menu, X, Download, GripHorizontal } from 'lucide-react';
 import { StageConfig } from './types';
 
@@ -46,6 +47,7 @@ const App: React.FC = () => {
   const [exportIncludeLabels, setExportIncludeLabels] = useState<boolean>(true);
   const [exportIncludeGrid, setExportIncludeGrid] = useState<boolean>(true);
   const [exportResolution, setExportResolution] = useState<'1080p' | '2k' | '4k'>('1080p');
+  const [exportCameraAngle, setExportCameraAngle] = useState<CameraAngle>('judge');
 
   // Stage View State
   const [showLabels, setShowLabels] = useState(true);
@@ -55,8 +57,8 @@ const App: React.FC = () => {
   const [ratioW, setRatioW] = useState<number>(16);
   const [ratioH, setRatioH] = useState<number>(9);
   const [showHelp, setShowHelp] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [stageToolbarCollapsed, setStageToolbarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.matchMedia('(max-width: 1100px)').matches);
+  const [stageToolbarCollapsed, setStageToolbarCollapsed] = useState(() => window.matchMedia('(max-width: 1100px)').matches);
   const [sidebarWidth, setSidebarWidth] = useState<number>(320);
   const [timelineHeight, setTimelineHeight] = useState<number>(() => (
     window.matchMedia('(max-width: 1100px)').matches ? 112 : 160
@@ -1649,6 +1651,22 @@ const App: React.FC = () => {
   const handleSetOutPoint = () => { setOutPointMs(currentTime); };
 
   const handleExportVideo = async () => {
+    // Route to 3D export when in 3D mode
+    if (viewMode === '3d') {
+      if (inPointMs == null || outPointMs == null || outPointMs <= inPointMs) {
+        if (inPointMs == null && outPointMs == null) {
+          alert('请先设置导出范围。\n\n1. 将播放头移动到视频开始位置，点击"设为入点"。\n2. 将播放头移动到视频结束位置，点击"设为出点"。\n3. 再点击"导出3D视频"。');
+        } else if (inPointMs == null) {
+          alert('还没有设置入点。\n\n将播放头移动到导出开始位置，然后点击时间轴上的"设为入点"。');
+        } else if (outPointMs == null) {
+          alert('还没有设置出点。\n\n将播放头移动到导出结束位置，然后点击时间轴上的"设为出点"。');
+        } else {
+          alert('导出范围无效：出点必须晚于入点。\n\n请把播放头移动到更靠后的位置，重新点击"设为出点"。');
+        }
+        return;
+      }
+      return handleExportVideo3D();
+    }
     if (inPointMs == null || outPointMs == null || outPointMs <= inPointMs) {
       if (inPointMs == null && outPointMs == null) {
         alert('请先设置导出范围。\n\n1. 将播放头移动到视频开始位置，点击“设为入点”。\n2. 将播放头移动到视频结束位置，点击“设为出点”。\n3. 再点击“导出视频”。');
@@ -2003,6 +2021,377 @@ const App: React.FC = () => {
     }
   };
 
+  const handleExportVideo3D = async () => {
+    if (inPointMs == null || outPointMs == null || outPointMs <= inPointMs) return;
+
+    const width = exportResolution === '4k' ? 3840 : exportResolution === '2k' ? 2560 : 1920;
+    const height = exportResolution === '4k' ? 2160 : exportResolution === '2k' ? 1440 : 1080;
+    const fps = 30;
+    const totalMs = outPointMs - inPointMs;
+    const totalFrames = Math.ceil(totalMs / 1000 * fps);
+    const stepMs = 1000 / fps;
+    const downloadBaseName = `choreomaster-3d-${exportCameraAngle}-${Math.round(inPointMs)}-${Math.round(outPointMs)}`;
+    const hasWebCodecs = typeof VideoEncoder !== 'undefined';
+    const showSaveFilePicker = (window as any).showSaveFilePicker as
+      | ((options?: any) => Promise<any>)
+      | undefined;
+    let mp4Writable: any = null;
+    let webmWritable: any = null;
+
+    if (showSaveFilePicker) {
+      try {
+        const handle = await showSaveFilePicker({
+          suggestedName: `${downloadBaseName}.${hasWebCodecs ? 'mp4' : 'webm'}`,
+          types: [{
+            description: hasWebCodecs ? 'MP4 video' : 'WebM video',
+            accept: hasWebCodecs
+              ? { 'video/mp4': ['.mp4'] }
+              : { 'video/webm': ['.webm'] },
+          }],
+        });
+        if (hasWebCodecs) {
+          mp4Writable = await handle.createWritable();
+        } else {
+          webmWritable = await handle.createWritable();
+        }
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        console.warn('Streaming file picker unavailable, falling back to in-memory download:', err);
+      }
+    }
+
+    setIsExporting(true);
+    setExportProgress(0);
+
+    // Pre-load resources
+    await Promise.all([
+      preloadPropTextures(performers),
+      preloadLEDVideo(stageConfig, mediaCache),
+    ]);
+
+    // Create offline 3D scene
+    const offline = createOfflineScene(
+      width, height, stageConfig, performers, exportCameraAngle, gridScale, mediaCache,
+    );
+
+    // Helper: compute hidden groups at a given time
+    const getHiddenGroups = (timeMs: number): string[] => {
+      const sortedFrames = [...frames].sort((a, b) => a.startTime - b.startTime);
+      const frame = sortedFrames.find(f => timeMs >= f.startTime && timeMs < f.startTime + f.duration)
+        || [...sortedFrames].reverse().find(f => f.startTime + f.duration <= timeMs);
+      return frame?.hiddenGroupIds || [];
+    };
+
+    // Canvas for capturing WebGL output
+    const tmpCanvas = document.createElement('canvas');
+    tmpCanvas.width = width;
+    tmpCanvas.height = height;
+
+    const waitForEncoderQueueBelow = async (encoder: VideoEncoder | AudioEncoder, maxQueueSize: number) => {
+      while (encoder.encodeQueueSize > maxQueueSize) {
+        await new Promise<void>(resolve => {
+          let settled = false;
+          const cleanup = () => {
+            if (settled) return;
+            settled = true;
+            encoder.removeEventListener('dequeue', onDequeue);
+            clearTimeout(timeoutId);
+            resolve();
+          };
+          const onDequeue = () => cleanup();
+          const timeoutId = window.setTimeout(cleanup, 50);
+          encoder.addEventListener('dequeue', onDequeue, { once: true });
+        });
+      }
+    };
+
+    const createFrameFromCanvas = async (timestamp: number, duration: number) => {
+      try {
+        return new VideoFrame(tmpCanvas, { timestamp, duration });
+      } catch {
+        const bitmap = await createImageBitmap(tmpCanvas);
+        try {
+          return new VideoFrame(bitmap, { timestamp, duration });
+        } finally {
+          bitmap.close();
+        }
+      }
+    };
+
+    if (hasWebCodecs) {
+      // --- WebCodecs + mp4-muxer (fast, offline) ---
+      try {
+        const { Muxer, StreamTarget, FileSystemWritableFileStreamTarget } = await import('mp4-muxer');
+
+        const hasAudio = audioBuffer != null && typeof AudioEncoder !== 'undefined';
+        const sampleRate = audioBuffer?.sampleRate ?? 44100;
+        const numChannels = audioBuffer?.numberOfChannels ?? 1;
+        const mp4Chunks: Uint8Array[] = [];
+        let mp4BytesWritten = 0;
+
+        const target = mp4Writable
+          ? new FileSystemWritableFileStreamTarget(mp4Writable, { chunkSize: 16 * 1024 * 1024 })
+          : new StreamTarget({
+            onData: (data: Uint8Array, position: number) => {
+              if (position !== mp4BytesWritten) {
+                throw new Error('MP4 stream wrote non-sequential data; cannot build download blob safely.');
+              }
+              mp4Chunks.push(data);
+              mp4BytesWritten += data.byteLength;
+            },
+            chunked: true,
+            chunkSize: 16 * 1024 * 1024,
+          });
+        const muxer = new Muxer({
+          target,
+          video: { codec: 'avc', width, height },
+          audio: hasAudio ? {
+            codec: 'aac',
+            numberOfChannels: numChannels,
+            sampleRate,
+          } : undefined,
+          fastStart: false,
+          firstTimestampBehavior: 'offset',
+        });
+
+        // --- Step 1: Render + Encode video ---
+        const videoEncoder = new VideoEncoder({
+          output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+          error: (e) => console.error('VideoEncoder error:', e),
+        });
+        videoEncoder.configure({
+          codec: exportResolution === '4k' ? 'avc1.640033' : exportResolution === '2k' ? 'avc1.640032' : 'avc1.640028',
+          width,
+          height,
+          bitrate: exportResolution === '4k' ? 20_000_000 : exportResolution === '2k' ? 10_000_000 : 5_000_000,
+          bitrateMode: 'constant',
+          framerate: fps,
+        });
+
+        for (let i = 0; i <= totalFrames; i++) {
+          const t = inPointMs + i * stepMs;
+          const clampedT = Math.min(t, outPointMs);
+          const positions = computePositionsAtTime(clampedT);
+          const hiddenGroupIds = getHiddenGroups(clampedT);
+
+          // Update scene and render
+          offline.updateAtTime(clampedT, positions, hiddenGroupIds);
+          offline.renderer.render(offline.scene, offline.camera);
+
+          // Copy WebGL canvas to tmpCanvas for VideoFrame
+          const ctx = tmpCanvas.getContext('2d')!;
+          ctx.clearRect(0, 0, width, height);
+          ctx.drawImage(offline.renderer.domElement, 0, 0);
+
+          const frame = await createFrameFromCanvas((i * 1_000_000) / fps, 1_000_000 / fps);
+          videoEncoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
+          frame.close();
+          await waitForEncoderQueueBelow(videoEncoder, 8);
+          setExportProgress((i / (totalFrames + 1)) * 0.7);
+          if (i % 30 === 0) await new Promise(r => setTimeout(r, 0));
+        }
+
+        await videoEncoder.flush();
+        videoEncoder.close();
+
+        // --- Step 2: Encode audio (after video is fully flushed) ---
+        if (hasAudio) {
+          const audioEncoder = new AudioEncoder({
+            output: (chunk, meta) => muxer.addAudioChunk(chunk, meta),
+            error: (e) => console.error('AudioEncoder error:', e),
+          });
+          audioEncoder.configure({
+            codec: 'mp4a.40.2',
+            numberOfChannels: numChannels,
+            sampleRate,
+            bitrate: 128_000,
+          });
+
+          const audioInSamples = Math.floor(inPointMs / 1000 * sampleRate);
+          const audioOutSamples = Math.floor(outPointMs / 1000 * sampleRate);
+          const aacFrameSize = 1024;
+          const totalAudioChunks = Math.ceil((audioOutSamples - audioInSamples) / aacFrameSize);
+
+          const channelData: Float32Array[] = [];
+          for (let ch = 0; ch < numChannels; ch++) {
+            channelData.push(audioBuffer!.getChannelData(ch));
+          }
+
+          for (let base = 0; base < totalAudioChunks; base++) {
+            const sampleStart = audioInSamples + base * aacFrameSize;
+            if (sampleStart >= audioOutSamples) break;
+
+            const data = new Float32Array(numChannels * aacFrameSize);
+            for (let ch = 0; ch < numChannels; ch++) {
+              const src = channelData[ch];
+              const off = ch * aacFrameSize;
+              for (let s = 0; s < aacFrameSize; s++) {
+                data[off + s] = (sampleStart + s < src.length) ? src[sampleStart + s] : 0;
+              }
+            }
+
+            const audioData = new AudioData({
+              format: 'f32-planar',
+              sampleRate,
+              numberOfFrames: aacFrameSize,
+              numberOfChannels: numChannels,
+              timestamp: (base * aacFrameSize * 1_000_000) / sampleRate,
+              data,
+            });
+            audioEncoder.encode(audioData);
+            audioData.close();
+            await waitForEncoderQueueBelow(audioEncoder, 32);
+
+            if (base % 100 === 0) {
+              setExportProgress(0.85 + (base / totalAudioChunks) * 0.1);
+              await new Promise(r => setTimeout(r, 0));
+            }
+          }
+
+          setExportProgress(0.95);
+          await audioEncoder.flush();
+          audioEncoder.close();
+        }
+
+        muxer.finalize();
+        if (mp4Writable) {
+          await mp4Writable.close();
+        } else {
+          const blob = new Blob(mp4Chunks, { type: 'video/mp4' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `${downloadBaseName}.mp4`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+        }
+
+        offline.dispose();
+        setIsExporting(false);
+        setExportProgress(1);
+        return;
+      } catch (err) {
+        if (mp4Writable) {
+          try { await mp4Writable.abort?.(); } catch { }
+          mp4Writable = null;
+        }
+        console.error('WebCodecs 3D export failed, falling back to MediaRecorder:', err);
+        alert('高速导出失败，已回退到实时录制模式。\n错误: ' + (err instanceof Error ? err.message : String(err)));
+      }
+    }
+
+    // --- Fallback: MediaRecorder (real-time rendering) ---
+    const streamV = (offline.renderer.domElement as any).captureStream
+      ? (offline.renderer.domElement as any).captureStream(fps)
+      : null;
+    if (!streamV) {
+      if (webmWritable) {
+        try { await webmWritable.abort?.(); } catch { }
+      }
+      offline.dispose();
+      setIsExporting(false);
+      return;
+    }
+
+    const audioCtx = audioContextRef.current;
+    let stream: MediaStream = streamV;
+    let source: AudioBufferSourceNode | null = null;
+    if (audioCtx && audioBuffer) {
+      if (audioCtx.state === 'suspended') {
+        try { await audioCtx.resume(); } catch { }
+      }
+      const dest = audioCtx.createMediaStreamDestination();
+      source = audioCtx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(dest);
+      source.connect(audioCtx.destination);
+      stream = new MediaStream([...streamV.getVideoTracks(), ...dest.stream.getAudioTracks()]);
+    }
+
+    const mimeCandidates = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+    const mime = mimeCandidates.find(m => MediaRecorder.isTypeSupported(m)) || 'video/webm';
+    const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 5000000 });
+    const chunks: Blob[] = [];
+    let webmWriteChain = Promise.resolve();
+    recorder.ondataavailable = (e: any) => {
+      if (!e.data || e.data.size <= 0) return;
+      if (webmWritable) {
+        webmWriteChain = webmWriteChain.then(() => webmWritable.write(e.data));
+      } else {
+        chunks.push(e.data);
+      }
+    };
+
+    recorder.start(100);
+    if (source) source.start(0, inPointMs / 1000);
+
+    const recordStart = performance.now();
+    const drawFrame = () => {
+      const elapsed = performance.now() - recordStart;
+      const currentFrameIdx = Math.min(Math.floor(elapsed / stepMs), totalFrames);
+      const t = Math.min(inPointMs + currentFrameIdx * stepMs, outPointMs);
+      const positions = computePositionsAtTime(t);
+      const hiddenGroupIds = getHiddenGroups(t);
+
+      offline.updateAtTime(t, positions, hiddenGroupIds);
+      offline.renderer.render(offline.scene, offline.camera);
+
+      setExportProgress(0.7 + Math.min(0.3, (currentFrameIdx / totalFrames) * 0.3));
+
+      if (elapsed < totalMs + stepMs) {
+        requestAnimationFrame(drawFrame);
+      } else {
+        recorder.stop();
+        if (source) { try { source.stop(); } catch { } }
+        offline.dispose();
+      }
+    };
+    requestAnimationFrame(drawFrame);
+
+    let blob: Blob;
+    try {
+      blob = await new Promise<Blob>((resolve, reject) => {
+        recorder.onstop = () => {
+          webmWriteChain
+            .then(async () => {
+              if (webmWritable) {
+                await webmWritable.close();
+                resolve(new Blob([], { type: mime }));
+              } else {
+                resolve(new Blob(chunks, { type: mime }));
+              }
+            })
+            .catch(async err => {
+              if (webmWritable) {
+                try { await webmWritable.abort?.(); } catch { }
+              }
+              reject(err);
+            });
+        };
+      });
+    } catch (err) {
+      setIsExporting(false);
+      alert('实时录制导出失败：' + (err instanceof Error ? err.message : String(err)));
+      return;
+    }
+
+    setIsExporting(false);
+    setExportProgress(1);
+
+    if (!webmWritable) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${downloadBaseName}.webm`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+  };
+
   const handleSelectFrame = (id: string) => {
     setSelectedPerformerIds([]);
     setCurrentFrameId(id);
@@ -2121,6 +2510,12 @@ const App: React.FC = () => {
       </div>
 
       <div className="flex-1 flex overflow-hidden relative">
+        {!sidebarCollapsed && isCompactLayout && (
+          <div
+            className="absolute inset-0 bg-black/40 z-10"
+            onClick={() => setSidebarCollapsed(true)}
+          />
+        )}
         {!sidebarCollapsed && (
           <Sidebar
             performers={performers}
@@ -2173,6 +2568,7 @@ const App: React.FC = () => {
             onLoadTemplate={handleLoadTemplate}
             onSaveProject={handleSaveProject}
             projectHasChanges={projectHasChanges}
+            isCompactLayout={isCompactLayout}
           />)}
         {!sidebarCollapsed && !isCompactLayout && (
           <div
@@ -2444,6 +2840,9 @@ const App: React.FC = () => {
         exportHeightPx={exportResolution === '4k' ? 2160 : exportResolution === '2k' ? 1440 : 1080}
         exportResolution={exportResolution}
         onSetExportResolution={setExportResolution}
+        exportCameraAngle={exportCameraAngle}
+        onSetExportCameraAngle={setExportCameraAngle}
+        viewMode={viewMode}
       />}
     </div>
   );

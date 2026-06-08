@@ -35,6 +35,7 @@ interface SidebarProps {
     onResetProject: () => void;
     onRenameFrame: (id: string, name?: string) => void;
     widthPx?: number;
+    isCompactLayout?: boolean;
     // Group Management Props
     onAddGroup: (name: string, color: string, type?: 'performer' | 'prop') => string;
     onRemoveGroup: (groupId: string) => void;
@@ -174,6 +175,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     onResetProject,
     onRenameFrame,
     widthPx = 320,
+    isCompactLayout = false,
     // Group Management Props
     onAddGroup,
     onRemoveGroup,
@@ -531,7 +533,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     };
 
     return (
-        <div style={{ width: widthPx, minWidth: widthPx, maxWidth: widthPx }} className="app-sidebar bg-slate-900 border-r border-slate-800 flex flex-col shadow-xl z-20 flex-shrink-0">
+        <div style={isCompactLayout ? undefined : { width: widthPx, minWidth: widthPx, maxWidth: widthPx }} className="app-sidebar bg-slate-900 border-r border-slate-800 flex flex-col shadow-xl z-20 flex-shrink-0">
             {/* Top Tabs */}
             <div className="flex items-center bg-slate-950 border-b border-slate-800 px-1 pt-1">
                 <button onClick={() => setActiveTab('library')} className={`flex-1 min-h-12 py-3 flex justify-center ${activeTab === 'library' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="项目库">
