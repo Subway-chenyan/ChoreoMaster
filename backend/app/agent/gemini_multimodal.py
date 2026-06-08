@@ -81,7 +81,7 @@ class GeminiMultimodalProvider:
         output_path = str(Path(output_dir) / "segment.wav")
         duration_seconds = (end_ms - start_ms) / 1000
         command = [
-            "ffmpeg",
+            os.getenv("FFMPEG_PATH", "ffmpeg"),
             "-y",
             "-ss",
             f"{start_ms / 1000:.3f}",
@@ -161,17 +161,30 @@ class GeminiMultimodalProvider:
 
     def generate_initial_proposal(
         self,
-        audio: AudioAnalysis,
-        sketch: SketchAnalysis,
+        audio: AudioAnalysis | None,
+        sketch: SketchAnalysis | None,
         requirements: str,
+        start_ms: int,
+        end_ms: int,
     ) -> InitialDesignProposal:
+        audio_context = (
+            audio.model_dump_json(by_alias=True)
+            if audio
+            else "未提供音频，不要声称已分析节奏；根据用户要求合理安排时间。"
+        )
+        sketch_context = (
+            sketch.model_dump_json(by_alias=True)
+            if sketch
+            else "未提供草图，可根据用户文字要求自由设计空间结构。"
+        )
         prompt = f"""
-根据音乐分析、草图分析和用户要求，提出所选片段的初步关键队形方案。
+根据已提供的音乐分析、草图分析和用户要求，提出初步关键队形方案。
+输入模态可能缺失，只能使用实际提供的信息，不得虚构分析来源。
 尚未确认草图语义时，不得把 unknown 图形强行归类；必须把这些内容列入 questions。
-每个队形 timeMs 必须在 {audio.segment_start_ms} 到 {audio.segment_end_ms} 内。
-用户要求：{requirements}
-音乐分析：{audio.model_dump_json(by_alias=True)}
-草图分析：{sketch.model_dump_json(by_alias=True)}
+每个队形 timeMs 必须在 {start_ms} 到 {end_ms} 内。
+用户要求：{requirements or "用户未提供文字要求，请根据现有素材提出合理方案。"}
+音乐分析：{audio_context}
+草图分析：{sketch_context}
 """
         return self._generate(
             self.flash_model,
@@ -184,15 +197,15 @@ class GeminiMultimodalProvider:
         proposal: InitialDesignProposal,
         mapping: SketchMapping,
         feedback: str,
-        audio: AudioAnalysis,
-        sketch: SketchAnalysis,
+        audio: AudioAnalysis | None,
+        sketch: SketchAnalysis | None,
     ) -> InitialDesignProposal:
         prompt = f"""
 根据用户确认的草图映射和反馈完善初步方案，保留音乐片段边界。
 映射：{mapping.model_dump_json(by_alias=True)}
 反馈：{feedback or "用户确认映射，请继续完善。"}
-音乐：{audio.model_dump_json(by_alias=True)}
-草图：{sketch.model_dump_json(by_alias=True)}
+音乐：{audio.model_dump_json(by_alias=True) if audio else "未提供"}
+草图：{sketch.model_dump_json(by_alias=True) if sketch else "未提供"}
 原方案：{proposal.model_dump_json(by_alias=True)}
 questions 应清空，除非仍存在无法生成最终结构的关键歧义。
 """
@@ -202,15 +215,15 @@ questions 应清空，除非仍存在无法生成最终结构的关键歧义。
         self,
         proposal: InitialDesignProposal,
         mapping: SketchMapping,
-        audio: AudioAnalysis,
-        sketch: SketchAnalysis,
+        audio: AudioAnalysis | None,
+        sketch: SketchAnalysis | None,
     ) -> DesignSummary:
         prompt = f"""
 为编舞师生成最终确认前的设计总结，清楚解释音乐依据、草图使用方式、关键队形顺序和风险。
 方案：{proposal.model_dump_json(by_alias=True)}
 映射：{mapping.model_dump_json(by_alias=True)}
-音乐：{audio.model_dump_json(by_alias=True)}
-草图：{sketch.model_dump_json(by_alias=True)}
+音乐：{audio.model_dump_json(by_alias=True) if audio else "未提供；musicRationale 应说明未使用音乐输入。"}
+草图：{sketch.model_dump_json(by_alias=True) if sketch else "未提供；sketchRationale 应说明未使用草图输入。"}
 """
         return self._generate(self.pro_model, [prompt], DesignSummary)
 
@@ -219,7 +232,7 @@ questions 应清空，除非仍存在无法生成最终结构的关键歧义。
         proposal: InitialDesignProposal,
         summary: DesignSummary,
         mapping: SketchMapping,
-        sketch: SketchAnalysis,
+        sketch: SketchAnalysis | None,
         start_ms: int,
         end_ms: int,
     ) -> AIChoreoPlan:
@@ -229,15 +242,15 @@ questions 应清空，除非仍存在无法生成最终结构的关键歧义。
 严格要求：
 1. 仅输出关键队形，不输出轨迹。
 2. 时间严格位于 {start_ms} 到 {end_ms}ms。
-3. 为 actorElementIds 中每个草图元素创建 performer 实体；为 propElementIds 创建 prop 实体。
-4. 每个 framesToCreate.positions 必须包含全部演员和全部道具的 tempId。
-5. 坐标使用草图元素归一化位置并保持 0-100。
+3. 若提供草图，为 actorElementIds 中每个元素创建 performer，为 propElementIds 创建 prop。
+4. 若未提供草图，根据方案自行创建合理数量的演员/道具；每帧必须包含全部创建实体。
+5. 有草图时参考归一化位置；无草图时自主布局。所有坐标保持 0-100。
 6. 演员和道具不得混淆，道具 propGeometryType 使用 box。
 7. intent 使用 generate_formation。
 方案：{proposal.model_dump_json(by_alias=True)}
 总结：{summary.model_dump_json(by_alias=True)}
 映射：{mapping.model_dump_json(by_alias=True)}
-草图：{sketch.model_dump_json(by_alias=True)}
+草图：{sketch.model_dump_json(by_alias=True) if sketch else "未提供"}
 JSON Schema：{json.dumps(schema, ensure_ascii=False)}
 """
         return self._generate(self.pro_model, [prompt], AIChoreoPlan)

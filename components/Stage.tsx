@@ -105,9 +105,10 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
     return { x, y };
   };
 
-  const handleResizeStart = (e: React.MouseEvent, id: string, handle: 'nw' | 'ne' | 'sw' | 'se', currentWidth: number, currentHeight: number) => {
+  const handleResizeStart = (e: React.PointerEvent, id: string, handle: 'nw' | 'ne' | 'sw' | 'se', currentWidth: number, currentHeight: number) => {
     e.stopPropagation();
     e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
     setResizeState({
       id,
       startClientX: e.clientX,
@@ -118,8 +119,9 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
     });
   };
 
-  const handleMouseDown = (e: React.MouseEvent) => {
+  const handlePointerDown = (e: React.PointerEvent) => {
     if (readonly) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
 
     // Start selection box
     if (mode === ToolMode.SELECT && !dragState && !resizeState) {
@@ -137,7 +139,7 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
     }
   };
 
-  const handleMouseMove = (e: React.MouseEvent) => {
+  const handlePointerMove = (e: React.PointerEvent) => {
     if (readonly) return;
 
     if (resizeState && stageRef.current && onUpdatePerformer) {
@@ -218,7 +220,7 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
     }
   };
 
-  const handleMouseUp = (e: React.MouseEvent) => {
+  const handlePointerUp = (e: React.PointerEvent) => {
     if (readonly) return;
     setResizeState(null);
     setDragState(null);
@@ -259,9 +261,10 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
     }
   };
 
-  const handlePerformerMouseDown = (e: React.MouseEvent, id: string) => {
+  const handlePerformerPointerDown = (e: React.PointerEvent, id: string) => {
     e.stopPropagation();
     if (readonly) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
 
     let newSelection = [...selectedPerformerIds];
 
@@ -348,21 +351,22 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
 
   return (
     <div
-      className="flex-1 bg-slate-900 flex items-center justify-center p-8 overflow-hidden select-none"
-      onMouseUp={handleMouseUp}
+      className="flex-1 min-h-0 bg-slate-900 flex items-center justify-center p-2 sm:p-4 lg:p-8 overflow-hidden select-none"
     >
       {/* Stage Container */}
       <div
         ref={stageRef}
-        className="relative bg-slate-800 border border-slate-700 shadow-2xl transition-transform duration-75 ease-out"
+        className="stage-surface relative bg-slate-800 border border-slate-700 shadow-2xl transition-transform duration-75 ease-out"
         style={{
           aspectRatio: `${aspectRatio}`,
           width: '100%',
           maxWidth: `${maxWidthPx}px`,
           cursor: mode === ToolMode.SELECT ? 'default' : 'crosshair'
         }}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
         onWheel={handleWheel}
       >
         {/* Dynamic Grid Lines */}
@@ -391,7 +395,7 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
             return (
               <div
                 key={performer.id}
-                onMouseDown={(e) => handlePerformerMouseDown(e, performer.id)}
+                onPointerDown={(e) => handlePerformerPointerDown(e, performer.id)}
                 className={`absolute cursor-grab active:cursor-grabbing z-10 group flex items-center justify-center`}
                 style={{
                   left: `${pos.x}%`,
@@ -418,10 +422,10 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
                 {/* Resize Handles */}
                 {isSelected && !readonly && (
                   <>
-                    <div className="absolute top-0 left-0 w-3 h-3 bg-white border border-blue-600 rounded-full cursor-nw-resize -translate-x-1/2 -translate-y-1/2 z-20 shadow-sm hover:scale-125 transition-transform" onMouseDown={(e) => handleResizeStart(e, performer.id, 'nw', performer.width || 1, performer.depth || 1)} />
-                    <div className="absolute top-0 right-0 w-3 h-3 bg-white border border-blue-600 rounded-full cursor-ne-resize translate-x-1/2 -translate-y-1/2 z-20 shadow-sm hover:scale-125 transition-transform" onMouseDown={(e) => handleResizeStart(e, performer.id, 'ne', performer.width || 1, performer.depth || 1)} />
-                    <div className="absolute bottom-0 left-0 w-3 h-3 bg-white border border-blue-600 rounded-full cursor-sw-resize -translate-x-1/2 translate-y-1/2 z-20 shadow-sm hover:scale-125 transition-transform" onMouseDown={(e) => handleResizeStart(e, performer.id, 'sw', performer.width || 1, performer.depth || 1)} />
-                    <div className="absolute bottom-0 right-0 w-3 h-3 bg-white border border-blue-600 rounded-full cursor-se-resize translate-x-1/2 translate-y-1/2 z-20 shadow-sm hover:scale-125 transition-transform" onMouseDown={(e) => handleResizeStart(e, performer.id, 'se', performer.width || 1, performer.depth || 1)} />
+                    <div className="absolute top-0 left-0 w-5 h-5 md:w-3 md:h-3 bg-white border border-blue-600 rounded-full cursor-nw-resize -translate-x-1/2 -translate-y-1/2 z-20 shadow-sm hover:scale-125 transition-transform touch-none" onPointerDown={(e) => handleResizeStart(e, performer.id, 'nw', performer.width || 1, performer.depth || 1)} />
+                    <div className="absolute top-0 right-0 w-5 h-5 md:w-3 md:h-3 bg-white border border-blue-600 rounded-full cursor-ne-resize translate-x-1/2 -translate-y-1/2 z-20 shadow-sm hover:scale-125 transition-transform touch-none" onPointerDown={(e) => handleResizeStart(e, performer.id, 'ne', performer.width || 1, performer.depth || 1)} />
+                    <div className="absolute bottom-0 left-0 w-5 h-5 md:w-3 md:h-3 bg-white border border-blue-600 rounded-full cursor-sw-resize -translate-x-1/2 translate-y-1/2 z-20 shadow-sm hover:scale-125 transition-transform touch-none" onPointerDown={(e) => handleResizeStart(e, performer.id, 'sw', performer.width || 1, performer.depth || 1)} />
+                    <div className="absolute bottom-0 right-0 w-5 h-5 md:w-3 md:h-3 bg-white border border-blue-600 rounded-full cursor-se-resize translate-x-1/2 translate-y-1/2 z-20 shadow-sm hover:scale-125 transition-transform touch-none" onPointerDown={(e) => handleResizeStart(e, performer.id, 'se', performer.width || 1, performer.depth || 1)} />
                   </>
                 )}
               </div>
@@ -431,8 +435,8 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
           return (
             <div
               key={performer.id}
-              onMouseDown={(e) => handlePerformerMouseDown(e, performer.id)}
-              className={`absolute transform -translate-x-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing z-10 group`}
+              onPointerDown={(e) => handlePerformerPointerDown(e, performer.id)}
+              className={`absolute min-w-11 min-h-11 flex items-center justify-center transform -translate-x-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing z-10 group touch-none`}
               style={{
                 left: `${pos.x}%`,
                 top: `${pos.y}%`,

@@ -34,7 +34,7 @@ interface ChoreoAgentModalProps {
 type ElementRole = 'actor' | 'prop';
 
 const PHASES = [
-  { key: 'assets_ingested', label: '素材上传', detail: '校验并截取音乐片段' },
+  { key: 'assets_ingested', label: '输入准备', detail: '校验并准备本次任务输入' },
   { key: 'audio_analyzed', label: '音频解析', detail: '节奏、情绪与换形点' },
   { key: 'sketch_analyzed', label: '图片解析', detail: '形状、方向与空间关系' },
   { key: 'initial_proposal_ready', label: '意图分析', detail: '生成初步编舞方案' },
@@ -93,6 +93,14 @@ export const ChoreoAgentModal: React.FC<ChoreoAgentModalProps> = ({
   const sketchPreview = useMemo(
     () => (sketch ? URL.createObjectURL(sketch) : null),
     [sketch],
+  );
+  const hasAnyInput = Boolean(prompt.trim() || audio || sketch);
+  const visiblePhases = useMemo(
+    () => PHASES.filter((phase) => (
+      (phase.key !== 'audio_analyzed' || Boolean(audio))
+      && (phase.key !== 'sketch_analyzed' || Boolean(sketch))
+    )),
+    [audio, sketch],
   );
 
   useEffect(() => () => {
@@ -165,8 +173,8 @@ export const ChoreoAgentModal: React.FC<ChoreoAgentModalProps> = ({
   };
 
   const start = async () => {
-    if (!prompt.trim() || !audio || !sketch) return;
-    if (useRange && endSeconds <= startSeconds) {
+    if (!hasAnyInput) return;
+    if (audio && useRange && endSeconds <= startSeconds) {
       setError('结束时间必须晚于开始时间。');
       return;
     }
@@ -177,8 +185,8 @@ export const ChoreoAgentModal: React.FC<ChoreoAgentModalProps> = ({
         prompt: prompt.trim(),
         audio,
         sketch,
-        segmentStartMs: useRange ? startSeconds * 1000 : 0,
-        segmentEndMs: useRange ? endSeconds * 1000 : 30000,
+        segmentStartMs: audio && useRange ? startSeconds * 1000 : 0,
+        segmentEndMs: audio && useRange ? endSeconds * 1000 : 30000,
       }, aiConfig);
       setSession(created);
       await executeWithPolling(
@@ -192,7 +200,17 @@ export const ChoreoAgentModal: React.FC<ChoreoAgentModalProps> = ({
   };
 
   const submitMapping = async () => {
-    if (!session?.sketchAnalysis) return;
+    if (!session) return;
+    if (!session.sketchAnalysis) {
+      await executeWithPolling(
+        session.id,
+        () => resumeMultimodalChoreoSession(session.id, {
+          action: 'edit',
+          feedback,
+        }, aiConfig),
+      ).catch(() => undefined);
+      return;
+    }
     const actorElementIds = Object.entries(roles).filter(([, role]) => role === 'actor').map(([id]) => id);
     const propElementIds = Object.entries(roles).filter(([, role]) => role === 'prop').map(([id]) => id);
     await executeWithPolling(
@@ -278,7 +296,10 @@ export const ChoreoAgentModal: React.FC<ChoreoAgentModalProps> = ({
             <main className="overflow-y-auto p-6">
               <div className="mx-auto max-w-2xl space-y-6">
                 <div>
-                  <label className="mb-2 block text-sm font-medium text-slate-200">你希望设计怎样的队形？</label>
+                  <div className="mb-2 flex items-center justify-between gap-4">
+                    <label className="block text-sm font-medium text-slate-200">创作要求（可选）</label>
+                    <span className="text-xs text-cyan-400">文本、音频、图片至少提供一种</span>
+                  </div>
                   <textarea
                     value={prompt}
                     onChange={(event) => setPrompt(event.target.value)}
@@ -299,7 +320,7 @@ export const ChoreoAgentModal: React.FC<ChoreoAgentModalProps> = ({
                       <Upload size={16} className="text-slate-600 group-hover:text-cyan-400" />
                     </div>
                     <div>
-                      <div className="truncate text-sm font-medium text-slate-200">{audio?.name || '选择音乐文件'}</div>
+                      <div className="truncate text-sm font-medium text-slate-200">{audio?.name || '选择音乐文件（可选）'}</div>
                       <div className="mt-1 text-xs text-slate-500">{audio ? formatSize(audio.size) : 'MP3、M4A、WAV 等音频格式'}</div>
                     </div>
                   </button>
@@ -316,14 +337,14 @@ export const ChoreoAgentModal: React.FC<ChoreoAgentModalProps> = ({
                       <Upload size={16} className="text-slate-600 group-hover:text-cyan-400" />
                     </div>
                     <div className="relative">
-                      <div className="truncate text-sm font-medium text-slate-200">{sketch?.name || '选择队形草图'}</div>
+                      <div className="truncate text-sm font-medium text-slate-200">{sketch?.name || '选择队形草图（可选）'}</div>
                       <div className="mt-1 text-xs text-slate-500">{sketch ? formatSize(sketch.size) : '最多一张 JPG、PNG 或 WebP'}</div>
                     </div>
                   </button>
                   <input ref={sketchInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(event) => setSketch(event.target.files?.[0] || null)} />
                 </div>
 
-                <div className="rounded-md border border-slate-800 bg-slate-950/50 p-4">
+                {audio && <div className="rounded-md border border-slate-800 bg-slate-950/50 p-4">
                   <label className="flex cursor-pointer items-center justify-between gap-4">
                     <span>
                       <span className="block text-sm font-medium text-slate-200">指定音乐分析范围</span>
@@ -344,12 +365,12 @@ export const ChoreoAgentModal: React.FC<ChoreoAgentModalProps> = ({
                       </label>
                     </div>
                   )}
-                </div>
+                </div>}
 
                 {error && <ErrorBanner message={error} />}
                 <button
                   onClick={start}
-                  disabled={isRunning || !prompt.trim() || !audio || !sketch}
+                  disabled={isRunning || !hasAnyInput}
                   className="flex w-full items-center justify-center gap-2 rounded-md bg-cyan-500 px-4 py-3 text-sm font-semibold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-600 lg:hidden"
                 >
                   {isRunning ? <LoaderCircle size={17} className="animate-spin" /> : <Sparkles size={17} />}
@@ -379,7 +400,7 @@ export const ChoreoAgentModal: React.FC<ChoreoAgentModalProps> = ({
               </div>
               <button
                 onClick={start}
-                disabled={isRunning || !prompt.trim() || !audio || !sketch}
+                disabled={isRunning || !hasAnyInput}
                 className="flex w-full items-center justify-center gap-2 rounded-md bg-cyan-500 px-4 py-3 text-sm font-semibold text-slate-950 transition-colors hover:bg-cyan-400 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-600"
               >
                 {isRunning ? <LoaderCircle size={17} className="animate-spin" /> : <Sparkles size={17} />}
@@ -395,9 +416,10 @@ export const ChoreoAgentModal: React.FC<ChoreoAgentModalProps> = ({
                 {isRunning ? 'Agent 正在工作' : isCompleted ? '设计已完成' : '等待你的确认'}
               </div>
               <div className="space-y-1">
-                {PHASES.map((phase, index) => {
-                  const done = currentPhase > index || session.status === 'completed';
-                  const active = currentPhase === index && isRunning;
+                {visiblePhases.map((phase, index) => {
+                  const phaseOrder = PHASE_ORDER[phase.key];
+                  const done = currentPhase > phaseOrder || session.status === 'completed';
+                  const active = currentPhase === phaseOrder && isRunning;
                   return (
                     <div key={phase.key} className={`flex gap-3 rounded-md px-3 py-3 ${active ? 'bg-cyan-500/8' : ''}`}>
                       <div className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${done ? 'border-cyan-500 bg-cyan-500 text-slate-950' : active ? 'border-cyan-400 text-cyan-300' : 'border-slate-700 text-slate-600'}`}>
@@ -428,9 +450,13 @@ export const ChoreoAgentModal: React.FC<ChoreoAgentModalProps> = ({
                   <RunningPanel phase={session.phase} />
                 )}
 
-                {isInitialReview && session.initialProposal && session.sketchAnalysis && (
+                {isInitialReview && session.initialProposal && (
                   <div className="space-y-5">
-                    <SectionHeading eyebrow="需要你的判断" title="确认草图语义与初步方案" description={session.interrupt?.message || ''} />
+                    <SectionHeading
+                      eyebrow="需要你的判断"
+                      title={session.sketchAnalysis ? '确认草图语义与初步方案' : '确认初步编舞方案'}
+                      description={session.interrupt?.message || ''}
+                    />
                     <div className="rounded-md border border-slate-700 bg-slate-950/45 p-4">
                       <div className="text-sm leading-6 text-slate-300">{session.initialProposal.summary}</div>
                       <div className="mt-4 grid grid-cols-2 gap-3 max-sm:grid-cols-1">
@@ -446,7 +472,7 @@ export const ChoreoAgentModal: React.FC<ChoreoAgentModalProps> = ({
                       </div>
                     </div>
 
-                    <div>
+                    {session.sketchAnalysis && <div>
                       <div className="mb-3 flex items-end justify-between gap-4">
                         <div>
                           <h3 className="text-sm font-medium text-slate-200">草图元素映射</h3>
@@ -507,9 +533,9 @@ export const ChoreoAgentModal: React.FC<ChoreoAgentModalProps> = ({
                           </div>
                         ))}
                       </div>
-                    </div>
+                    </div>}
 
-                    <div>
+                    {session.sketchAnalysis && <div>
                       <label className="mb-2 block text-xs font-medium text-slate-300">舞台方向</label>
                       <div className="grid grid-cols-4 gap-2 max-sm:grid-cols-2">
                         {[
@@ -523,7 +549,7 @@ export const ChoreoAgentModal: React.FC<ChoreoAgentModalProps> = ({
                           </button>
                         ))}
                       </div>
-                    </div>
+                    </div>}
 
                     <FeedbackInput value={feedback} onChange={setFeedback} placeholder="补充你的偏好，例如：门板保持不动，演员移动需要更克制。" />
                     {error && <ErrorBanner message={error} />}

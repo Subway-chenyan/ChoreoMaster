@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.models import AIChoreoPlan
 
@@ -129,16 +129,22 @@ class ChoreoDraft(BaseModel):
 
 
 class TestSessionCreateRequest(BaseModel):
-    audio_path: str = Field(alias="audioPath")
-    sketch_path: str = Field(alias="sketchPath")
+    audio_path: str | None = Field(default=None, alias="audioPath")
+    sketch_path: str | None = Field(default=None, alias="sketchPath")
     segment_start_ms: int = Field(default=0, alias="segmentStartMs", ge=0)
     segment_end_ms: int = Field(default=30000, alias="segmentEndMs", gt=0)
     user_requirements: str = Field(
-        default="根据音乐节奏和队形草图，为所选片段设计关键队形。",
+        default="",
         alias="userRequirements",
     )
 
     model_config = {"populate_by_name": True}
+
+    @model_validator(mode="after")
+    def require_at_least_one_input(self):
+        if not self.user_requirements.strip() and not self.audio_path and not self.sketch_path:
+            raise ValueError("文本、音频、图片至少提供一种。")
+        return self
 
 
 class TestSessionResumeRequest(BaseModel):

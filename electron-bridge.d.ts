@@ -14,6 +14,15 @@ interface AppSettings {
   maxRecentProjects: number;
 }
 
+interface AgentBackendRuntime {
+  state: 'starting' | 'ready' | 'stopped' | 'error';
+  baseUrl: string;
+  accessToken: string;
+  configPath: string;
+  logPath: string;
+  error?: string;
+}
+
 declare global {
   interface Window {
     electronAPI: {
@@ -43,6 +52,13 @@ declare global {
         openStorageFolder: () => Promise<void>;
         rename: (projectId: string, newName: string) => Promise<void>;
         duplicate: (projectId: string) => Promise<{ id: string; path: string }>;
+      };
+
+      agent: {
+        getRuntime: () => Promise<AgentBackendRuntime>;
+        restart: () => Promise<AgentBackendRuntime>;
+        openConfig: () => Promise<void>;
+        openLogs: () => Promise<void>;
       };
       
       // System information

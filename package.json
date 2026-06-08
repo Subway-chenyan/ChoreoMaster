@@ -1,5 +1,7 @@
 {
   "name": "choreomaster-desktop",
+  "description": "ChoreoMaster desktop choreography editor with a managed multi-agent backend",
+  "author": "ChoreoMaster",
   "private": true,
   "version": "1.0.0",
   "main": "dist-electron/main.js",
@@ -11,7 +13,8 @@
     "dev:backend": "node scripts/run-backend-dev.cjs",
     "dev:electron": "concurrently \"vite\" \"tsc -p tsconfig.electron.json && wait-on http://localhost:5173 && electron .\"",
     "build": "vite build",
-    "build:electron": "npm run build:main && npm run build && electron-builder --config electron-builder.config.cjs",
+    "build:electron": "npm run build:agent && npm run build:main && npm run build && electron-builder --config electron-builder.config.cjs",
+    "build:agent": "node scripts/build-agent-backend.cjs",
     "build:main": "tsc -p tsconfig.electron.json",
     "preview": "vite preview",
     "test:backend": "node scripts/run-backend-pytest.cjs",
@@ -19,6 +22,7 @@
   },
   "dependencies": {
     "electron-is-dev": "^3.0.1",
+    "ffmpeg-static": "^5.3.0",
     "mp4-muxer": "^5.2.2"
   },
   "devDependencies": {

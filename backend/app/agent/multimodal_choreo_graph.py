@@ -95,33 +95,52 @@ def _append_call(
 
 def ingest_assets(state: MultimodalChoreoState) -> dict[str, Any]:
     request = TestSessionCreateRequest.model_validate(state["request"])
-    audio_path = Path(request.audio_path)
-    sketch_path = Path(request.sketch_path)
-    if not audio_path.is_file():
-        raise FileNotFoundError(f"Audio file not found: {audio_path}")
-    if not sketch_path.is_file():
-        raise FileNotFoundError(f"Sketch file not found: {sketch_path}")
-    if request.segment_end_ms <= request.segment_start_ms:
+    if request.audio_path and request.segment_end_ms <= request.segment_start_ms:
         raise ValueError("segmentEndMs must be later than segmentStartMs.")
 
     provider = get_multimodal_provider()
     temp_dir = create_session_temp_dir(state["session_id"])
-    audio_segment_path = provider.prepare_audio_segment(
-        str(audio_path),
-        request.segment_start_ms,
-        request.segment_end_ms,
-        temp_dir,
-    )
-    audio_ref = provider.upload_file(audio_segment_path, "audio/wav")
-    sketch_mime = mimetypes.guess_type(sketch_path.name)[0] or "image/jpeg"
-    sketch_ref = provider.upload_file(str(sketch_path), sketch_mime)
-    return {
+    result: dict[str, Any] = {
         "phase": "assets_ingested",
         "status": "running",
         "session_temp_dir": temp_dir,
-        "audio_ref": audio_ref.model_dump(by_alias=True),
-        "sketch_ref": sketch_ref.model_dump(by_alias=True),
     }
+    if request.audio_path:
+        audio_path = Path(request.audio_path)
+        if not audio_path.is_file():
+            raise FileNotFoundError(f"Audio file not found: {audio_path}")
+        audio_segment_path = provider.prepare_audio_segment(
+            str(audio_path),
+            request.segment_start_ms,
+            request.segment_end_ms,
+            temp_dir,
+        )
+        result["audio_ref"] = provider.upload_file(
+            audio_segment_path,
+            "audio/wav",
+        ).model_dump(by_alias=True)
+    if request.sketch_path:
+        sketch_path = Path(request.sketch_path)
+        if not sketch_path.is_file():
+            raise FileNotFoundError(f"Sketch file not found: {sketch_path}")
+        sketch_mime = mimetypes.guess_type(sketch_path.name)[0] or "image/jpeg"
+        result["sketch_ref"] = provider.upload_file(
+            str(sketch_path),
+            sketch_mime,
+        ).model_dump(by_alias=True)
+    return result
+
+
+def route_after_ingest(state: MultimodalChoreoState) -> str:
+    if state.get("audio_ref"):
+        return "audio"
+    if state.get("sketch_ref"):
+        return "sketch"
+    return "proposal"
+
+
+def route_after_audio(state: MultimodalChoreoState) -> str:
+    return "sketch" if state.get("sketch_ref") else "proposal"
 
 
 def analyze_audio(state: MultimodalChoreoState) -> dict[str, Any]:
@@ -155,9 +174,15 @@ def generate_initial_proposal(state: MultimodalChoreoState) -> dict[str, Any]:
     provider = get_multimodal_provider()
     request = TestSessionCreateRequest.model_validate(state["request"])
     proposal = provider.generate_initial_proposal(
-        AudioAnalysis.model_validate(state["audio_analysis"]),
-        SketchAnalysis.model_validate(state["sketch_analysis"]),
+        AudioAnalysis.model_validate(state["audio_analysis"])
+        if state.get("audio_analysis")
+        else None,
+        SketchAnalysis.model_validate(state["sketch_analysis"])
+        if state.get("sketch_analysis")
+        else None,
         request.user_requirements,
+        request.segment_start_ms,
+        request.segment_end_ms,
     )
     return {
         "phase": "initial_proposal_ready",
@@ -171,24 +196,34 @@ def generate_initial_proposal(state: MultimodalChoreoState) -> dict[str, Any]:
 
 
 def await_initial_approval(state: MultimodalChoreoState) -> dict[str, Any]:
+    has_sketch = bool(state.get("sketch_analysis"))
     while True:
         decision = interrupt(
             {
                 "type": "initial_approval",
-                "message": "请确认初步方案，并明确草图中的演员、道具和舞台方向。",
+                "message": (
+                    "请确认初步方案，并明确草图中的演员、道具和舞台方向。"
+                    if has_sketch
+                    else "请确认初步方案，或补充你的调整意见。"
+                ),
                 "proposal": state["initial_proposal"],
-                "sketchAnalysis": state["sketch_analysis"],
+                "sketchAnalysis": state.get("sketch_analysis"),
                 "allowedActions": ["approve", "edit", "reject"],
             }
         )
         parsed = TestSessionResumeRequest.model_validate(decision)
         if parsed.action == "reject":
             continue
-        if parsed.mapping is None:
+        if has_sketch and parsed.mapping is None:
             continue
+        mapping = parsed.mapping or SketchMapping(
+            actorElementIds=[],
+            propElementIds=[],
+            stageOrientation="top_is_back",
+        )
         return {
             "phase": "initial_approved",
-            "mapping": parsed.mapping.model_dump(by_alias=True),
+            "mapping": mapping.model_dump(by_alias=True),
             "feedback": parsed.feedback,
         }
 
@@ -199,8 +234,12 @@ def refine_design(state: MultimodalChoreoState) -> dict[str, Any]:
         InitialDesignProposal.model_validate(state["initial_proposal"]),
         SketchMapping.model_validate(state["mapping"]),
         state.get("feedback", ""),
-        AudioAnalysis.model_validate(state["audio_analysis"]),
-        SketchAnalysis.model_validate(state["sketch_analysis"]),
+        AudioAnalysis.model_validate(state["audio_analysis"])
+        if state.get("audio_analysis")
+        else None,
+        SketchAnalysis.model_validate(state["sketch_analysis"])
+        if state.get("sketch_analysis")
+        else None,
     )
     return {
         "phase": "design_refined",
@@ -214,8 +253,12 @@ def generate_design_summary(state: MultimodalChoreoState) -> dict[str, Any]:
     summary = provider.generate_design_summary(
         InitialDesignProposal.model_validate(state["initial_proposal"]),
         SketchMapping.model_validate(state["mapping"]),
-        AudioAnalysis.model_validate(state["audio_analysis"]),
-        SketchAnalysis.model_validate(state["sketch_analysis"]),
+        AudioAnalysis.model_validate(state["audio_analysis"])
+        if state.get("audio_analysis")
+        else None,
+        SketchAnalysis.model_validate(state["sketch_analysis"])
+        if state.get("sketch_analysis")
+        else None,
     )
     return {
         "phase": "design_summary_ready",
@@ -260,7 +303,9 @@ def generate_final_structure(state: MultimodalChoreoState) -> dict[str, Any]:
         InitialDesignProposal.model_validate(state["initial_proposal"]),
         DesignSummary.model_validate(state["design_summary"]),
         SketchMapping.model_validate(state["mapping"]),
-        SketchAnalysis.model_validate(state["sketch_analysis"]),
+        SketchAnalysis.model_validate(state["sketch_analysis"])
+        if state.get("sketch_analysis")
+        else None,
         request.segment_start_ms,
         request.segment_end_ms,
     )
@@ -274,10 +319,29 @@ def generate_final_structure(state: MultimodalChoreoState) -> dict[str, Any]:
 def _normalize_final_plan(
     plan: AIChoreoPlan,
     mapping: SketchMapping,
-    sketch: SketchAnalysis,
+    sketch: SketchAnalysis | None,
     segment_start_ms: int,
     segment_end_ms: int,
 ) -> AIChoreoPlan:
+    if sketch is None:
+        frames = [
+            frame.model_copy(
+                update={
+                    "start_time": min(
+                        max(frame.start_time, segment_start_ms),
+                        segment_end_ms,
+                    ),
+                    "duration": min(
+                        max(frame.duration, 0),
+                        segment_end_ms
+                        - min(max(frame.start_time, segment_start_ms), segment_end_ms),
+                    ),
+                }
+            )
+            for frame in plan.frames_to_create
+        ]
+        return plan.model_copy(update={"frames_to_create": frames})
+
     elements = {element.id: element for element in sketch.elements}
     actor_ids = mapping.actor_element_ids
     prop_ids = mapping.prop_element_ids
@@ -380,7 +444,11 @@ def _normalize_final_plan(
 def validate_structure(state: MultimodalChoreoState) -> dict[str, Any]:
     request = TestSessionCreateRequest.model_validate(state["request"])
     mapping = SketchMapping.model_validate(state["mapping"])
-    sketch = SketchAnalysis.model_validate(state["sketch_analysis"])
+    sketch = (
+        SketchAnalysis.model_validate(state["sketch_analysis"])
+        if state.get("sketch_analysis")
+        else None
+    )
     plan = _normalize_final_plan(
         AIChoreoPlan.model_validate(state["final_plan"]),
         mapping,
@@ -390,16 +458,19 @@ def validate_structure(state: MultimodalChoreoState) -> dict[str, Any]:
     )
     expected_ids = set(mapping.actor_element_ids + mapping.prop_element_ids)
     entity_ids = {entity.temp_id for entity in plan.entities_to_create}
+    required_position_ids = expected_ids or entity_ids
     errors: list[str] = []
 
     if not plan.frames_to_create:
         errors.append("Final plan has no key formations.")
+    if not plan.entities_to_create:
+        errors.append("Final plan has no actors or props.")
     if not expected_ids.issubset(entity_ids):
         errors.append("Final plan does not create every mapped sketch element.")
     for frame in plan.frames_to_create:
         if not request.segment_start_ms <= frame.start_time <= request.segment_end_ms:
             errors.append(f"Frame {frame.name} is outside the selected segment.")
-        missing = expected_ids - set(frame.positions)
+        missing = required_position_ids - set(frame.positions)
         if missing:
             errors.append(
                 f"Frame {frame.name} is missing positions for: {sorted(missing)}"
@@ -446,7 +517,10 @@ def cleanup_assets(state: MultimodalChoreoState) -> dict[str, Any]:
         shutil.rmtree(temp_dir, ignore_errors=True)
     request = TestSessionCreateRequest.model_validate(state["request"])
     upload_root = Path(tempfile.gettempdir()) / "choreomaster-agent-uploads"
-    for source_path in (Path(request.audio_path), Path(request.sketch_path)):
+    for raw_path in (request.audio_path, request.sketch_path):
+        if not raw_path:
+            continue
+        source_path = Path(raw_path)
         try:
             resolved = source_path.resolve()
             if upload_root.resolve() in resolved.parents:
@@ -472,8 +546,23 @@ def build_multimodal_choreo_graph():
     builder.add_node("cleanup_assets", cleanup_assets)
 
     builder.add_edge(START, "ingest_assets")
-    builder.add_edge("ingest_assets", "analyze_audio")
-    builder.add_edge("analyze_audio", "analyze_sketch")
+    builder.add_conditional_edges(
+        "ingest_assets",
+        route_after_ingest,
+        {
+            "audio": "analyze_audio",
+            "sketch": "analyze_sketch",
+            "proposal": "generate_initial_proposal",
+        },
+    )
+    builder.add_conditional_edges(
+        "analyze_audio",
+        route_after_audio,
+        {
+            "sketch": "analyze_sketch",
+            "proposal": "generate_initial_proposal",
+        },
+    )
     builder.add_edge("analyze_sketch", "generate_initial_proposal")
     builder.add_edge("generate_initial_proposal", "await_initial_approval")
     builder.add_edge("await_initial_approval", "refine_design")

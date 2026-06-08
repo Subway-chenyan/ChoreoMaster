@@ -26,10 +26,20 @@ const readResponse = async <T>(response: Response): Promise<T> => {
 };
 
 export const validateAgentAccess = async (config: AIConfig): Promise<void> => {
-  const response = await fetch(`${getBaseUrl(config)}/api/auth/validate`, {
-    headers: getHeaders(config),
-  });
-  await readResponse<{ valid: boolean }>(response);
+  try {
+    const response = await fetch(`${getBaseUrl(config)}/api/auth/validate`, {
+      headers: getHeaders(config),
+    });
+    await readResponse<{ valid: boolean }>(response);
+  } catch (error) {
+    if (window.electronAPI?.isElectron) {
+      const runtime = await window.electronAPI.agent.getRuntime();
+      if (runtime.state !== 'ready') {
+        throw new Error(runtime.error || '桌面端 Agent 服务尚未就绪。');
+      }
+    }
+    throw error;
+  }
 };
 
 export const createChoreoPlan = async (
@@ -49,8 +59,8 @@ export const createChoreoPlan = async (
 export const createMultimodalChoreoSession = async (
   input: {
     prompt: string;
-    audio: File;
-    sketch: File;
+    audio?: File | null;
+    sketch?: File | null;
     segmentStartMs: number;
     segmentEndMs: number;
   },
@@ -58,8 +68,8 @@ export const createMultimodalChoreoSession = async (
 ): Promise<ChoreoAgentSession> => {
   const form = new FormData();
   form.append('prompt', input.prompt);
-  form.append('audio', input.audio);
-  form.append('sketch', input.sketch);
+  if (input.audio) form.append('audio', input.audio);
+  if (input.sketch) form.append('sketch', input.sketch);
   form.append('segmentStartMs', String(input.segmentStartMs));
   form.append('segmentEndMs', String(input.segmentEndMs));
   const response = await fetch(`${getBaseUrl(config)}/api/choreo/sessions`, {

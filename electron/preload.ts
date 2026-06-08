@@ -16,6 +16,15 @@ export interface AppSettings {
   maxRecentProjects: number;
 }
 
+export interface AgentBackendRuntime {
+  state: 'starting' | 'ready' | 'stopped' | 'error';
+  baseUrl: string;
+  accessToken: string;
+  configPath: string;
+  logPath: string;
+  error?: string;
+}
+
 export interface ElectronAPI {
   // Dialog operations
   saveFile: (defaultName: string) => Promise<string | null>;
@@ -43,6 +52,13 @@ export interface ElectronAPI {
     openStorageFolder: () => Promise<void>;
     rename: (projectId: string, newName: string) => Promise<void>;
     duplicate: (projectId: string) => Promise<{ id: string; path: string }>;
+  };
+
+  agent: {
+    getRuntime: () => Promise<AgentBackendRuntime>;
+    restart: () => Promise<AgentBackendRuntime>;
+    openConfig: () => Promise<void>;
+    openLogs: () => Promise<void>;
   };
 
   // System information
@@ -84,6 +100,13 @@ const electronAPI: ElectronAPI = {
     openStorageFolder: () => ipcRenderer.invoke('project:openStorageFolder'),
     rename: (projectId, newName) => ipcRenderer.invoke('project:rename', projectId, newName),
     duplicate: (projectId) => ipcRenderer.invoke('project:duplicate', projectId),
+  },
+
+  agent: {
+    getRuntime: () => ipcRenderer.invoke('agent:getRuntime'),
+    restart: () => ipcRenderer.invoke('agent:restart'),
+    openConfig: () => ipcRenderer.invoke('agent:openConfig'),
+    openLogs: () => ipcRenderer.invoke('agent:openLogs'),
   },
 
   // System information

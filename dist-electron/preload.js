@@ -25,6 +25,12 @@ const electronAPI = {
         rename: (projectId, newName) => ipcRenderer.invoke('project:rename', projectId, newName),
         duplicate: (projectId) => ipcRenderer.invoke('project:duplicate', projectId),
     },
+    agent: {
+        getRuntime: () => ipcRenderer.invoke('agent:getRuntime'),
+        restart: () => ipcRenderer.invoke('agent:restart'),
+        openConfig: () => ipcRenderer.invoke('agent:openConfig'),
+        openLogs: () => ipcRenderer.invoke('agent:openLogs'),
+    },
     // System information
     isElectron: true,
     platform: process.platform,

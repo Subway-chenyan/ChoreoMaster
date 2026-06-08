@@ -531,25 +531,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
     };
 
     return (
-        <div style={{ width: widthPx, minWidth: widthPx, maxWidth: widthPx }} className="bg-slate-900 border-r border-slate-800 flex flex-col shadow-xl z-20 flex-shrink-0">
+        <div style={{ width: widthPx, minWidth: widthPx, maxWidth: widthPx }} className="app-sidebar bg-slate-900 border-r border-slate-800 flex flex-col shadow-xl z-20 flex-shrink-0">
             {/* Top Tabs */}
             <div className="flex items-center bg-slate-950 border-b border-slate-800 px-1 pt-1">
-                <button onClick={() => setActiveTab('library')} className={`flex-1 py-3 flex justify-center ${activeTab === 'library' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="项目库">
+                <button onClick={() => setActiveTab('library')} className={`flex-1 min-h-12 py-3 flex justify-center ${activeTab === 'library' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="项目库">
                     <Library size={18} />
                 </button>
-                <button onClick={() => setActiveTab('project')} className={`flex-1 py-3 flex justify-center ${activeTab === 'project' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="项目设置">
+                <button onClick={() => setActiveTab('project')} className={`flex-1 min-h-12 py-3 flex justify-center ${activeTab === 'project' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="项目设置">
                     <Settings size={18} />
                 </button>
-                <button onClick={() => setActiveTab('formations')} className={`flex-1 py-3 flex justify-center ${activeTab === 'formations' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="队形列表">
+                <button onClick={() => setActiveTab('formations')} className={`flex-1 min-h-12 py-3 flex justify-center ${activeTab === 'formations' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="队形列表">
                     <Film size={18} />
                 </button>
-                <button onClick={() => setActiveTab('performers')} className={`flex-1 py-3 flex justify-center ${activeTab === 'performers' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="演员管理">
+                <button onClick={() => setActiveTab('performers')} className={`flex-1 min-h-12 py-3 flex justify-center ${activeTab === 'performers' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="演员管理">
                     <Users size={18} />
                 </button>
-                <button onClick={() => setActiveTab('props')} className={`flex-1 py-3 flex justify-center ${activeTab === 'props' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="道具管理">
+                <button onClick={() => setActiveTab('props')} className={`flex-1 min-h-12 py-3 flex justify-center ${activeTab === 'props' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="道具管理">
                     <Box size={18} />
                 </button>
-                <button onClick={() => setActiveTab('presets')} className={`flex-1 py-3 flex justify-center ${activeTab === 'presets' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="AI预设">
+                <button onClick={() => setActiveTab('presets')} className={`flex-1 min-h-12 py-3 flex justify-center ${activeTab === 'presets' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="AI预设">
                     <Grid size={18} />
                 </button>
             </div>

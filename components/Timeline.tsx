@@ -66,7 +66,7 @@ export const Timeline: React.FC<TimelineProps> = ({
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
-    const [zoom, setZoom] = useState(100); // Pixels per second
+    const [zoom, setZoom] = useState(() => window.matchMedia('(max-width: 1100px)').matches ? 24 : 100);
     const [isScrubbing, setIsScrubbing] = useState(false);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState<string>('');
@@ -82,6 +82,23 @@ export const Timeline: React.FC<TimelineProps> = ({
 
     // Calculate total timeline width
     const totalWidth = Math.max((duration / 1000) * zoom, containerRef.current?.clientWidth || 0);
+
+    useEffect(() => {
+        const container = containerRef.current;
+        if (!container || !window.matchMedia('(max-width: 1100px)').matches) return;
+
+        const fitTimeline = () => {
+            const seconds = Math.max(1, duration / 1000);
+            const fittedZoom = Math.max(8, Math.min(100, (container.clientWidth - 2) / seconds));
+            setZoom(fittedZoom);
+            container.scrollLeft = 0;
+        };
+
+        fitTimeline();
+        const observer = new ResizeObserver(fitTimeline);
+        observer.observe(container);
+        return () => observer.disconnect();
+    }, [duration]);
 
     // Draw waveform
     useEffect(() => {
@@ -192,8 +209,9 @@ export const Timeline: React.FC<TimelineProps> = ({
                     ? '出点必须晚于入点：移动播放头到更靠后的位置，重新点击“设为出点”。'
                     : '';
 
-    const handleMouseDown = (e: React.MouseEvent) => {
+    const handlePointerDown = (e: React.PointerEvent) => {
         if (draggingState) return;
+        e.currentTarget.setPointerCapture(e.pointerId);
 
         // Allow scrubbing anywhere on the timeline background
         const rect = containerRef.current?.getBoundingClientRect();
@@ -205,9 +223,11 @@ export const Timeline: React.FC<TimelineProps> = ({
         }
     };
 
-    const handleFrameDragStart = (e: React.MouseEvent, frame: Frame, type: 'move' | 'resize') => {
+    const handleFrameDragStart = (e: React.PointerEvent, frame: Frame, type: 'move' | 'resize') => {
         e.stopPropagation();
+        e.preventDefault();
         if (editingId === frame.id) return; // prevent drag while editing
+        e.currentTarget.setPointerCapture(e.pointerId);
         // Select frame on drag start
         onSelectFrame(frame.id);
 
@@ -220,7 +240,7 @@ export const Timeline: React.FC<TimelineProps> = ({
         });
     };
 
-    const onMouseMove = (e: React.MouseEvent) => {
+    const onPointerMove = (e: React.PointerEvent) => {
         // Handle Scrubbing
         if (isScrubbing) {
             const rect = containerRef.current?.getBoundingClientRect();
@@ -256,7 +276,7 @@ export const Timeline: React.FC<TimelineProps> = ({
         onFrameUpdate(updatedFrames);
     };
 
-    const onMouseUp = () => {
+    const onPointerUp = () => {
         setIsScrubbing(false);
         if (draggingState) {
             // Final sort on drop to ensure consistency
@@ -269,63 +289,63 @@ export const Timeline: React.FC<TimelineProps> = ({
     return (
         <div
             className="h-auto bg-slate-950 border-t border-slate-800 flex flex-col select-none"
-            onMouseUp={onMouseUp}
-            onMouseMove={onMouseMove}
-            onMouseLeave={onMouseUp}
+            onPointerUp={onPointerUp}
+            onPointerMove={onPointerMove}
+            onPointerCancel={onPointerUp}
         >
             {/* Toolbar */}
-            <div className="h-10 flex items-center px-4 bg-slate-900 border-b border-slate-800 justify-between z-20 relative">
-                <div className="flex items-center gap-2">
-                    <button className="p-1.5 hover:bg-slate-800 rounded text-slate-400" onClick={() => onSeek(0)}><SkipBack size={16} /></button>
+            <div className="timeline-toolbar min-h-12 flex items-center gap-3 px-2 sm:px-4 bg-slate-900 border-b border-slate-800 justify-between z-20 relative overflow-hidden">
+                <div className="flex items-center gap-2 min-w-max">
+                    <button className="coarse-touch-target p-1.5 hover:bg-slate-800 rounded text-slate-400 flex items-center justify-center" onClick={() => onSeek(0)}><SkipBack size={16} /></button>
                     <button
-                        className={`p-1.5 rounded text-white shadow-lg flex items-center gap-1 px-3 transition-colors ${isPlaying ? 'bg-amber-600 hover:bg-amber-500' : 'bg-blue-600 hover:bg-blue-500'}`}
+                        className={`coarse-touch-target p-1.5 rounded text-white shadow-lg flex items-center gap-1 px-3 transition-colors ${isPlaying ? 'bg-amber-600 hover:bg-amber-500' : 'bg-blue-600 hover:bg-blue-500'}`}
                         onClick={onPlayPause}
                     >
                         {isPlaying ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}
                         <span className="text-xs font-bold">{isPlaying ? '暂停' : '播放'}</span>
                     </button>
-                    <span className="font-mono text-slate-300 ml-4 text-sm">{formatTime(currentTime)}</span>
-                    <span className="text-[10px] text-slate-500 ml-2">(空格键)</span>
+                    <span className="timeline-toolbar-time font-mono text-slate-300 ml-4 text-sm">{formatTime(currentTime)}</span>
+                    <span className="desktop-only text-[10px] text-slate-500 ml-2">(空格键)</span>
                     <button
-                        className={`ml-3 text-[11px] px-2 py-1 rounded border transition-colors ${!hasInPoint
+                        className={`desktop-only ml-3 text-[11px] px-2 py-1 rounded border transition-colors ${!hasInPoint
                             ? 'bg-blue-600/20 hover:bg-blue-600/30 border-blue-400 text-blue-100'
                             : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300'
                             }`}
                         onClick={onSetInPoint}
                     >设为入点</button>
                     <button
-                        className={`text-[11px] px-2 py-1 rounded border transition-colors ${hasInPoint && (!hasOutPoint || !hasValidExportRange)
+                        className={`desktop-only text-[11px] px-2 py-1 rounded border transition-colors ${hasInPoint && (!hasOutPoint || !hasValidExportRange)
                             ? 'bg-red-600/20 hover:bg-red-600/30 border-red-400 text-red-100'
                             : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300'
                             }`}
                         onClick={onSetOutPoint}
                     >设为出点</button>
                 </div>
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2 sm:gap-4 min-w-max">
                     <button
                         onClick={onAddFrame}
-                        className="flex items-center gap-1 text-xs bg-slate-800 hover:bg-slate-700 px-2 py-1 rounded border border-slate-700 text-slate-300"
+                        className="coarse-touch-target flex items-center gap-1 text-xs bg-slate-800 hover:bg-slate-700 px-2 py-1 rounded border border-slate-700 text-slate-300"
                         title="在当前时间添加队形"
                     >
                         <PlusCircle size={12} /> 添加
                     </button>
                     <div className="flex items-center gap-1">
-                        <button className="p-1 hover:bg-slate-800 rounded text-slate-400" onClick={() => setZoom(Math.max(20, zoom - 20))}><ZoomOut size={14} /></button>
-                        <div className="w-20 h-1 bg-slate-700 rounded-full overflow-hidden">
+                        <button className="coarse-touch-target p-1 hover:bg-slate-800 rounded text-slate-400 flex items-center justify-center" onClick={() => setZoom(Math.max(20, zoom - 20))}><ZoomOut size={14} /></button>
+                        <div className="desktop-only w-20 h-1 bg-slate-700 rounded-full overflow-hidden">
                             <div className="h-full bg-slate-500" style={{ width: `${(zoom / 200) * 100}%` }}></div>
                         </div>
-                        <button className="p-1 hover:bg-slate-800 rounded text-slate-400" onClick={() => setZoom(Math.min(200, zoom + 20))}><ZoomIn size={14} /></button>
+                        <button className="coarse-touch-target p-1 hover:bg-slate-800 rounded text-slate-400 flex items-center justify-center" onClick={() => setZoom(Math.min(200, zoom + 20))}><ZoomIn size={14} /></button>
                         <button
                             onClick={onToggleExportIncludeLabels}
-                            className={`text-xs ml-2 px-2 py-1 rounded border ${exportIncludeLabels ? 'bg-blue-600 text-white border-blue-500' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'}`}
+                            className={`desktop-only text-xs ml-2 px-2 py-1 rounded border ${exportIncludeLabels ? 'bg-blue-600 text-white border-blue-500' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'}`}
                             title="切换导出时是否显示姓名"
                         >显示姓名</button>
                         <button
                             onClick={onToggleExportIncludeGrid}
-                            className={`text-xs ml-1 px-2 py-1 rounded border ${exportIncludeGrid ? 'bg-blue-600 text-white border-blue-500' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'}`}
+                            className={`desktop-only text-xs ml-1 px-2 py-1 rounded border ${exportIncludeGrid ? 'bg-blue-600 text-white border-blue-500' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'}`}
                             title="切换导出时是否显示网格"
                         >显示网格</button>
-                        <span className="text-[11px] ml-2 flex items-center gap-1 text-slate-300">分辨率:
+                        <span className="desktop-only text-[11px] ml-2 flex items-center gap-1 text-slate-300">分辨率:
                             <select
                                 value={exportResolution ?? '1080p'}
                                 onChange={(e) => onSetExportResolution?.(e.target.value as '1080p' | '2k' | '4k')}
@@ -340,7 +360,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                     <button
                         onClick={onExportVideo}
                         disabled={isExporting}
-                        className={`text-xs px-3 py-1 rounded border ${isExporting
+                        className={`desktop-only text-xs px-3 py-1 rounded border ${isExporting
                             ? 'bg-gray-500 text-white border-gray-500'
                             : hasValidExportRange
                                 ? 'bg-green-600 hover:bg-green-500 text-white border-green-500'
@@ -378,9 +398,9 @@ export const Timeline: React.FC<TimelineProps> = ({
 
             {/* Scrollable Timeline Area */}
             <div
-                className={`overflow-x-auto overflow-y-hidden relative custom-scrollbar bg-slate-950 ${isScrubbing ? 'cursor-col-resize' : 'cursor-default'}`}
+                className={`timeline-scroll overflow-x-auto max-[1100px]:overflow-x-hidden overflow-y-hidden relative custom-scrollbar bg-slate-950 ${isScrubbing ? 'cursor-col-resize' : 'cursor-default'}`}
                 ref={containerRef}
-                onMouseDown={handleMouseDown}
+                onPointerDown={handlePointerDown}
                 style={{ height: heightPx }}
             >
                 <div style={{ width: totalWidth, minWidth: '100%' }} className="h-full relative">
@@ -452,9 +472,9 @@ export const Timeline: React.FC<TimelineProps> = ({
                                 style={{ left: (frame.startTime / 1000) * zoom }}
                             >
                                 <div
-                                        onMouseDown={(e) => handleFrameDragStart(e, frame, 'move')}
+                                        onPointerDown={(e) => handleFrameDragStart(e, frame, 'move')}
                                         onClick={() => onSelectFrame(frame.id)}
-                                        className={`relative h-full rounded-lg flex flex-col items-center justify-center cursor-grab active:cursor-grabbing overflow-hidden transition-all border select-none shadow-lg
+                                        className={`timeline-clip relative h-full rounded-lg flex flex-col items-center justify-center cursor-grab active:cursor-grabbing overflow-hidden transition-all border select-none shadow-lg
                                 ${selectedFrameId === frame.id
                                             ? 'bg-slate-700 border-blue-400 shadow-blue-900/20 z-20'
                                             : 'bg-slate-800/90 border-slate-600 hover:bg-slate-700 z-10'
@@ -499,8 +519,8 @@ export const Timeline: React.FC<TimelineProps> = ({
 
                                         {/* Resize Handle (Right) */}
                                         <div
-                                            className="absolute right-0 top-0 bottom-0 w-3 cursor-ew-resize hover:bg-blue-500/30 z-30 flex items-center justify-center group/handle"
-                                            onMouseDown={(e) => handleFrameDragStart(e, frame, 'resize')}
+                                            className="absolute right-0 top-0 bottom-0 w-6 md:w-3 cursor-ew-resize hover:bg-blue-500/30 z-30 flex items-center justify-center group/handle touch-none"
+                                            onPointerDown={(e) => handleFrameDragStart(e, frame, 'resize')}
                                             title="拖动调整时长"
                                         >
                                             <div className="w-1 h-4 bg-slate-500 rounded-full group-hover/handle:bg-blue-400" />

@@ -90,22 +90,24 @@ async def _save_upload(upload: UploadFile, directory: Path, fallback: str) -> st
 
 @app.post("/api/choreo/sessions", response_model=TestSessionResponse)
 async def create_multimodal_session(
-    prompt: str = Form(...),
+    prompt: str = Form(default=""),
     segment_start_ms: int = Form(default=0, alias="segmentStartMs"),
     segment_end_ms: int = Form(default=30000, alias="segmentEndMs"),
-    audio: UploadFile = File(...),
-    sketch: UploadFile = File(...),
+    audio: UploadFile | None = File(default=None),
+    sketch: UploadFile | None = File(default=None),
     _user_id: str = Depends(require_member_credential),
 ) -> TestSessionResponse:
     try:
         validate_multimodal_configuration()
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
-    if not audio.content_type or not audio.content_type.startswith("audio/"):
+    if not prompt.strip() and audio is None and sketch is None:
+        raise HTTPException(status_code=400, detail="文本、音频、图片至少提供一种。")
+    if audio and (not audio.content_type or not audio.content_type.startswith("audio/")):
         raise HTTPException(status_code=400, detail="请选择有效的音频文件。")
-    if not sketch.content_type or not sketch.content_type.startswith("image/"):
+    if sketch and (not sketch.content_type or not sketch.content_type.startswith("image/")):
         raise HTTPException(status_code=400, detail="请选择有效的图片文件。")
-    if segment_end_ms <= segment_start_ms:
+    if audio and segment_end_ms <= segment_start_ms:
         raise HTTPException(status_code=400, detail="结束时间必须晚于开始时间。")
 
     upload_dir = (
@@ -115,8 +117,8 @@ async def create_multimodal_session(
     )
     upload_dir.mkdir(parents=True, exist_ok=True)
     try:
-        audio_path = await _save_upload(audio, upload_dir, ".audio")
-        sketch_path = await _save_upload(sketch, upload_dir, ".jpg")
+        audio_path = await _save_upload(audio, upload_dir, ".audio") if audio else None
+        sketch_path = await _save_upload(sketch, upload_dir, ".jpg") if sketch else None
         request = TestSessionCreateRequest(
             audioPath=audio_path,
             sketchPath=sketch_path,

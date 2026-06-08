@@ -7,7 +7,7 @@ import { Timeline } from './components/Timeline';
 import { HelpModal } from './components/HelpModal';
 import { useTheme } from './contexts/ThemeContext';
 import { DEFAULT_COLORS, STAGE_ASPECT_RATIO } from './constants';
-import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, Maximize2, ChevronDown, ChevronUp } from 'lucide-react';
+import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, Maximize2, ChevronDown, ChevronUp, Menu, X, Download, GripHorizontal } from 'lucide-react';
 import { StageConfig } from './types';
 
 const DEFAULT_FRAME: Frame = {
@@ -22,6 +22,11 @@ const DEFAULT_FRAME: Frame = {
 interface ClipboardItem {
   performer: Performer;
   positions: Record<string, Position>; // Map FrameID -> Position
+}
+
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
 }
 
 const App: React.FC = () => {
@@ -53,9 +58,51 @@ const App: React.FC = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [stageToolbarCollapsed, setStageToolbarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState<number>(320);
-  const [timelineHeight, setTimelineHeight] = useState<number>(160);
+  const [timelineHeight, setTimelineHeight] = useState<number>(() => (
+    window.matchMedia('(max-width: 1100px)').matches ? 112 : 160
+  ));
+  const [timelineCollapsed, setTimelineCollapsed] = useState(false);
+  const previousTimelineHeightRef = useRef(160);
+  const [isCompactLayout, setIsCompactLayout] = useState(() => window.matchMedia('(max-width: 1100px)').matches);
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [undoStack, setUndoStack] = useState<any[]>([]);
   const [redoStack, setRedoStack] = useState<any[]>([]);
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 1100px)');
+    const syncLayout = () => {
+      setIsCompactLayout(media.matches);
+      if (media.matches) {
+        setSidebarCollapsed(true);
+        setTimelineHeight((height) => height === 160 ? 112 : Math.min(height, 320));
+        setStageToolbarCollapsed(true);
+      }
+    };
+    syncLayout();
+    media.addEventListener('change', syncLayout);
+    return () => media.removeEventListener('change', syncLayout);
+  }, []);
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setInstallPrompt(event as BeforeInstallPromptEvent);
+    };
+    const handleInstalled = () => setInstallPrompt(null);
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleInstalled);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleInstalled);
+    };
+  }, []);
+
+  const handleInstallPwa = async () => {
+    if (!installPrompt) return;
+    await installPrompt.prompt();
+    await installPrompt.userChoice;
+    setInstallPrompt(null);
+  };
 
   // 新增：3D 模式相关状态
   const [viewMode, setViewMode] = useState<'2d' | '3d'>('2d');
@@ -91,6 +138,37 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('choreo-ai-config', JSON.stringify(aiConfig));
   }, [aiConfig]);
+
+  useEffect(() => {
+    if (!window.electronAPI?.isElectron) return;
+
+    let cancelled = false;
+    const syncDesktopAgent = async () => {
+      for (let attempt = 0; attempt < 60 && !cancelled; attempt += 1) {
+        try {
+          const runtime = await window.electronAPI.agent.getRuntime();
+          if (runtime.baseUrl && runtime.accessToken) {
+            setAiConfig((current) => ({
+              ...current,
+              backendUrl: runtime.baseUrl,
+              memberToken: runtime.accessToken,
+            }));
+            return;
+          }
+          if (runtime.state === 'error') return;
+        } catch (error) {
+          console.error('Failed to read desktop Agent runtime:', error);
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    };
+    void syncDesktopAgent();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Sync 3D stage config depth with 2D aspect ratio
   useEffect(() => {
@@ -1953,6 +2031,28 @@ const App: React.FC = () => {
     });
   };
 
+  const cycleTimelineHeight = () => {
+    if (timelineCollapsed) {
+      setTimelineCollapsed(false);
+      setTimelineHeight(previousTimelineHeightRef.current);
+      return;
+    }
+    const presets = isCompactLayout ? [112, 200, 320] : [100, 180, 300];
+    const next = presets.find((height) => height > timelineHeight + 12) ?? presets[0];
+    setTimelineHeight(next);
+  };
+
+  const toggleTimelineVisibility = () => {
+    setTimelineCollapsed((collapsed) => {
+      if (collapsed) {
+        setTimelineHeight(previousTimelineHeightRef.current);
+        return false;
+      }
+      previousTimelineHeightRef.current = timelineHeight;
+      return true;
+    });
+  };
+
   // Always use currentPositions() to ensure scrubbing shows real-time interpolation
   const displayedPositions = currentPositions();
 
@@ -1963,26 +2063,43 @@ const App: React.FC = () => {
   );
 
   return (
-    <div className={`h-screen w-screen flex flex-col ${theme === 'dark' ? 'bg-slate-950 text-slate-200' : 'bg-gray-50 text-gray-900'} overflow-hidden`}>
+    <div className={`min-h-[100dvh] h-[100dvh] w-screen flex flex-col safe-top safe-bottom ${theme === 'dark' ? 'bg-slate-950 text-slate-200' : 'bg-gray-50 text-gray-900'} overflow-hidden`}>
       {/* Help Modal */}
       <HelpModal isOpen={showHelp} onClose={() => setShowHelp(false)} />
 
       {/* Top Bar */}
-      <div className={`h-12 flex items-center justify-between px-4 border-b ${theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-gray-200'}`}>
-        <div className="flex items-center gap-2">
-          <h1 className={`text-lg font-bold ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>CosFormation</h1>
-        </div>
+      <div className={`min-h-12 flex items-center justify-between px-3 sm:px-4 border-b ${theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-gray-200'}`}>
         <div className="flex items-center gap-2">
           <button
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            className={`compact-only touch-target -ml-2 items-center justify-center rounded-lg ${theme === 'dark' ? 'text-slate-300 hover:bg-slate-800' : 'text-gray-700 hover:bg-gray-100'}`}
+            aria-label={sidebarCollapsed ? '打开侧栏' : '关闭侧栏'}
+          >
+            {sidebarCollapsed ? <Menu size={22} /> : <X size={22} />}
+          </button>
+          <h1 className={`text-base sm:text-lg font-bold ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>CosFormation</h1>
+        </div>
+        <div className="flex items-center gap-2">
+          {installPrompt && (
+            <button
+              onClick={handleInstallPwa}
+              className="touch-target flex items-center justify-center gap-1.5 rounded-lg px-2 text-xs text-blue-300 hover:bg-slate-800 hover:text-blue-200"
+              title="安装 ChoreoMaster"
+            >
+              <Download size={18} />
+              <span className="desktop-only">安装</span>
+            </button>
+          )}
+          <button
             onClick={() => setShowHelp(true)}
-            className={`p-2 rounded-lg transition-colors ${theme === 'dark' ? 'hover:bg-slate-800 text-slate-400 hover:text-blue-400' : 'hover:bg-gray-100 text-gray-600 hover:text-blue-600'}`}
+            className={`touch-target flex items-center justify-center rounded-lg transition-colors ${theme === 'dark' ? 'hover:bg-slate-800 text-slate-400 hover:text-blue-400' : 'hover:bg-gray-100 text-gray-600 hover:text-blue-600'}`}
             title="帮助 (F1)"
           >
             <HelpCircle size={20} />
           </button>
           <button
             onClick={() => setViewMode(viewMode === '2d' ? '3d' : '2d')}
-            className={`p-2 rounded-lg transition-colors ${viewMode === '3d'
+            className={`touch-target flex items-center justify-center rounded-lg transition-colors ${viewMode === '3d'
               ? 'bg-purple-600 text-white hover:bg-purple-500'
               : theme === 'dark'
                 ? 'hover:bg-slate-800 text-slate-400 hover:text-purple-400'
@@ -1994,7 +2111,7 @@ const App: React.FC = () => {
           </button>
           <button
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            className={`p-2 rounded-lg transition-colors ${theme === 'dark' ? 'hover:bg-slate-800 text-slate-400 hover:text-green-400' : 'hover:bg-gray-100 text-gray-600 hover:text-green-600'}`}
+            className={`desktop-only touch-target flex items-center justify-center rounded-lg transition-colors ${theme === 'dark' ? 'hover:bg-slate-800 text-slate-400 hover:text-green-400' : 'hover:bg-gray-100 text-gray-600 hover:text-green-600'}`}
             title={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
           >
             <Maximize2 size={20} />
@@ -2003,7 +2120,7 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden relative">
         {!sidebarCollapsed && (
           <Sidebar
             performers={performers}
@@ -2057,15 +2174,16 @@ const App: React.FC = () => {
             onSaveProject={handleSaveProject}
             projectHasChanges={projectHasChanges}
           />)}
-        {!sidebarCollapsed && (
+        {!sidebarCollapsed && !isCompactLayout && (
           <div
-            onMouseDown={(e) => {
+            onPointerDown={(e) => {
               e.preventDefault();
               const startX = e.clientX;
               const startW = sidebarWidth;
+              e.currentTarget.setPointerCapture(e.pointerId);
               document.body.style.cursor = 'ew-resize';
               document.body.style.userSelect = 'none';
-              const onMove = (ev: MouseEvent) => {
+              const onMove = (ev: PointerEvent) => {
                 const dx = ev.clientX - startX;
                 const next = Math.max(240, Math.min(480, startW + dx));
                 setSidebarWidth(next);
@@ -2073,11 +2191,11 @@ const App: React.FC = () => {
               const onUp = () => {
                 document.body.style.cursor = '';
                 document.body.style.userSelect = '';
-                window.removeEventListener('mousemove', onMove);
-                window.removeEventListener('mouseup', onUp);
+                window.removeEventListener('pointermove', onMove);
+                window.removeEventListener('pointerup', onUp);
               };
-              window.addEventListener('mousemove', onMove);
-              window.addEventListener('mouseup', onUp);
+              window.addEventListener('pointermove', onMove);
+              window.addEventListener('pointerup', onUp);
             }}
             className={`${theme === 'dark' ? 'bg-slate-800 hover:bg-blue-600' : 'bg-gray-300 hover:bg-blue-500'} w-1.5 cursor-ew-resize transition-colors flex-shrink-0 group relative`}
             title="拖动调整侧边栏宽度"
@@ -2091,8 +2209,8 @@ const App: React.FC = () => {
           </div>
         )}
 
-        <div className={`flex-1 flex flex-col relative ${theme === 'dark' ? 'bg-black' : 'bg-gray-100'}`}>
-          <div className="absolute top-4 left-4 z-10 pointer-events-none">
+        <div className={`min-w-0 flex-1 flex flex-col relative ${theme === 'dark' ? 'bg-black' : 'bg-gray-100'}`}>
+          <div className="stage-status absolute top-4 left-4 z-10 pointer-events-none">
             <div className={`backdrop-blur px-4 py-2 rounded-lg border text-sm shadow-xl ${theme === 'dark' ? 'bg-slate-900/90 border-slate-700 text-slate-400' : 'bg-white/90 border-gray-300 text-gray-700'}`}>
               正在编辑队形：<span className="text-blue-400 font-bold ml-1">{frames.find(f => f.id === currentFrameId)?.name || '过渡/GAP'}</span>
               <div className={`text-[10px] mt-1 ${theme === 'dark' ? 'text-slate-500' : 'text-gray-500'}`}>{selectedPerformerIds.length} 人已选中</div>
@@ -2136,26 +2254,74 @@ const App: React.FC = () => {
           )}
 
           <div
-            onMouseDown={(e) => {
+            onPointerDown={(e) => {
+              e.preventDefault();
+              if (timelineCollapsed) {
+                setTimelineCollapsed(false);
+                setTimelineHeight(previousTimelineHeightRef.current);
+                return;
+              }
               const startY = e.clientY;
               const startH = timelineHeight;
-              const onMove = (ev: MouseEvent) => {
+              let moved = false;
+              e.currentTarget.setPointerCapture(e.pointerId);
+              const onMove = (ev: PointerEvent) => {
                 const dy = ev.clientY - startY;
-                const next = Math.max(100, Math.min(300, startH - dy));
+                if (Math.abs(dy) > 4) moved = true;
+                const minimum = isCompactLayout ? 88 : 100;
+                const maximum = Math.min(
+                  isCompactLayout ? 360 : 300,
+                  Math.round(window.innerHeight * 0.58),
+                );
+                const next = Math.max(minimum, Math.min(maximum, startH - dy));
                 setTimelineHeight(next);
               };
               const onUp = () => {
-                window.removeEventListener('mousemove', onMove);
-                window.removeEventListener('mouseup', onUp);
+                window.removeEventListener('pointermove', onMove);
+                window.removeEventListener('pointerup', onUp);
+                window.removeEventListener('pointercancel', onUp);
+                if (!moved) cycleTimelineHeight();
               };
-              window.addEventListener('mousemove', onMove);
-              window.addEventListener('mouseup', onUp);
+              window.addEventListener('pointermove', onMove);
+              window.addEventListener('pointerup', onUp);
+              window.addEventListener('pointercancel', onUp);
             }}
-            className={`h-2 cursor-ns-resize ${theme === 'dark' ? 'bg-slate-800 hover:bg-slate-700' : 'bg-gray-300 hover:bg-gray-400'}`}
-          />
+            className={`timeline-resizer relative z-30 h-7 min-h-7 min-[1101px]:h-2 min-[1101px]:min-h-2 cursor-ns-resize touch-none flex items-center justify-center transition-colors ${theme === 'dark' ? 'bg-slate-800 hover:bg-slate-700' : 'bg-gray-300 hover:bg-gray-400'}`}
+            role="slider"
+            aria-label="调整时间轴高度"
+            aria-valuemin={isCompactLayout ? 88 : 100}
+            aria-valuemax={isCompactLayout ? 360 : 300}
+            aria-valuenow={timelineCollapsed ? 0 : Math.round(timelineHeight)}
+            title="上下拖动调整时间轴高度，轻点切换高度"
+          >
+            <div className={`compact-only h-6 min-w-32 items-center justify-center gap-1 rounded-full border pl-3 pr-1 text-[10px] shadow ${theme === 'dark' ? 'border-slate-600 bg-slate-900 text-slate-300' : 'border-gray-300 bg-white text-gray-600'}`}>
+              <GripHorizontal className="pointer-events-none" size={16} />
+              <span className="pointer-events-none">{timelineCollapsed ? '时间轴已隐藏' : `时间轴 ${Math.round(timelineHeight)}px`}</span>
+              <button
+                type="button"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={toggleTimelineVisibility}
+                className={`ml-1 flex h-5 w-7 items-center justify-center rounded-full transition-colors ${theme === 'dark' ? 'hover:bg-slate-700' : 'hover:bg-gray-100'}`}
+                aria-label={timelineCollapsed ? '展开时间轴' : '隐藏时间轴'}
+                title={timelineCollapsed ? '展开时间轴' : '隐藏时间轴'}
+              >
+                {timelineCollapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              </button>
+            </div>
+            <button
+              type="button"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={toggleTimelineVisibility}
+              className={`desktop-only absolute right-2 h-6 min-w-10 items-center justify-center rounded border transition-colors ${theme === 'dark' ? 'border-slate-600 bg-slate-900 text-slate-300 hover:bg-slate-700' : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-100'}`}
+              aria-label={timelineCollapsed ? '展开时间轴' : '隐藏时间轴'}
+              title={timelineCollapsed ? '展开时间轴' : '隐藏时间轴'}
+            >
+              {timelineCollapsed ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            </button>
+          </div>
 
           {/* Floating Stage Toolbar */}
-          <div className={`absolute bottom-4 right-4 z-20 backdrop-blur p-2 rounded-lg border shadow-xl animate-in fade-in slide-in-from-bottom-4 ${theme === 'dark' ? 'bg-slate-900/90 border-slate-700' : 'bg-white/90 border-gray-300'}`}>
+          <div className={`stage-toolbar absolute bottom-3 right-3 z-20 backdrop-blur p-1.5 lg:p-2 rounded-lg border shadow-xl animate-in fade-in slide-in-from-bottom-4 mobile-compact-scroll ${theme === 'dark' ? 'bg-slate-900/90 border-slate-700' : 'bg-white/90 border-gray-300'}`}>
             {stageToolbarCollapsed ? (
               <button
                 onClick={() => setStageToolbarCollapsed(false)}
@@ -2165,7 +2331,7 @@ const App: React.FC = () => {
                 <ChevronUp size={16} />
               </button>
             ) : (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 min-w-max">
                 <button
                   onClick={() => setStageToolbarCollapsed(true)}
                   className={`${theme === 'dark' ? 'text-slate-300 hover:text-white' : 'text-gray-600 hover:text-gray-900'} p-1 rounded`}
@@ -2173,7 +2339,7 @@ const App: React.FC = () => {
                 >
                   <ChevronDown size={16} />
                 </button>
-                <div className={`w-px h-6 mx-1 ${theme === 'dark' ? 'bg-slate-700' : 'bg-gray-300'}`}></div>
+                <div className={`desktop-only w-px h-6 mx-1 ${theme === 'dark' ? 'bg-slate-700' : 'bg-gray-300'}`}></div>
                 <button
                   onClick={() => setShowLabels(!showLabels)}
                   className={`p-2 rounded transition-colors ${showLabels ? 'text-blue-400' : theme === 'dark' ? 'text-slate-500 hover:bg-slate-800' : 'text-gray-500 hover:bg-gray-100'}`}
@@ -2188,7 +2354,7 @@ const App: React.FC = () => {
                   <button onClick={() => handleGridZoom(0.5)} className={theme === 'dark' ? 'text-slate-500 hover:text-white' : 'text-gray-500 hover:text-gray-900'}><PlusCircle size={16} /></button>
                 </div>
                 <div className={`w-px h-6 mx-1 ${theme === 'dark' ? 'bg-slate-700' : 'bg-gray-300'}`}></div>
-                <div className="flex items-center gap-1">
+                <div className="desktop-only flex items-center gap-1">
                   <button
                     onClick={() => setStageAspectRatio(16 / 9)}
                     className={`px-2 py-1 text-xs rounded transition-colors ${stageAspectRatio === 16 / 9 ? 'bg-blue-600 text-white' : theme === 'dark' ? 'bg-slate-800 text-slate-400 hover:bg-slate-700' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}
@@ -2204,8 +2370,8 @@ const App: React.FC = () => {
                     4:3
                   </button>
                 </div>
-                <div className={`w-px h-6 mx-1 ${theme === 'dark' ? 'bg-slate-700' : 'bg-gray-300'}`}></div>
-                <div className="flex items-center gap-2">
+                <div className={`desktop-only w-px h-6 mx-1 ${theme === 'dark' ? 'bg-slate-700' : 'bg-gray-300'}`}></div>
+                <div className="desktop-only flex items-center gap-2">
                   <span className={`text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-gray-600'}`}>比例</span>
                   <input
                     type="number"
@@ -2245,7 +2411,7 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      <Timeline
+      {!timelineCollapsed && <Timeline
         frames={frames}
         duration={Math.max(
           totalDuration + 10000,
@@ -2278,7 +2444,7 @@ const App: React.FC = () => {
         exportHeightPx={exportResolution === '4k' ? 2160 : exportResolution === '2k' ? 1440 : 1080}
         exportResolution={exportResolution}
         onSetExportResolution={setExportResolution}
-      />
+      />}
     </div>
   );
 };

@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.agent import multimodal_choreo_graph
@@ -173,30 +174,37 @@ class FakeGeminiProvider:
             ],
         )
 
-    def generate_initial_proposal(self, audio, sketch, requirements):
+    def generate_initial_proposal(
+        self,
+        audio,
+        sketch,
+        requirements,
+        start_ms,
+        end_ms,
+    ):
         return InitialDesignProposal(
-            summary="以草图为基础，在音乐增强点切换三组关键队形。",
+            summary="根据当前可用输入，在片段内切换三组关键队形。",
             formations=[
                 ProposedFormation(
                     id="formation-1",
                     name="静态开场",
-                    timeMs=0,
-                    description="保持草图初始空间关系。",
+                    timeMs=start_ms,
+                    description="建立清晰的初始空间关系。",
                 ),
                 ProposedFormation(
                     id="formation-2",
                     name="中段展开",
-                    timeMs=9000,
+                    timeMs=min(start_ms + 9000, end_ms),
                     description="演员向舞台两侧展开。",
                 ),
                 ProposedFormation(
                     id="formation-3",
                     name="高潮收束",
-                    timeMs=21000,
-                    description="演员围绕道具重新聚合。",
+                    timeMs=min(start_ms + 21000, end_ms),
+                    description="演员重新聚合。",
                 ),
             ],
-            questions=sketch.questions,
+            questions=sketch.questions if sketch else [],
         )
 
     def refine_design(self, proposal, mapping, feedback, audio, sketch):
@@ -210,8 +218,16 @@ class FakeGeminiProvider:
     def generate_design_summary(self, proposal, mapping, audio, sketch):
         return DesignSummary(
             summary="三段关键队形从克制开场逐步发展到集中收束。",
-            musicRationale="队形切换对应 9 秒和 21 秒的音乐变化。",
-            sketchRationale="矩形和方形作为道具，椭圆和三角形作为演员。",
+            musicRationale=(
+                "队形切换对应音乐变化。"
+                if audio
+                else "本次未使用音频输入。"
+            ),
+            sketchRationale=(
+                "矩形和方形作为道具，椭圆和三角形作为演员。"
+                if sketch
+                else "本次未使用草图输入。"
+            ),
             formationSequence=[formation.name for formation in proposal.formations],
             risks=["演员靠近道具时需检查间距。"],
         )
@@ -225,6 +241,37 @@ class FakeGeminiProvider:
         start_ms,
         end_ms,
     ):
+        if sketch is None:
+            entities = [
+                AIEntityCreate(
+                    tempId=f"actor-{index + 1}",
+                    type="performer",
+                    name=f"演员{index + 1}",
+                    color="#3B82F6",
+                )
+                for index in range(4)
+            ]
+            positions = {
+                entity.temp_id: Position(x=20 + index * 20, y=50)
+                for index, entity in enumerate(entities)
+            }
+            frames = [
+                AIFrameCreate(
+                    tempId=formation.id,
+                    name=formation.name,
+                    startTime=formation.time_ms,
+                    duration=2000,
+                    positions=positions,
+                )
+                for formation in proposal.formations
+            ]
+            return AIChoreoPlan(
+                intent="generate_formation",
+                summary=summary.summary,
+                entitiesToCreate=entities,
+                framesToCreate=frames,
+            )
+
         elements = {element.id: element for element in sketch.elements}
         entities = []
         actor_source_ids = []
@@ -386,6 +433,112 @@ def test_multimodal_session_interrupts_resume_and_creates_draft(
     )
     assert checkpoints.status_code == 200
     assert len(checkpoints.json()) >= 10
+
+
+@pytest.mark.parametrize(
+    ("prompt", "include_audio", "include_sketch"),
+    [
+        ("设计一个四人逐步聚拢的三段队形。", False, False),
+        ("", True, False),
+        ("", False, True),
+        ("根据音乐设计三个关键队形。", True, False),
+    ],
+    ids=["text-only", "audio-only", "image-only", "text-audio"],
+)
+def test_multimodal_session_accepts_flexible_input_combinations(
+    monkeypatch,
+    prompt,
+    include_audio,
+    include_sketch,
+):
+    monkeypatch.setattr(
+        multimodal_choreo_graph,
+        "get_multimodal_provider",
+        lambda: FakeGeminiProvider(),
+    )
+    monkeypatch.setattr(
+        "app.main.validate_multimodal_configuration",
+        lambda: None,
+    )
+    files = {}
+    if include_audio:
+        files["audio"] = ("music.wav", b"fake-audio", "audio/wav")
+    if include_sketch:
+        files["sketch"] = ("sketch.jpg", b"fake-image", "image/jpeg")
+
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer dev-member-token"}
+    created = client.post(
+        "/api/choreo/sessions",
+        headers=headers,
+        data={
+            "prompt": prompt,
+            "segmentStartMs": "0",
+            "segmentEndMs": "30000",
+        },
+        files=files or None,
+    )
+    assert created.status_code == 200
+
+    result = client.post(
+        f"/api/choreo/sessions/{created.json()['id']}/run",
+        headers=headers,
+    )
+    assert result.status_code == 200
+    body = result.json()
+    assert body["status"] == "waiting_for_user"
+    assert body["interrupt"]["type"] == "initial_approval"
+    assert (body["audioAnalysis"] is not None) is include_audio
+    assert (body["sketchAnalysis"] is not None) is include_sketch
+    purposes = [call["purpose"] for call in body["callLog"]]
+    assert ("audio_analysis" in purposes) is include_audio
+    assert ("sketch_analysis" in purposes) is include_sketch
+
+
+def test_text_only_session_can_create_complete_draft(monkeypatch):
+    monkeypatch.setattr(
+        multimodal_choreo_graph,
+        "get_multimodal_provider",
+        lambda: FakeGeminiProvider(),
+    )
+    monkeypatch.setattr(
+        "app.main.validate_multimodal_configuration",
+        lambda: None,
+    )
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer dev-member-token"}
+    created = client.post(
+        "/api/choreo/sessions",
+        headers=headers,
+        data={"prompt": "创建四名演员和三个关键队形。"},
+    )
+    assert created.status_code == 200
+    session_id = created.json()["id"]
+    client.post(f"/api/choreo/sessions/{session_id}/run", headers=headers)
+
+    summary = client.post(
+        f"/api/choreo/sessions/{session_id}/resume",
+        headers=headers,
+        json={"action": "edit", "feedback": "保持四人编制。"},
+    )
+    assert summary.status_code == 200
+    assert summary.json()["interrupt"]["type"] == "final_approval"
+
+    completed = client.post(
+        f"/api/choreo/sessions/{session_id}/resume",
+        headers=headers,
+        json={"action": "approve"},
+    )
+    assert completed.status_code == 200
+    body = completed.json()
+    assert body["status"] == "completed"
+    entity_ids = {
+        entity["tempId"]
+        for entity in body["draft"]["plan"]["entitiesToCreate"]
+    }
+    assert entity_ids
+    for frame in body["draft"]["plan"]["framesToCreate"]:
+        assert set(frame["positions"]) == entity_ids
 
 
 def test_multimodal_session_reports_missing_gemini_key(monkeypatch, tmp_path):
