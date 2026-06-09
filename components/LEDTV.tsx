@@ -20,7 +20,7 @@ const LEDTV: React.FC<LEDTVProps> = ({ config, mediaCache = {}, currentTime = 0,
   const [imageTexture, setImageTexture] = useState<THREE.Texture | null>(null);
 
   const height = config.ledHeight || 6;
-  const width = config.width;
+  const width = config.ledWidth ?? config.width;
   const depth = config.depth;
   const content = config.ledContent;
 

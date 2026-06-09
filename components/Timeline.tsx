@@ -19,22 +19,9 @@ interface TimelineProps {
     heightPx?: number;
     inPointMs?: number | null;
     outPointMs?: number | null;
-    onSetInPoint?: () => void;
-    onSetOutPoint?: () => void;
     onExportVideo?: () => void;
     isExporting?: boolean;
     exportProgress?: number;
-    exportIncludeLabels?: boolean;
-    exportIncludeGrid?: boolean;
-    onToggleExportIncludeLabels?: () => void;
-    onToggleExportIncludeGrid?: () => void;
-    exportWidthPx?: number;
-    exportHeightPx?: number;
-    exportResolution?: '1080p' | '2k' | '4k';
-    onSetExportResolution?: (v: '1080p' | '2k' | '4k') => void;
-    exportCameraAngle?: 'judge' | 'overhead';
-    onSetExportCameraAngle?: (v: 'judge' | 'overhead') => void;
-    viewMode?: '2d' | '3d';
 }
 
 export const Timeline: React.FC<TimelineProps> = ({
@@ -53,22 +40,9 @@ export const Timeline: React.FC<TimelineProps> = ({
     heightPx = 160,
     inPointMs,
     outPointMs,
-    onSetInPoint,
-    onSetOutPoint,
-    onExportVideo
-    , isExporting
-    , exportProgress
-    , exportIncludeLabels
-    , exportIncludeGrid
-    , onToggleExportIncludeLabels
-    , onToggleExportIncludeGrid
-    , exportWidthPx
-    , exportHeightPx
-    , exportResolution
-    , onSetExportResolution
-    , exportCameraAngle
-    , onSetExportCameraAngle
-    , viewMode
+    onExportVideo,
+    isExporting,
+    exportProgress
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -202,19 +176,6 @@ export const Timeline: React.FC<TimelineProps> = ({
             || candidates[candidates.length - 1];
     }, [zoom]);
 
-    const hasInPoint = typeof inPointMs === 'number';
-    const hasOutPoint = typeof outPointMs === 'number';
-    const hasValidExportRange = hasInPoint && hasOutPoint && outPointMs! > inPointMs!;
-    const exportGuideText = !hasInPoint && !hasOutPoint
-        ? '先移动播放头到开始位置，点击“设为入点”；再移动到结束位置，点击“设为出点”。'
-        : !hasInPoint
-            ? '还缺入点：移动播放头到导出开始位置，然后点击“设为入点”。'
-            : !hasOutPoint
-                ? '还缺出点：移动播放头到导出结束位置，然后点击“设为出点”。'
-                : !hasValidExportRange
-                    ? '出点必须晚于入点：移动播放头到更靠后的位置，重新点击“设为出点”。'
-                    : '';
-
     const handlePointerDown = (e: React.PointerEvent) => {
         if (draggingState) return;
         e.currentTarget.setPointerCapture(e.pointerId);
@@ -312,20 +273,6 @@ export const Timeline: React.FC<TimelineProps> = ({
                     </button>
                     <span className="timeline-toolbar-time font-mono text-slate-300 ml-4 text-sm">{formatTime(currentTime)}</span>
                     <span className="desktop-only text-[10px] text-slate-500 ml-2">(空格键)</span>
-                    <button
-                        className={`desktop-only ml-3 text-[11px] px-2 py-1 rounded border transition-colors ${!hasInPoint
-                            ? 'bg-blue-600/20 hover:bg-blue-600/30 border-blue-400 text-blue-100'
-                            : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300'
-                            }`}
-                        onClick={onSetInPoint}
-                    >设为入点</button>
-                    <button
-                        className={`desktop-only text-[11px] px-2 py-1 rounded border transition-colors ${hasInPoint && (!hasOutPoint || !hasValidExportRange)
-                            ? 'bg-red-600/20 hover:bg-red-600/30 border-red-400 text-red-100'
-                            : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300'
-                            }`}
-                        onClick={onSetOutPoint}
-                    >设为出点</button>
                 </div>
                 <div className="flex items-center gap-2 sm:gap-4 min-w-max">
                     <button
@@ -341,52 +288,15 @@ export const Timeline: React.FC<TimelineProps> = ({
                             <div className="h-full bg-slate-500" style={{ width: `${(zoom / 200) * 100}%` }}></div>
                         </div>
                         <button className="coarse-touch-target p-1 hover:bg-slate-800 rounded text-slate-400 flex items-center justify-center" onClick={() => setZoom(Math.min(200, zoom + 20))}><ZoomIn size={14} /></button>
-                        <button
-                            onClick={onToggleExportIncludeLabels}
-                            className={`desktop-only text-xs ml-2 px-2 py-1 rounded border ${exportIncludeLabels ? 'bg-blue-600 text-white border-blue-500' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'}`}
-                            title="切换导出时是否显示姓名"
-                        >显示姓名</button>
-                        <button
-                            onClick={onToggleExportIncludeGrid}
-                            className={`desktop-only text-xs ml-1 px-2 py-1 rounded border ${exportIncludeGrid ? 'bg-blue-600 text-white border-blue-500' : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'}`}
-                            title="切换导出时是否显示网格"
-                        >显示网格</button>
-                        <span className="desktop-only text-[11px] ml-2 flex items-center gap-1 text-slate-300">分辨率:
-                            <select
-                                value={exportResolution ?? '1080p'}
-                                onChange={(e) => onSetExportResolution?.(e.target.value as '1080p' | '2k' | '4k')}
-                                className="bg-slate-800 text-slate-300 border border-slate-700 rounded px-1 py-0.5 text-[11px] focus:outline-none focus:border-blue-500"
-                                disabled={isExporting}
-                            >
-                                <option value="1080p">1080p (1920×1080)</option>
-                                <option value="2k">2K (2560×1440)</option>
-                                <option value="4k">4K (3840×2160)</option>
-                            </select>
-                        </span>
-                        {viewMode === '3d' && (
-                            <span className="desktop-only text-[11px] ml-2 flex items-center gap-1 text-slate-300">机位:
-                                <select
-                                    value={exportCameraAngle ?? 'judge'}
-                                    onChange={(e) => onSetExportCameraAngle?.(e.target.value as 'judge' | 'overhead')}
-                                    className="bg-slate-800 text-slate-300 border border-slate-700 rounded px-1 py-0.5 text-[11px] focus:outline-none focus:border-blue-500"
-                                    disabled={isExporting}
-                                >
-                                    <option value="judge">评委视角</option>
-                                    <option value="overhead">45°俯视</option>
-                                </select>
-                            </span>
-                        )}
                     <button
                         onClick={onExportVideo}
                         disabled={isExporting}
-                        className={`desktop-only text-xs px-3 py-1 rounded border ${isExporting
+                        className={`text-xs ml-2 px-3 py-1 rounded border ${isExporting
                             ? 'bg-gray-500 text-white border-gray-500'
-                            : hasValidExportRange
-                                ? 'bg-green-600 hover:bg-green-500 text-white border-green-500'
-                                : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-amber-500'
+                            : 'bg-green-600 hover:bg-green-500 text-white border-green-500'
                             }`}
-                        title={isExporting ? '导出中...' : hasValidExportRange ? (viewMode === '3d' ? '导出3D视频' : '导出视频') : '请先设置入点和出点'}
-                    >{isExporting ? '导出中…' : (viewMode === '3d' ? '导出3D' : '导出视频')}</button>
+                        title={isExporting ? '导出中...' : '打开导出设置'}
+                    >{isExporting ? '导出中…' : '导出视频'}</button>
                     {isExporting && (
                         <div className="flex items-center gap-2 ml-2">
                             <div className="w-32 h-2 bg-slate-700 rounded overflow-hidden">
@@ -402,19 +312,6 @@ export const Timeline: React.FC<TimelineProps> = ({
                 </div>
                 </div>
             </div>
-            {exportGuideText && !isExporting && (
-                <div className="min-h-8 flex items-center gap-2 px-4 bg-amber-950/40 border-b border-amber-900/60 text-[12px] text-amber-100">
-                    <span className="h-2 w-2 rounded-full bg-amber-400 flex-shrink-0" />
-                    <span>{exportGuideText}</span>
-                    {hasInPoint && (
-                        <span className="ml-auto font-mono text-amber-200">入点 {formatTime(inPointMs!)}</span>
-                    )}
-                    {hasOutPoint && (
-                        <span className="font-mono text-amber-200">出点 {formatTime(outPointMs!)}</span>
-                    )}
-                </div>
-            )}
-
             {/* Scrollable Timeline Area */}
             <div
                 className={`timeline-scroll overflow-x-auto max-[1100px]:overflow-x-hidden overflow-y-hidden relative custom-scrollbar bg-slate-950 ${isScrubbing ? 'cursor-col-resize' : 'cursor-default'}`}

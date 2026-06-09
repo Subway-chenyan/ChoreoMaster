@@ -1,12 +1,38 @@
 import type { StageConfig } from '../types';
 import type { Position } from '../types';
 
+export const DEFAULT_WING_WIDTH = 4;
+
+export function getWingWidth(config: StageConfig): number {
+  return Math.max(0, config.wingWidth ?? DEFAULT_WING_WIDTH);
+}
+
+export function getTotalStageWidth(config: StageConfig): number {
+  return config.width + getWingWidth(config) * 2;
+}
+
+export function getStageXBounds(config: StageConfig): { min: number; max: number } {
+  const wingPercent = (getWingWidth(config) / config.width) * 100;
+  return { min: -wingPercent, max: 100 + wingPercent };
+}
+
+export function stageXToViewPercent(x: number, config: StageConfig): number {
+  const bounds = getStageXBounds(config);
+  return ((x - bounds.min) / (bounds.max - bounds.min)) * 100;
+}
+
+export function viewPercentToStageX(x: number, config: StageConfig): number {
+  const bounds = getStageXBounds(config);
+  return bounds.min + (x / 100) * (bounds.max - bounds.min);
+}
+
 /** Convert 2D percentage coordinates to 3D world coordinates */
 export function mapTo3D(
   pos: Position,
   config: StageConfig
 ): [number, number, number] {
   // x: 0-100 → -width/2 to width/2 (left to right)
+  // The main stage is 0-100; wing coordinates extend below 0 and above 100.
   const x3d = ((pos.x - 50) / 50) * (config.width / 2);
 
   // y: 0-100 → -depth/2 to depth/2
@@ -35,7 +61,7 @@ export function mapTo2D(
   const y = ((z3d / (config.depth / 2)) * 50) + 50;
 
   return {
-    x: Math.max(0, Math.min(100, x)),
+    x,
     y: Math.max(0, Math.min(100, y)),
     z: y3d
   };

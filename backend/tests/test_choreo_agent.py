@@ -3,7 +3,7 @@ import json
 from app.agent import run_choreo_agent
 from app.agent import choreo_graph
 from app.agent import model_provider
-from app.models import AIChoreoPlan, AIChoreoRequest, Frame, Performer, Position, ProjectSnapshot
+from app.models import AIChoreoPlan, AIChoreoRequest, AIFrameCreate, Frame, Performer, Position, ProjectSnapshot, StageConfig
 
 
 def test_initializes_performers_groups_and_door_props():
@@ -235,3 +235,37 @@ def test_deepseek_provider_adds_missing_full_rotation_frame(monkeypatch):
     assert len(plan.frames_to_create) == 3
     assert plan.frames_to_create[-1].start_time == 6000
     assert plan.frames_to_create[-1].positions["b"].x == 65
+
+
+def test_allows_positions_inside_stage_wings(monkeypatch):
+    def fake_model_provider(request, intent, requirements, resolved_context):
+        return AIChoreoPlan(
+            intent="generate_formation",
+            summary="wing formation",
+            framesToCreate=[
+                AIFrameCreate(
+                    tempId="wing-frame",
+                    name="Wing frame",
+                    startTime=0,
+                    duration=2000,
+                    positions={
+                        "left": Position(x=-15, y=50),
+                        "outside": Position(x=-30, y=50),
+                    },
+                )
+            ],
+        )
+
+    monkeypatch.setattr(choreo_graph, "generate_plan_with_model", fake_model_provider)
+    project = ProjectSnapshot(stageConfig=StageConfig(width=20, depth=11.25, wingWidth=4))
+
+    plan, _steps = run_choreo_agent(
+        AIChoreoRequest(
+            prompt="place performers in the wings",
+            taskType="generate_formation",
+            project=project,
+        )
+    )
+
+    assert plan.frames_to_create[0].positions["left"].x == -15
+    assert plan.frames_to_create[0].positions["outside"].x == -20

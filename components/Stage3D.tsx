@@ -2,6 +2,7 @@ import React from 'react';
 import { Canvas } from '@react-three/fiber';
 import Scene3D from '../3d_components/Scene3D';
 import { Performer, Position, StageConfig } from '../types';
+import { getTotalStageWidth } from '../utils/coordinates';
 
 interface Stage3DProps {
   performers: Performer[];
@@ -41,10 +42,17 @@ const Stage3D: React.FC<Stage3DProps> = ({
   onDragEnd
 }) => {
   const handleSelect = (id: string) => { onSelect(id === '' ? [] : [id]); };
+  const totalWidth = getTotalStageWidth(stageConfig);
+  const cameraDistance = Math.max(20, totalWidth * 0.85, stageConfig.depth * 1.35);
 
   return (
     <div className="flex-1 bg-slate-950 relative">
-      <Canvas shadows camera={{ position: [0, 15, 20], fov: 50 }} gl={{ antialias: true }}>
+      <Canvas
+        key={`${totalWidth}-${stageConfig.depth}`}
+        shadows
+        camera={{ position: [0, cameraDistance * 0.75, cameraDistance], fov: 50 }}
+        gl={{ antialias: true }}
+      >
         <Scene3D
           performers={performers}
           positions={positions}

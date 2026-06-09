@@ -29,6 +29,13 @@ button {
   -webkit-tap-highlight-color: transparent;
 }
 
+.project-transfer-control {
+  font-family: inherit;
+  font-size: 12px !important;
+  font-weight: 400;
+  line-height: 16px !important;
+}
+
 .touch-target {
   min-width: 44px;
   min-height: 44px;
@@ -56,6 +63,14 @@ button {
   touch-action: none;
 }
 
+.stage-toolbar {
+  bottom: 36px !important;
+}
+
+.timeline-resizer-control {
+  transform: translateY(0);
+}
+
 .compact-only {
   display: none !important;
 }
@@ -66,13 +81,11 @@ button {
   }
 
   .app-sidebar {
-    position: absolute;
-    left: 0;
-    top: 0;
+    position: relative;
     height: 100%;
     width: clamp(210px, 36vw, 320px) !important;
     min-width: clamp(210px, 36vw, 320px) !important;
-    max-width: 85vw !important;
+    max-width: min(85vw, 320px) !important;
     z-index: 20;
     box-shadow: 8px 0 24px rgb(2 6 23 / 0.22);
   }

@@ -1,7 +1,13 @@
 
 import React, { useRef, useState, useEffect, useMemo } from 'react';
-import { Performer, Position, SelectionBox, ToolMode, PerformerGroup } from '../types';
-import { STAGE_ASPECT_RATIO } from '../constants';
+import { Performer, Position, SelectionBox, ToolMode, PerformerGroup, StageConfig } from '../types';
+import {
+  getStageXBounds,
+  getTotalStageWidth,
+  getWingWidth,
+  stageXToViewPercent,
+  viewPercentToStageX,
+} from '../utils/coordinates';
 
 interface StageProps {
   performers: Performer[];
@@ -17,6 +23,7 @@ interface StageProps {
   showLabels?: boolean;
   gridScale?: number;
   onZoom?: (delta: number) => void;
+  stageConfig: StageConfig;
 }
 
 const ShapeIcon: React.FC<{ shape: string; color: string; size: number; className?: string }> = ({ shape, color, size, className }) => {
@@ -57,7 +64,7 @@ function getPolygonClipPath(points: { x: number; y: number }[] | undefined): str
   ).join(', ')})`;
 }
 
-export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: number }> = ({
+export const Stage: React.FC<StageProps> = ({
   performers,
   performerGroups = [],
   hiddenGroupIds = [],
@@ -71,12 +78,51 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
   showLabels = true,
   gridScale = 1,
   onZoom,
-  aspectRatio = STAGE_ASPECT_RATIO,
-  maxWidthPx = 1200
+  stageConfig
 }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
+  const [availableSize, setAvailableSize] = useState({ width: 0, height: 0 });
+  const stageXBounds = useMemo(() => getStageXBounds(stageConfig), [stageConfig]);
+  const wingWidth = getWingWidth(stageConfig);
+  const totalStageWidth = getTotalStageWidth(stageConfig);
+  const leftMainEdge = stageXToViewPercent(0, stageConfig);
+  const rightMainEdge = stageXToViewPercent(100, stageConfig);
+  const visualAspectRatio = totalStageWidth / stageConfig.depth;
+  const fittedSize = useMemo(() => {
+    if (availableSize.width <= 0 || availableSize.height <= 0) {
+      return { width: 0, height: 0 };
+    }
+    let width = Math.min(1200, availableSize.width);
+    let height = width / visualAspectRatio;
+    if (height > availableSize.height) {
+      height = availableSize.height;
+      width = height * visualAspectRatio;
+    }
+    return { width, height };
+  }, [availableSize, visualAspectRatio]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const updateSize = () => {
+      const styles = window.getComputedStyle(container);
+      const horizontalPadding = parseFloat(styles.paddingLeft) + parseFloat(styles.paddingRight);
+      const verticalPadding = parseFloat(styles.paddingTop) + parseFloat(styles.paddingBottom);
+      setAvailableSize({
+        width: Math.max(0, container.clientWidth - horizontalPadding),
+        height: Math.max(0, container.clientHeight - verticalPadding),
+      });
+    };
+
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
 
   interface ResizeState {
     id: string;
@@ -100,7 +146,7 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
   const getPercentagePos = (clientX: number, clientY: number) => {
     if (!stageRef.current) return { x: 0, y: 0 };
     const rect = stageRef.current.getBoundingClientRect();
-    const x = ((clientX - rect.left) / rect.width) * 100;
+    const x = viewPercentToStageX(((clientX - rect.left) / rect.width) * 100, stageConfig);
     const y = ((clientY - rect.top) / rect.height) * 100;
     return { x, y };
   };
@@ -145,14 +191,12 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
     if (resizeState && stageRef.current && onUpdatePerformer) {
       // Resizing Logic
       const rect = stageRef.current.getBoundingClientRect();
-      const STAGE_WIDTH_METERS = 20;
-
       const deltaXPixels = e.clientX - resizeState.startClientX;
       const deltaYPixels = e.clientY - resizeState.startClientY;
 
       // Convert pixels to meters
       // Ratio: STAGE_WIDTH_METERS / rect.width
-      const metersPerPx = STAGE_WIDTH_METERS / rect.width;
+      const metersPerPx = totalStageWidth / rect.width;
 
       let deltaW = 0;
       let deltaH = 0;
@@ -195,7 +239,7 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
       const deltaXPx = e.clientX - dragState.startX;
       const deltaYPx = e.clientY - dragState.startY;
 
-      const deltaX = (deltaXPx / rect.width) * 100;
+      const deltaX = (deltaXPx / rect.width) * (stageXBounds.max - stageXBounds.min);
       const deltaY = (deltaYPx / rect.height) * 100;
 
       const updates: { id: string; pos: Position }[] = [];
@@ -205,7 +249,7 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
         updates.push({
           id,
           pos: {
-            x: Math.max(0, Math.min(100, initialPos.x + deltaX)),
+            x: Math.max(stageXBounds.min, Math.min(stageXBounds.max, initialPos.x + deltaX)),
             y: Math.max(0, Math.min(100, initialPos.y + deltaY)),
           }
         });
@@ -244,7 +288,7 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
         const pos = positions[p.id];
         if (!pos) return false; // Skip if not in frame
 
-        const px = rect.left + (pos.x / 100) * rect.width;
+        const px = rect.left + (stageXToViewPercent(pos.x, stageConfig) / 100) * rect.width;
         const py = rect.top + (pos.y / 100) * rect.height;
         return px >= sbLeft && px <= sbRight && py >= sbTop && py <= sbBottom;
       }).map(p => p.id);
@@ -351,6 +395,7 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
 
   return (
     <div
+      ref={containerRef}
       className="flex-1 min-h-0 bg-slate-900 flex items-center justify-center p-2 sm:p-4 lg:p-8 overflow-hidden select-none"
     >
       {/* Stage Container */}
@@ -358,9 +403,9 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
         ref={stageRef}
         className="stage-surface relative bg-slate-800 border border-slate-700 shadow-2xl transition-transform duration-75 ease-out"
         style={{
-          aspectRatio: `${aspectRatio}`,
-          width: '100%',
-          maxWidth: `${maxWidthPx}px`,
+          width: fittedSize.width > 0 ? `${fittedSize.width}px` : '100%',
+          height: fittedSize.height > 0 ? `${fittedSize.height}px` : 'auto',
+          aspectRatio: `${visualAspectRatio}`,
           cursor: mode === ToolMode.SELECT ? 'default' : 'crosshair'
         }}
         onPointerDown={handlePointerDown}
@@ -369,8 +414,30 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
         onPointerCancel={handlePointerUp}
         onWheel={handleWheel}
       >
+        <div
+          className="absolute inset-y-0 left-0 bg-slate-950/55 border-r-2 border-dashed border-amber-400/70 pointer-events-none"
+          style={{ width: `${leftMainEdge}%` }}
+        />
+        <div
+          className="absolute inset-y-0 right-0 bg-slate-950/55 border-l-2 border-dashed border-amber-400/70 pointer-events-none"
+          style={{ width: `${100 - rightMainEdge}%` }}
+        />
+
         {/* Dynamic Grid Lines */}
         {gridLines}
+
+        {wingWidth > 0 && (
+          <>
+            <div className="absolute left-0 top-2 pointer-events-none text-[10px] font-medium tracking-widest text-amber-300/80" style={{ width: `${leftMainEdge}%`, textAlign: 'center' }}>左备场区</div>
+            <div className="absolute right-0 top-2 pointer-events-none text-[10px] font-medium tracking-widest text-amber-300/80" style={{ width: `${100 - rightMainEdge}%`, textAlign: 'center' }}>右备场区</div>
+          </>
+        )}
+        <div
+          className="absolute top-2 pointer-events-none text-center text-[10px] font-medium tracking-wide text-slate-300/75"
+          style={{ left: `${leftMainEdge}%`, width: `${rightMainEdge - leftMainEdge}%` }}
+        >
+          主舞台 {Number(stageConfig.width.toFixed(2))}m × {Number(stageConfig.depth.toFixed(2))}m
+        </div>
 
         {/* Stage Front Indicator */}
         <div className="absolute bottom-0 left-0 right-0 h-2 bg-slate-600 opacity-50 text-center text-[10px] tracking-widest text-white">舞台前沿</div>
@@ -385,11 +452,10 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
 
           // Render Prop
           if (performer.type === 'prop') {
-            const STAGE_WIDTH_METERS = 20; // Assume 20m width
-            const STAGE_DEPTH_METERS = STAGE_WIDTH_METERS / aspectRatio;
+            const STAGE_DEPTH_METERS = stageConfig.depth;
 
             // width(长) for 2D x-axis, depth(宽) for 2D y-axis
-            const widthPct = ((performer.width || 1) / STAGE_WIDTH_METERS) * 100;
+            const widthPct = ((performer.width || 1) / totalStageWidth) * 100;
             const heightPct = ((performer.depth || 1) / STAGE_DEPTH_METERS) * 100;
 
             return (
@@ -398,7 +464,7 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
                 onPointerDown={(e) => handlePerformerPointerDown(e, performer.id)}
                 className={`absolute cursor-grab active:cursor-grabbing z-10 group flex items-center justify-center`}
                 style={{
-                  left: `${pos.x}%`,
+                  left: `${stageXToViewPercent(pos.x, stageConfig)}%`,
                   top: `${pos.y}%`,
                   width: `${widthPct}%`,
                   height: `${heightPct}%`,
@@ -438,7 +504,7 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
               onPointerDown={(e) => handlePerformerPointerDown(e, performer.id)}
               className={`absolute min-w-11 min-h-11 flex items-center justify-center transform -translate-x-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing z-10 group touch-none`}
               style={{
-                left: `${pos.x}%`,
+                left: `${stageXToViewPercent(pos.x, stageConfig)}%`,
                 top: `${pos.y}%`,
               }}
             >
@@ -472,7 +538,7 @@ export const Stage: React.FC<StageProps & { aspectRatio?: number; maxWidthPx?: n
                         ${isSelected ? 'opacity-100' : 'opacity-100'}
                     `}
               style={{
-                left: `${pos.x}%`,
+                left: `${stageXToViewPercent(pos.x, stageConfig)}%`,
                 top: `${pos.y}%`,
               }}
             >

@@ -1,5 +1,6 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Performer, Frame, PerformerShape, PerformerGroup, PerformerType, AIConfig, AIChoreoPlan } from '../types';
 import { Plus, Users, Trash2, Download, Grid, Music, Sparkles, Wand2, Film, Copy, Search, Settings, Scaling, Upload, FilePlus, Circle, Square, Triangle, UserCheck, UserX, Eye, EyeOff, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreVertical, Palette, Edit2, Box, Library, Save } from 'lucide-react';
 import { PRESET_SHAPES, DEFAULT_COLORS } from '../constants';
@@ -226,6 +227,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const [isValidatingAgentAccess, setIsValidatingAgentAccess] = useState(false);
 
     // Group State
+    const [showAddForm, setShowAddForm] = useState(false);
     const [showNewGroupForm, setShowNewGroupForm] = useState(false);
     const [newGroupName, setNewGroupName] = useState('');
     const [newGroupColor, setNewGroupColor] = useState(DEFAULT_COLORS[0]);
@@ -304,6 +306,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         if (newPerformerName.trim()) {
             onAddPerformer(newPerformerName, newPerformerColor, newPerformerShape);
             setNewPerformerName('');
+            setShowAddForm(false);
             const nextColorIndex = (DEFAULT_COLORS.indexOf(newPerformerColor) + 1) % DEFAULT_COLORS.length;
             setNewPerformerColor(DEFAULT_COLORS[nextColorIndex]);
         }
@@ -319,6 +322,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 rotation: 0
             });
             setNewPerformerName('');
+            setShowAddForm(false);
             const nextColorIndex = (DEFAULT_COLORS.indexOf(newPerformerColor) + 1) % DEFAULT_COLORS.length;
             setNewPerformerColor(DEFAULT_COLORS[nextColorIndex]);
         }
@@ -382,10 +386,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const handleContextMenu = (e: React.MouseEvent, performerId: string | null, groupId: string | null = null) => {
         e.preventDefault();
         e.stopPropagation();
+        const menuWidth = 208;
+        const menuHeight = 320;
+        const viewportPadding = 8;
         setContextMenuState({
             show: true,
-            x: e.clientX,
-            y: e.clientY,
+            x: Math.max(viewportPadding, Math.min(e.clientX, window.innerWidth - menuWidth - viewportPadding)),
+            y: Math.max(viewportPadding, Math.min(e.clientY, window.innerHeight - menuHeight - viewportPadding)),
             performerId,
             groupId,
         });
@@ -533,7 +540,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     };
 
     return (
-        <div style={isCompactLayout ? undefined : { width: widthPx, minWidth: widthPx, maxWidth: widthPx }} className="app-sidebar bg-slate-900 border-r border-slate-800 flex flex-col shadow-xl z-20 flex-shrink-0">
+        <div style={isCompactLayout ? undefined : { width: widthPx, minWidth: widthPx, maxWidth: widthPx }} className="app-sidebar min-h-0 overflow-hidden bg-slate-900 border-r border-slate-800 flex flex-col shadow-xl z-20 flex-shrink-0">
             {/* Top Tabs */}
             <div className="flex items-center bg-slate-950 border-b border-slate-800 px-1 pt-1">
                 <button onClick={() => setActiveTab('library')} className={`flex-1 min-h-12 py-3 flex justify-center ${activeTab === 'library' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="项目库">
@@ -556,7 +563,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar bg-slate-900 p-4">
+            <div className={`flex-1 min-h-0 overflow-x-hidden custom-scrollbar bg-slate-900 ${
+                activeTab === 'performers' || activeTab === 'props'
+                    ? 'overflow-hidden'
+                    : 'overflow-y-auto p-4'
+            }`}>
 
                 {/* LIBRARY TAB */}
                 {activeTab === 'library' && (
@@ -574,11 +585,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         <div className="mt-4 pt-4 border-t border-slate-800">
                             <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">导入 / 导出</h3>
                             <div className="space-y-2">
-                                <label className="w-full flex items-center gap-3 px-3 py-2 bg-slate-800 hover:bg-slate-700 rounded text-slate-300 transition-colors text-xs cursor-pointer">
+                                <label className="project-transfer-control w-full h-10 box-border flex items-center justify-start gap-3 px-3 bg-slate-800 hover:bg-slate-700 rounded text-slate-300 transition-colors cursor-pointer">
                                     <Upload size={14} /> 导入项目 (JSON)
                                     <input type="file" accept=".json" className="hidden" onChange={onImportProject} />
                                 </label>
-                                <button onClick={onExport} className="w-full flex items-center gap-3 px-3 py-2 bg-slate-800 hover:bg-slate-700 rounded text-slate-300 transition-colors text-xs">
+                                <button type="button" onClick={onExport} className="project-transfer-control w-full h-10 box-border appearance-none border-0 flex items-center justify-start gap-3 px-3 bg-slate-800 hover:bg-slate-700 rounded text-slate-300 transition-colors">
                                     <Download size={14} /> 导出项目 (JSON)
                                 </button>
                             </div>
@@ -636,13 +647,79 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             </label>
                         </div>
 
-                        {/* 3D 舞台设置 */}
+                        {/* 舞台设置 */}
                         <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
                             <div className="flex items-center gap-2 mb-3">
-                                <span className="text-xs font-bold text-slate-400 uppercase">3D 舞台设置</span>
+                                <span className="text-xs font-bold text-slate-400 uppercase">舞台尺寸与显示</span>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3 mb-3">
+                                <div className="space-y-2">
+                                    <label className="text-xs text-slate-400">舞台宽度</label>
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="number"
+                                            step={0.5}
+                                            min={1}
+                                            max={100}
+                                            value={stageConfig?.width ?? 20}
+                                            onChange={(e) => onStageConfigChange({ width: Math.max(1, Number(e.target.value)) })}
+                                            className="min-w-0 flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                                        />
+                                        <span className="text-xs text-slate-500">米</span>
+                                    </div>
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-xs text-slate-400">舞台深度</label>
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="number"
+                                            step={0.5}
+                                            min={1}
+                                            max={100}
+                                            value={stageConfig?.depth ?? 11.25}
+                                            onChange={(e) => onStageConfigChange({ depth: Math.max(1, Number(e.target.value)) })}
+                                            className="min-w-0 flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                                        />
+                                        <span className="text-xs text-slate-500">米</span>
+                                    </div>
+                                </div>
                             </div>
 
                             {/* LED 高度 */}
+                            <div className="space-y-2 mb-3">
+                                <label className="text-xs text-slate-400">左右备场区宽度（每侧）</label>
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        type="number"
+                                        step={0.5}
+                                        min={0}
+                                        max={20}
+                                        value={stageConfig?.wingWidth ?? 4}
+                                        onChange={(e) => onStageConfigChange({ wingWidth: Math.max(0, Number(e.target.value)) })}
+                                        className="flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                                    />
+                                    <span className="text-xs text-slate-500">米</span>
+                                </div>
+                                <p className="text-[10px] leading-4 text-slate-500">备场区参与演员、道具、轨迹和视频导出。</p>
+                            </div>
+
+                            <div className="space-y-2 mb-3">
+                                <label className="text-xs text-slate-400">LED 屏幕宽度</label>
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        type="number"
+                                        step={0.5}
+                                        min={1}
+                                        max={60}
+                                        value={stageConfig?.ledWidth ?? stageConfig?.width ?? 20}
+                                        onChange={(e) => onStageConfigChange({ ledWidth: Math.max(1, Number(e.target.value)) })}
+                                        className="flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                                    />
+                                    <span className="text-xs text-slate-500">米</span>
+                                </div>
+                            </div>
+
                             <div className="space-y-2 mb-3">
                                 <label className="text-xs text-slate-400">LED 屏幕高度</label>
                                 <div className="flex items-center gap-2">
@@ -762,8 +839,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
                 {/* PERFORMERS & PROPS TAB */}
                 {(activeTab === 'performers' || activeTab === 'props') && (
-                    <div className="h-full flex flex-col">
-                        <div className="flex items-center justify-between mb-4">
+                    <div className="h-full min-h-0 flex flex-col p-4 pb-3">
+                        <div className="flex items-center justify-between mb-3">
                             <h2 className="text-sm font-bold text-slate-400 uppercase">{activeTab === 'props' ? '道具列表' : '演员列表'}</h2>
                             <span className="text-xs text-slate-500">{filteredPerformers.length} {activeTab === 'props' ? '个' : '人'}</span>
                         </div>
@@ -780,8 +857,40 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             />
                         </div>
 
+                        <div className="grid grid-cols-2 gap-2 mb-3">
+                            <button
+                                onClick={() => {
+                                    setShowAddForm((visible) => !visible);
+                                    setShowNewGroupForm(false);
+                                }}
+                                className={`flex items-center justify-center gap-2 px-3 py-2 rounded border text-xs transition-colors ${
+                                    showAddForm
+                                        ? 'bg-blue-600/20 border-blue-500 text-blue-200'
+                                        : 'bg-slate-800/50 hover:bg-slate-700/60 border-slate-700 text-slate-300'
+                                }`}
+                            >
+                                <Plus size={14} />
+                                {showAddForm ? '收起添加' : activeTab === 'props' ? '添加道具' : '添加演员'}
+                                <ChevronDown size={13} className={`transition-transform ${showAddForm ? 'rotate-180' : ''}`} />
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setShowNewGroupForm((visible) => !visible);
+                                    setShowAddForm(false);
+                                }}
+                                className={`flex items-center justify-center gap-2 px-3 py-2 rounded border text-xs transition-colors ${
+                                    showNewGroupForm
+                                        ? 'bg-emerald-600/20 border-emerald-500 text-emerald-200'
+                                        : 'bg-slate-800/50 hover:bg-slate-700/60 border-slate-700 text-slate-300'
+                                }`}
+                            >
+                                <FolderPlus size={14} />
+                                {showNewGroupForm ? '收起分组' : '创建分组'}
+                            </button>
+                        </div>
+
                         {/* Add New Performer / Prop */}
-                        {activeTab === 'props' ? (
+                        {showAddForm && (activeTab === 'props' ? (
                             <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700 mb-3">
                                 <div className="flex flex-col gap-2">
                                     <input
@@ -846,12 +955,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                     </div>
                                 </div>
                             </div>
-                        )}
+                        ))}
 
                         {/* Add New Group Button */}
-                        <div className="mb-3">
+                        <div className={showNewGroupForm ? 'mb-3' : ''}>
                             {!showNewGroupForm ? (
-                                <button onClick={() => setShowNewGroupForm(true)} className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-slate-800/50 hover:bg-slate-700/50 border border-slate-700 hover:border-slate-600 rounded text-slate-300 hover:text-white transition-colors text-xs">
+                                <button onClick={() => setShowNewGroupForm(true)} className="hidden">
                                     <FolderPlus size={14} /> 创建分组
                                 </button>
                             ) : (
@@ -889,7 +998,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         )}
 
                         {/* Performers List with Groups */}
-                        <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+                        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain custom-scrollbar space-y-2 pr-1 pb-2">
                             {/* Groups */}
                             {filteredGroups.map(group => {
                                 const groupPerformers = performersByGroup.grouped[group.id] || [];
@@ -988,11 +1097,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 )}
 
                 {/* Context Menu */}
-                {contextMenuState.show && (
+                {contextMenuState.show && createPortal(
                     <div
                         ref={contextMenuRef}
-                        style={{ position: 'fixed', left: contextMenuState.x, top: contextMenuState.y, zIndex: 50000 }}
-                        className="bg-slate-800 border border-slate-700 rounded-lg shadow-2xl py-1 min-w-[160px] animate-in fade-in zoom-in-95 duration-100"
+                        style={{ position: 'fixed', left: contextMenuState.x, top: contextMenuState.y, zIndex: 100000 }}
+                        className="max-h-[min(70vh,420px)] overflow-y-auto bg-slate-800 border border-slate-700 rounded-lg shadow-2xl py-1 min-w-[176px] animate-in fade-in zoom-in-95 duration-100"
                     >
                         {contextMenuState.performerId && (
                             <>
@@ -1111,7 +1220,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 </button>
                             </>
                         )}
-                    </div>
+                    </div>,
+                    document.body
                 )}
 
                 {/* PRESETS TAB */}

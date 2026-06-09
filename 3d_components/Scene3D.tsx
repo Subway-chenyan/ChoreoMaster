@@ -7,6 +7,7 @@ import Performer3D from './Performer3D';
 import Prop3D from './Prop3D';
 import LEDTV from '../components/LEDTV';
 import { Performer, Position, StageConfig } from '../types';
+import { getTotalStageWidth, getWingWidth, mapTo2D } from '../utils/coordinates';
 
 interface DragContextType {
   isDragging: boolean;
@@ -91,14 +92,12 @@ const Scene3D: React.FC<Scene3DProps> = ({
 
     // Convert 3D position to 2D percentage
     // Using the same logic as mapTo2D
-    const newPos = {
-      x: ((point.x / (stageConfig.width / 2)) * 50) + 50,
-      y: ((point.z / (stageConfig.depth / 2)) * 50) + 50,
-      z: positions[id]?.z || 0
-    };
+    const newPos = mapTo2D(point.x, positions[id]?.z || 0, point.z, stageConfig);
 
     // Clamp to stage bounds
-    newPos.x = Math.max(0, Math.min(100, newPos.x));
+    const totalWidth = getTotalStageWidth(stageConfig);
+    const halfWingPercent = ((totalWidth - stageConfig.width) / 2 / stageConfig.width) * 100;
+    newPos.x = Math.max(-halfWingPercent, Math.min(100 + halfWingPercent, newPos.x));
     newPos.y = Math.max(0, Math.min(100, newPos.y));
 
     onPositionChange([{ id, pos: newPos }]);
@@ -152,7 +151,7 @@ const Scene3D: React.FC<Scene3DProps> = ({
         makeDefault
         minPolarAngle={0}
         maxPolarAngle={Math.PI / 2}
-        maxDistance={50}
+        maxDistance={80}
         minDistance={5}
         target={[0, 0, 0]}
         enableRotate={!contextValue.isDragging && !contextValue.hasSelection}
@@ -164,7 +163,7 @@ const Scene3D: React.FC<Scene3DProps> = ({
         currentTime={currentTime}
         isPlaying={isPlaying}
       />
-      <StageFloor width={stageConfig.width} depth={stageConfig.depth} gridScale={gridScale} />
+      <StageFloor width={stageConfig.width} depth={stageConfig.depth} wingWidth={getWingWidth(stageConfig)} gridScale={gridScale} />
       {visiblePerformers.map(p => {
         const pos = positions[p.id]; if (!pos) return null;
         const commonProps = {
@@ -173,7 +172,7 @@ const Scene3D: React.FC<Scene3DProps> = ({
           position: pos,
           isSelected: selectedIds.includes(p.id),
           onSelect,
-          stageConfig: { width: stageConfig.width, depth: stageConfig.depth },
+          stageConfig,
           onDragStart: handleHeightDragStart,
           onDragEnd: handleHeightDragEnd,
           onPositionChange: readonly ? undefined : (newPos: Position) => handlePositionChange(p.id, newPos)

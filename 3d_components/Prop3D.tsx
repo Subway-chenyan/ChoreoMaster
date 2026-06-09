@@ -2,8 +2,8 @@ import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react'
 import { useFrame, useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
-import { Performer, Position, ExtrudedTextures } from '../types';
-import { mapTo3D, degToRad } from '../utils/coordinates';
+import { Performer, Position, ExtrudedTextures, StageConfig } from '../types';
+import { mapTo3D, mapTo2D, degToRad, getTotalStageWidth } from '../utils/coordinates';
 import { useDragContext } from './Scene3D';
 import { denormalizePoints } from '../components/prop-editor/PolygonUtils';
 
@@ -23,7 +23,7 @@ interface Prop3DProps {
   position: Position;
   isSelected: boolean;
   onSelect: (id: string) => void;
-  stageConfig: { width: number; depth: number };
+  stageConfig: StageConfig;
   onDragStart?: () => void;
   onDragEnd?: () => void;
   onPositionChange?: (pos: Position) => void;
@@ -162,15 +162,12 @@ const Prop3D: React.FC<Prop3DProps> = ({
       raycaster.ray.intersectPlane(dragPlaneRef.current, intersectionPoint);
       if (intersectionPoint) {
         const clampedPoint = intersectionPoint.sub(dragOffsetRef.current);
-        // Clamp to stage bounds
-        clampedPoint.x = Math.max(-stageConfig.width / 2, Math.min(stageConfig.width / 2, clampedPoint.x));
+        // Clamp to the full floor, including both wings.
+        const totalWidth = getTotalStageWidth(stageConfig);
+        clampedPoint.x = Math.max(-totalWidth / 2, Math.min(totalWidth / 2, clampedPoint.x));
         clampedPoint.z = Math.max(-stageConfig.depth / 2, Math.min(stageConfig.depth / 2, clampedPoint.z));
 
-        const newPos = {
-          x: ((clampedPoint.x / (stageConfig.width / 2)) * 50) + 50,
-          y: ((clampedPoint.z / (stageConfig.depth / 2)) * 50) + 50,
-          z: position.z || 0
-        };
+        const newPos = mapTo2D(clampedPoint.x, position.z || 0, clampedPoint.z, stageConfig);
         onPositionChange(newPos);
       }
     }

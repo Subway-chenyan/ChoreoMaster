@@ -8,7 +8,8 @@ import { HelpModal } from './components/HelpModal';
 import { useTheme } from './contexts/ThemeContext';
 import { DEFAULT_COLORS, STAGE_ASPECT_RATIO } from './constants';
 import { createOfflineScene, preloadPropTextures, preloadLEDVideo, type CameraAngle } from './utils/OfflineRenderer3D';
-import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, Maximize2, ChevronDown, ChevronUp, Menu, X, Download, GripHorizontal } from 'lucide-react';
+import { getTotalStageWidth, getWingWidth, stageXToViewPercent, getStageXBounds } from './utils/coordinates';
+import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, Maximize2, ChevronDown, ChevronUp, Menu, X, Download, GripHorizontal, SlidersHorizontal } from 'lucide-react';
 import { StageConfig } from './types';
 
 const DEFAULT_FRAME: Frame = {
@@ -48,14 +49,13 @@ const App: React.FC = () => {
   const [exportIncludeGrid, setExportIncludeGrid] = useState<boolean>(true);
   const [exportResolution, setExportResolution] = useState<'1080p' | '2k' | '4k'>('1080p');
   const [exportCameraAngle, setExportCameraAngle] = useState<CameraAngle>('judge');
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [export2D, setExport2D] = useState(true);
+  const [export3D, setExport3D] = useState(false);
 
   // Stage View State
   const [showLabels, setShowLabels] = useState(true);
   const [gridScale, setGridScale] = useState(1);
-  const [stageAspectRatio, setStageAspectRatio] = useState(16 / 9);
-  const [stageMaxWidth, setStageMaxWidth] = useState<number>(1200);
-  const [ratioW, setRatioW] = useState<number>(16);
-  const [ratioH, setRatioH] = useState<number>(9);
   const [showHelp, setShowHelp] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.matchMedia('(max-width: 1100px)').matches);
   const [stageToolbarCollapsed, setStageToolbarCollapsed] = useState(() => window.matchMedia('(max-width: 1100px)').matches);
@@ -111,6 +111,8 @@ const App: React.FC = () => {
   const [stageConfig, setStageConfig] = useState<StageConfig>({
     width: 20,
     depth: 20 / (16 / 9),
+    wingWidth: 4,
+    ledWidth: 20,
     ledHeight: 6,
     ledContent: { type: 'none' }
   });
@@ -171,14 +173,6 @@ const App: React.FC = () => {
       cancelled = true;
     };
   }, []);
-
-  // Sync 3D stage config depth with 2D aspect ratio
-  useEffect(() => {
-    setStageConfig(prev => ({
-      ...prev,
-      depth: prev.width / stageAspectRatio
-    }));
-  }, [stageAspectRatio]);
 
   // Theme
   const { theme } = useTheme();
@@ -1279,7 +1273,7 @@ const App: React.FC = () => {
         const originalPos = item.positions[f.id] || { x: 50, y: 50 };
         if (!frameUpdates[f.id]) frameUpdates[f.id] = {};
         frameUpdates[f.id][newId] = {
-          x: Math.min(100, Math.max(0, originalPos.x + 2)),
+          x: Math.min(getStageXBounds(stageConfig).max, Math.max(getStageXBounds(stageConfig).min, originalPos.x + 2)),
           y: Math.min(100, Math.max(0, originalPos.y + 2))
         };
       });
@@ -1525,11 +1519,26 @@ const App: React.FC = () => {
     const w = canvas.width;
     const h = canvas.height;
     const scale = w / 1280; // baseline: 1280px wide
-    ctx.fillStyle = bgColor;
+    const stageW = stageConfig.width || 20;
+    const stageD = stageConfig.depth || stageW / STAGE_ASPECT_RATIO;
+    const totalStageW = getTotalStageWidth(stageConfig);
+    const stageAspect = totalStageW / stageD;
+    let renderW = w;
+    let renderH = renderW / stageAspect;
+    if (renderH > h) {
+      renderH = h;
+      renderW = renderH * stageAspect;
+    }
+    const renderX = (w - renderW) / 2;
+    const renderY = (h - renderH) / 2;
+
+    ctx.fillStyle = '#0f172a';
     ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = bgColor;
+    ctx.fillRect(renderX, renderY, renderW, renderH);
     ctx.strokeStyle = '#334155';
     ctx.lineWidth = scale;
-    ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
+    ctx.strokeRect(renderX + 0.5, renderY + 0.5, renderW - 1, renderH - 1);
 
     if (includeGrid) {
       const divisions = Math.round(4 * gridScale);
@@ -1537,10 +1546,10 @@ const App: React.FC = () => {
       ctx.lineWidth = scale;
       ctx.globalAlpha = 0.2;
       for (let i = 0; i <= divisions; i++) {
-        const gx = (i / divisions) * w;
-        ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, h); ctx.stroke();
-        const gy = (i / divisions) * h;
-        ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(w, gy); ctx.stroke();
+        const gx = renderX + (i / divisions) * renderW;
+        ctx.beginPath(); ctx.moveTo(gx, renderY); ctx.lineTo(gx, renderY + renderH); ctx.stroke();
+        const gy = renderY + (i / divisions) * renderH;
+        ctx.beginPath(); ctx.moveTo(renderX, gy); ctx.lineTo(renderX + renderW, gy); ctx.stroke();
       }
       ctx.globalAlpha = 1;
     }
@@ -1552,20 +1561,43 @@ const App: React.FC = () => {
     const hiddenGroupIds = frame?.hiddenGroupIds || [];
 
     const positions = computePositionsAtTime(timeMs);
-    const stageW = stageConfig.width || 20;
-    const stageD = stageConfig.depth || stageW / STAGE_ASPECT_RATIO;
+    const leftMainEdge = renderX + stageXToViewPercent(0, stageConfig) / 100 * renderW;
+    const rightMainEdge = renderX + stageXToViewPercent(100, stageConfig) / 100 * renderW;
+
+    ctx.fillStyle = 'rgba(2,6,23,0.55)';
+    ctx.fillRect(renderX, renderY, leftMainEdge - renderX, renderH);
+    ctx.fillRect(rightMainEdge, renderY, renderX + renderW - rightMainEdge, renderH);
+    ctx.strokeStyle = 'rgba(245,158,11,0.8)';
+    ctx.lineWidth = Math.max(2, 2 * scale);
+    ctx.setLineDash([8 * scale, 6 * scale]);
+    ctx.beginPath();
+    ctx.moveTo(leftMainEdge, renderY);
+    ctx.lineTo(leftMainEdge, renderY + renderH);
+    ctx.moveTo(rightMainEdge, renderY);
+    ctx.lineTo(rightMainEdge, renderY + renderH);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    if (getWingWidth(stageConfig) > 0) {
+      ctx.fillStyle = 'rgba(252,211,77,0.8)';
+      ctx.font = `${Math.round(11 * scale)}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText('左备场区', renderX + (leftMainEdge - renderX) / 2, renderY + 10 * scale);
+      ctx.fillText('右备场区', rightMainEdge + (renderX + renderW - rightMainEdge) / 2, renderY + 10 * scale);
+    }
 
     // Draw performers
     performers.forEach(p => {
       if (p.groupId && hiddenGroupIds.includes(p.groupId)) return;
       const pos = positions[p.id];
       if (!pos) return;
-      const cx = (pos.x / 100) * w;
-      const cy = (pos.y / 100) * h;
+      const cx = renderX + (stageXToViewPercent(pos.x, stageConfig) / 100) * renderW;
+      const cy = renderY + (pos.y / 100) * renderH;
 
       if (p.type === 'prop') {
-        const propW = (p.width || 1) / stageW * w;
-        const propD = (p.depth || 1) / stageD * h;
+        const propW = (p.width || 1) / totalStageW * renderW;
+        const propD = (p.depth || 1) / stageD * renderH;
         const rot = (p.rotation || 0) * Math.PI / 180;
 
         ctx.save();
@@ -1639,34 +1671,15 @@ const App: React.FC = () => {
     });
 
     ctx.fillStyle = 'rgba(100,116,139,0.5)';
-    ctx.fillRect(0, h - 8 * scale, w, 8 * scale);
+    ctx.fillRect(renderX, renderY + renderH - 8 * scale, renderW, 8 * scale);
     ctx.fillStyle = '#ffffff';
     ctx.font = `${Math.round(10 * scale)}px sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'alphabetic';
-    ctx.fillText('舞台前沿', Math.floor(w / 2), h - 2 * scale);
+    ctx.fillText('舞台前沿', Math.floor(renderX + renderW / 2), renderY + renderH - 2 * scale);
   };
 
-  const handleSetInPoint = () => { setInPointMs(currentTime); };
-  const handleSetOutPoint = () => { setOutPointMs(currentTime); };
-
-  const handleExportVideo = async () => {
-    // Route to 3D export when in 3D mode
-    if (viewMode === '3d') {
-      if (inPointMs == null || outPointMs == null || outPointMs <= inPointMs) {
-        if (inPointMs == null && outPointMs == null) {
-          alert('请先设置导出范围。\n\n1. 将播放头移动到视频开始位置，点击"设为入点"。\n2. 将播放头移动到视频结束位置，点击"设为出点"。\n3. 再点击"导出3D视频"。');
-        } else if (inPointMs == null) {
-          alert('还没有设置入点。\n\n将播放头移动到导出开始位置，然后点击时间轴上的"设为入点"。');
-        } else if (outPointMs == null) {
-          alert('还没有设置出点。\n\n将播放头移动到导出结束位置，然后点击时间轴上的"设为出点"。');
-        } else {
-          alert('导出范围无效：出点必须晚于入点。\n\n请把播放头移动到更靠后的位置，重新点击"设为出点"。');
-        }
-        return;
-      }
-      return handleExportVideo3D();
-    }
+  const handleExportVideo2D = async () => {
     if (inPointMs == null || outPointMs == null || outPointMs <= inPointMs) {
       if (inPointMs == null && outPointMs == null) {
         alert('请先设置导出范围。\n\n1. 将播放头移动到视频开始位置，点击“设为入点”。\n2. 将播放头移动到视频结束位置，点击“设为出点”。\n3. 再点击“导出视频”。');
@@ -2071,8 +2084,11 @@ const App: React.FC = () => {
 
     // Create offline 3D scene
     const offline = createOfflineScene(
-      width, height, stageConfig, performers, exportCameraAngle, gridScale, mediaCache,
+      width, height, stageConfig, performers, exportCameraAngle, gridScale, mediaCache, exportIncludeGrid, exportIncludeLabels,
     );
+
+    // Pre-capture LED video frames for fast export (seeks once, then uses cache)
+    await offline.prerenderLEDVideo(inPointMs, outPointMs, fps);
 
     // Helper: compute hidden groups at a given time
     const getHiddenGroups = (timeMs: number): string[] => {
@@ -2174,7 +2190,7 @@ const App: React.FC = () => {
           const positions = computePositionsAtTime(clampedT);
           const hiddenGroupIds = getHiddenGroups(clampedT);
 
-          // Update scene and render
+          // Update scene and render (await LED video seek if present)
           offline.updateAtTime(clampedT, positions, hiddenGroupIds);
           offline.renderer.render(offline.scene, offline.camera);
 
@@ -2328,7 +2344,7 @@ const App: React.FC = () => {
     if (source) source.start(0, inPointMs / 1000);
 
     const recordStart = performance.now();
-    const drawFrame = () => {
+    const drawFrame = async () => {
       const elapsed = performance.now() - recordStart;
       const currentFrameIdx = Math.min(Math.floor(elapsed / stepMs), totalFrames);
       const t = Math.min(inPointMs + currentFrameIdx * stepMs, outPointMs);
@@ -2390,6 +2406,32 @@ const App: React.FC = () => {
       a.remove();
       URL.revokeObjectURL(url);
     }
+  };
+
+  const handleOpenExportModal = () => {
+    const projectDuration = Math.max(
+      totalDuration,
+      audioBuffer ? audioBuffer.duration * 1000 : 0,
+      1000,
+    );
+    if (inPointMs == null) setInPointMs(0);
+    if (outPointMs == null || outPointMs <= (inPointMs ?? 0)) setOutPointMs(projectDuration);
+    setShowExportModal(true);
+  };
+
+  const handleConfirmExport = async () => {
+    if (inPointMs == null || outPointMs == null || outPointMs <= inPointMs) {
+      alert('请设置有效的导出入点和出点，出点必须晚于入点。');
+      return;
+    }
+    if (!export2D && !export3D) {
+      alert('请至少选择一种输出：2D 视频或 3D 视频。');
+      return;
+    }
+
+    setShowExportModal(false);
+    if (export2D) await handleExportVideo2D();
+    if (export3D) await handleExportVideo3D();
   };
 
   const handleSelectFrame = (id: string) => {
@@ -2510,12 +2552,6 @@ const App: React.FC = () => {
       </div>
 
       <div className="flex-1 flex overflow-hidden relative">
-        {!sidebarCollapsed && isCompactLayout && (
-          <div
-            className="absolute inset-0 bg-black/40 z-10"
-            onClick={() => setSidebarCollapsed(true)}
-          />
-        )}
         {!sidebarCollapsed && (
           <Sidebar
             performers={performers}
@@ -2606,6 +2642,7 @@ const App: React.FC = () => {
         )}
 
         <div className={`min-w-0 flex-1 flex flex-col relative ${theme === 'dark' ? 'bg-black' : 'bg-gray-100'}`}>
+          <div className="min-h-0 flex-1 flex flex-col relative">
           <div className="stage-status absolute top-4 left-4 z-10 pointer-events-none">
             <div className={`backdrop-blur px-4 py-2 rounded-lg border text-sm shadow-xl ${theme === 'dark' ? 'bg-slate-900/90 border-slate-700 text-slate-400' : 'bg-white/90 border-gray-300 text-gray-700'}`}>
               正在编辑队形：<span className="text-blue-400 font-bold ml-1">{frames.find(f => f.id === currentFrameId)?.name || '过渡/GAP'}</span>
@@ -2627,8 +2664,7 @@ const App: React.FC = () => {
               showLabels={showLabels}
               gridScale={gridScale}
               onZoom={handleGridZoom}
-              aspectRatio={stageAspectRatio}
-              maxWidthPx={stageMaxWidth}
+              stageConfig={stageConfig}
             />
           ) : (
             <Stage3D
@@ -2682,7 +2718,7 @@ const App: React.FC = () => {
               window.addEventListener('pointerup', onUp);
               window.addEventListener('pointercancel', onUp);
             }}
-            className={`timeline-resizer relative z-30 h-7 min-h-7 min-[1101px]:h-2 min-[1101px]:min-h-2 cursor-ns-resize touch-none flex items-center justify-center transition-colors ${theme === 'dark' ? 'bg-slate-800 hover:bg-slate-700' : 'bg-gray-300 hover:bg-gray-400'}`}
+            className={`timeline-resizer relative z-30 h-7 min-h-7 cursor-ns-resize touch-none flex items-center justify-center transition-colors ${theme === 'dark' ? 'bg-slate-800 hover:bg-slate-700' : 'bg-gray-300 hover:bg-gray-400'}`}
             role="slider"
             aria-label="调整时间轴高度"
             aria-valuemin={isCompactLayout ? 88 : 100}
@@ -2690,7 +2726,7 @@ const App: React.FC = () => {
             aria-valuenow={timelineCollapsed ? 0 : Math.round(timelineHeight)}
             title="上下拖动调整时间轴高度，轻点切换高度"
           >
-            <div className={`compact-only h-6 min-w-32 items-center justify-center gap-1 rounded-full border pl-3 pr-1 text-[10px] shadow ${theme === 'dark' ? 'border-slate-600 bg-slate-900 text-slate-300' : 'border-gray-300 bg-white text-gray-600'}`}>
+            <div className={`timeline-resizer-control flex h-6 min-w-32 items-center justify-center gap-1 rounded-full border pl-3 pr-1 text-[10px] shadow ${theme === 'dark' ? 'border-slate-600 bg-slate-900 text-slate-300' : 'border-gray-300 bg-white text-gray-600'}`}>
               <GripHorizontal className="pointer-events-none" size={16} />
               <span className="pointer-events-none">{timelineCollapsed ? '时间轴已隐藏' : `时间轴 ${Math.round(timelineHeight)}px`}</span>
               <button
@@ -2704,16 +2740,6 @@ const App: React.FC = () => {
                 {timelineCollapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
               </button>
             </div>
-            <button
-              type="button"
-              onPointerDown={(event) => event.stopPropagation()}
-              onClick={toggleTimelineVisibility}
-              className={`desktop-only absolute right-2 h-6 min-w-10 items-center justify-center rounded border transition-colors ${theme === 'dark' ? 'border-slate-600 bg-slate-900 text-slate-300 hover:bg-slate-700' : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-100'}`}
-              aria-label={timelineCollapsed ? '展开时间轴' : '隐藏时间轴'}
-              title={timelineCollapsed ? '展开时间轴' : '隐藏时间轴'}
-            >
-              {timelineCollapsed ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-            </button>
           </div>
 
           {/* Floating Stage Toolbar */}
@@ -2721,19 +2747,21 @@ const App: React.FC = () => {
             {stageToolbarCollapsed ? (
               <button
                 onClick={() => setStageToolbarCollapsed(false)}
-                className={`${theme === 'dark' ? 'text-slate-300 hover:text-white' : 'text-gray-600 hover:text-gray-900'} p-1 rounded`}
-                title="展开工具栏"
+                className={`${theme === 'dark' ? 'text-slate-300 hover:bg-slate-700 hover:text-white' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'} flex h-9 w-9 items-center justify-center rounded-full transition-colors`}
+                title="打开舞台设置"
+                aria-label="打开舞台设置"
               >
-                <ChevronUp size={16} />
+                <SlidersHorizontal size={17} />
               </button>
             ) : (
               <div className="flex items-center gap-2 min-w-max">
                 <button
                   onClick={() => setStageToolbarCollapsed(true)}
-                  className={`${theme === 'dark' ? 'text-slate-300 hover:text-white' : 'text-gray-600 hover:text-gray-900'} p-1 rounded`}
-                  title="收起工具栏"
+                  className={`${theme === 'dark' ? 'bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-900'} flex h-8 w-8 items-center justify-center rounded-full transition-colors`}
+                  title="收起舞台设置"
+                  aria-label="收起舞台设置"
                 >
-                  <ChevronDown size={16} />
+                  <SlidersHorizontal size={16} />
                 </button>
                 <div className={`desktop-only w-px h-6 mx-1 ${theme === 'dark' ? 'bg-slate-700' : 'bg-gray-300'}`}></div>
                 <button
@@ -2749,101 +2777,150 @@ const App: React.FC = () => {
                   <span className={`text-xs font-mono w-8 text-center ${theme === 'dark' ? 'text-slate-400' : 'text-gray-600'}`}>{gridScale.toFixed(1)}x</span>
                   <button onClick={() => handleGridZoom(0.5)} className={theme === 'dark' ? 'text-slate-500 hover:text-white' : 'text-gray-500 hover:text-gray-900'}><PlusCircle size={16} /></button>
                 </div>
-                <div className={`w-px h-6 mx-1 ${theme === 'dark' ? 'bg-slate-700' : 'bg-gray-300'}`}></div>
-                <div className="desktop-only flex items-center gap-1">
-                  <button
-                    onClick={() => setStageAspectRatio(16 / 9)}
-                    className={`px-2 py-1 text-xs rounded transition-colors ${stageAspectRatio === 16 / 9 ? 'bg-blue-600 text-white' : theme === 'dark' ? 'bg-slate-800 text-slate-400 hover:bg-slate-700' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}
-                    title="16:9"
-                  >
-                    16:9
-                  </button>
-                  <button
-                    onClick={() => setStageAspectRatio(4 / 3)}
-                    className={`px-2 py-1 text-xs rounded transition-colors ${stageAspectRatio === 4 / 3 ? 'bg-blue-600 text-white' : theme === 'dark' ? 'bg-slate-800 text-slate-400 hover:bg-slate-700' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}
-                    title="4:3"
-                  >
-                    4:3
-                  </button>
-                </div>
-                <div className={`desktop-only w-px h-6 mx-1 ${theme === 'dark' ? 'bg-slate-700' : 'bg-gray-300'}`}></div>
-                <div className="desktop-only flex items-center gap-2">
-                  <span className={`text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-gray-600'}`}>比例</span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={ratioW}
-                    onChange={(e) => { const v = Math.max(1, parseInt(e.target.value || '1')); setRatioW(v); setStageAspectRatio(v / Math.max(1, ratioH)); }}
-                    className={`w-12 px-2 py-1 text-xs rounded border ${theme === 'dark' ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-white border-gray-300 text-gray-800'}`}
-                    title="宽"
-                  />
-                  <span className={`text-xs ${theme === 'dark' ? 'text-slate-500' : 'text-gray-500'}`}>:</span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={ratioH}
-                    onChange={(e) => { const v = Math.max(1, parseInt(e.target.value || '1')); setRatioH(v); setStageAspectRatio(Math.max(1, ratioW) / v); }}
-                    className={`w-12 px-2 py-1 text-xs rounded border ${theme === 'dark' ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-white border-gray-300 text-gray-800'}`}
-                    title="高"
-                  />
-                </div>
-                <div className={`w-px h-6 mx-1 ${theme === 'dark' ? 'bg-slate-700' : 'bg-gray-300'}`}></div>
-                <div className="flex items-center gap-2">
-                  <span className={`text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-gray-600'}`}>宽度</span>
-                  <input
-                    type="range"
-                    min={600}
-                    max={2000}
-                    step={50}
-                    value={stageMaxWidth}
-                    onChange={(e) => setStageMaxWidth(parseInt(e.target.value))}
-                    className="w-32"
-                  />
-                  <span className={`text-xs font-mono ${theme === 'dark' ? 'text-slate-400' : 'text-gray-600'}`}>{stageMaxWidth}px</span>
-                </div>
               </div>
             )}
           </div>
+          </div>
+
+          {!timelineCollapsed && <Timeline
+            frames={frames}
+            duration={Math.max(
+              totalDuration + 10000,
+              audioBuffer ? audioBuffer.duration * 1000 : 0,
+              30000,
+            )}
+            currentTime={currentTime}
+            audioBuffer={audioBuffer}
+            isPlaying={isPlaying}
+            onPlayPause={handlePlayPause}
+            onSeek={handleSeek}
+            onFrameUpdate={setFrames}
+            onAddFrame={handleAddFrame}
+            onSelectFrame={handleSelectFrame}
+            selectedFrameId={selectedPerformerIds.length > 0 ? null : currentFrameId}
+            heightPx={timelineHeight}
+            onRenameFrame={handleRenameFrame}
+            inPointMs={inPointMs}
+            outPointMs={outPointMs}
+            onExportVideo={handleOpenExportModal}
+            isExporting={isExporting}
+            exportProgress={exportProgress}
+          />}
         </div>
       </div>
 
-      {!timelineCollapsed && <Timeline
-        frames={frames}
-        duration={Math.max(
-          totalDuration + 10000,
-          audioBuffer ? audioBuffer.duration * 1000 : 0,
-          30000,
-        )}
-        currentTime={currentTime}
-        audioBuffer={audioBuffer}
-        isPlaying={isPlaying}
-        onPlayPause={handlePlayPause}
-        onSeek={handleSeek}
-        onFrameUpdate={setFrames}
-        onAddFrame={handleAddFrame}
-        onSelectFrame={handleSelectFrame}
-        selectedFrameId={selectedPerformerIds.length > 0 ? null : currentFrameId}
-        heightPx={timelineHeight}
-        onRenameFrame={handleRenameFrame}
-        inPointMs={inPointMs}
-        outPointMs={outPointMs}
-        onSetInPoint={handleSetInPoint}
-        onSetOutPoint={handleSetOutPoint}
-        onExportVideo={handleExportVideo}
-        isExporting={isExporting}
-        exportProgress={exportProgress}
-        exportIncludeLabels={exportIncludeLabels}
-        exportIncludeGrid={exportIncludeGrid}
-        onToggleExportIncludeLabels={() => setExportIncludeLabels(v => !v)}
-        onToggleExportIncludeGrid={() => setExportIncludeGrid(v => !v)}
-        exportWidthPx={exportResolution === '4k' ? 3840 : exportResolution === '2k' ? 2560 : 1920}
-        exportHeightPx={exportResolution === '4k' ? 2160 : exportResolution === '2k' ? 1440 : 1080}
-        exportResolution={exportResolution}
-        onSetExportResolution={setExportResolution}
-        exportCameraAngle={exportCameraAngle}
-        onSetExportCameraAngle={setExportCameraAngle}
-        viewMode={viewMode}
-      />}
+      {showExportModal && (
+        <div className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-xl rounded-xl border border-slate-700 bg-slate-900 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-700 px-5 py-4">
+              <div>
+                <h2 className="text-base font-semibold text-white">导出视频</h2>
+                <p className="mt-1 text-xs text-slate-400">设置时间范围和输出格式，可同时生成 2D 与 3D 视频。</p>
+              </div>
+              <button
+                onClick={() => setShowExportModal(false)}
+                className="rounded p-2 text-slate-400 hover:bg-slate-800 hover:text-white"
+                aria-label="关闭导出设置"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-5 p-5">
+              <div>
+                <label className="mb-2 block text-xs font-medium text-slate-300">导出时间范围</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-lg border border-slate-700 bg-slate-950/60 p-3">
+                    <span className="mb-2 block text-[11px] text-slate-500">入点（秒）</span>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.1}
+                        value={((inPointMs ?? 0) / 1000).toFixed(1)}
+                        onChange={(e) => setInPointMs(Math.max(0, Number(e.target.value) * 1000))}
+                        className="min-w-0 flex-1 rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white"
+                      />
+                      <button onClick={() => setInPointMs(currentTime)} className="rounded border border-slate-700 px-2 text-[11px] text-slate-300 hover:bg-slate-800">当前</button>
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-slate-700 bg-slate-950/60 p-3">
+                    <span className="mb-2 block text-[11px] text-slate-500">出点（秒）</span>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.1}
+                        value={((outPointMs ?? 0) / 1000).toFixed(1)}
+                        onChange={(e) => setOutPointMs(Math.max(0, Number(e.target.value) * 1000))}
+                        className="min-w-0 flex-1 rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white"
+                      />
+                      <button onClick={() => setOutPointMs(currentTime)} className="rounded border border-slate-700 px-2 text-[11px] text-slate-300 hover:bg-slate-800">当前</button>
+                    </div>
+                  </div>
+                </div>
+                {inPointMs != null && outPointMs != null && outPointMs <= inPointMs && (
+                  <p className="mt-2 text-xs text-red-400">出点必须晚于入点。</p>
+                )}
+              </div>
+
+              <div>
+                <label className="mb-2 block text-xs font-medium text-slate-300">输出类型</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 ${export2D ? 'border-blue-500 bg-blue-500/10' : 'border-slate-700 bg-slate-950/60'}`}>
+                    <input type="checkbox" checked={export2D} onChange={(e) => setExport2D(e.target.checked)} />
+                    <span className="text-sm text-slate-200">2D 视频</span>
+                  </label>
+                  <label className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 ${export3D ? 'border-blue-500 bg-blue-500/10' : 'border-slate-700 bg-slate-950/60'}`}>
+                    <input type="checkbox" checked={export3D} onChange={(e) => setExport3D(e.target.checked)} />
+                    <span className="text-sm text-slate-200">3D 视频</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <label className="flex items-center justify-between rounded-lg border border-slate-700 bg-slate-950/60 p-3 text-sm text-slate-300">
+                  显示姓名
+                  <input type="checkbox" checked={exportIncludeLabels} onChange={(e) => setExportIncludeLabels(e.target.checked)} />
+                </label>
+                <label className="flex items-center justify-between rounded-lg border border-slate-700 bg-slate-950/60 p-3 text-sm text-slate-300">
+                  显示网格
+                  <input type="checkbox" checked={exportIncludeGrid} onChange={(e) => setExportIncludeGrid(e.target.checked)} />
+                </label>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <label className="text-xs text-slate-400">
+                  <span className="mb-2 block">分辨率</span>
+                  <select value={exportResolution} onChange={(e) => setExportResolution(e.target.value as '1080p' | '2k' | '4k')} className="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white">
+                    <option value="1080p">1080p（1920×1080）</option>
+                    <option value="2k">2K（2560×1440）</option>
+                    <option value="4k">4K（3840×2160）</option>
+                  </select>
+                </label>
+                <label className={`text-xs text-slate-400 ${export3D ? '' : 'opacity-50'}`}>
+                  <span className="mb-2 block">3D 机位</span>
+                  <select disabled={!export3D} value={exportCameraAngle} onChange={(e) => setExportCameraAngle(e.target.value as CameraAngle)} className="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white disabled:cursor-not-allowed">
+                    <option value="judge">评委视角</option>
+                    <option value="overhead">45°俯视</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 border-t border-slate-700 px-5 py-4">
+              <button onClick={() => setShowExportModal(false)} className="rounded border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800">取消</button>
+              <button
+                onClick={handleConfirmExport}
+                disabled={!export2D && !export3D}
+                className="rounded bg-green-600 px-5 py-2 text-sm font-medium text-white hover:bg-green-500 disabled:cursor-not-allowed disabled:bg-slate-700"
+              >
+                开始导出
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

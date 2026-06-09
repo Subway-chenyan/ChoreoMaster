@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { Performer, Position, StageConfig, LEDContent } from '../types';
-import { mapTo3D, degToRad } from './coordinates';
+import { mapTo3D, degToRad, getTotalStageWidth, getWingWidth } from './coordinates';
 import { denormalizePoints } from '../components/prop-editor/PolygonUtils';
 
 export type CameraAngle = 'judge' | 'overhead';
@@ -10,21 +10,31 @@ interface OfflineSceneResult {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   updateAtTime: (timeMs: number, positions: Record<string, Position>, hiddenGroupIds?: string[]) => void;
+  /** Pre-capture LED video frames for fast offline export. Call before the render loop. */
+  prerenderLEDVideo: (inPointMs: number, outPointMs: number, fps?: number) => Promise<void>;
   dispose: () => void;
 }
 
 /** Build camera for a given angle and stage dimensions */
-function createCamera(angle: CameraAngle, stageConfig: StageConfig): THREE.PerspectiveCamera {
+function createCamera(angle: CameraAngle, stageConfig: StageConfig, aspect: number): THREE.PerspectiveCamera {
   const cam = new THREE.PerspectiveCamera(50, 1, 0.1, 200);
   const { width, depth } = stageConfig;
+  const totalWidth = Math.max(
+    getTotalStageWidth(stageConfig),
+    stageConfig.ledWidth ?? stageConfig.width,
+  );
+  cam.aspect = aspect;
+  const verticalFov = THREE.MathUtils.degToRad(cam.fov);
+  const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * aspect);
+  const fitDistance = totalWidth / (2 * Math.tan(horizontalFov / 2));
 
   if (angle === 'judge') {
-    // 评委视角：舞台前方正中，眼高1.7m，距前缘6m
-    cam.position.set(0, 1.7, depth / 2 + 6);
-    cam.lookAt(0, 1.2, 0);
+    // 评委视角：舞台前方正中，眼高1.7m，距前缘14m
+    cam.position.set(0, 1.7, depth / 2 + Math.max(14, fitDistance));
+    cam.lookAt(0, 1.0, 0);
   } else {
     // 45°俯视：舞台侧前方上方
-    const dist = depth / 2 + 12;
+    const dist = Math.max(depth / 2 + 18, fitDistance * 1.15);
     cam.position.set(0, dist, dist);
     cam.lookAt(0, 0, 0);
   }
@@ -33,8 +43,9 @@ function createCamera(angle: CameraAngle, stageConfig: StageConfig): THREE.Persp
 }
 
 /** Build stage floor (plane + grid + edge lines) matching StageFloor.tsx */
-function createStageFloor(width: number, depth: number, gridScale: number): THREE.Group {
+function createStageFloor(width: number, depth: number, wingWidth: number, gridScale: number, includeGrid: boolean): THREE.Group {
   const group = new THREE.Group();
+  const totalWidth = width + wingWidth * 2;
 
   // Floor plane
   const floorGeo = new THREE.PlaneGeometry(width, depth);
@@ -45,22 +56,46 @@ function createStageFloor(width: number, depth: number, gridScale: number): THRE
   floor.receiveShadow = true;
   group.add(floor);
 
+  if (wingWidth > 0) {
+    const wingGeo = new THREE.PlaneGeometry(wingWidth, depth);
+    wingGeo.rotateX(-Math.PI / 2);
+    const wingMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.9, metalness: 0.1 });
+    const leftWing = new THREE.Mesh(wingGeo, wingMat);
+    leftWing.position.set(-(width + wingWidth) / 2, -0.01, 0);
+    leftWing.receiveShadow = true;
+    group.add(leftWing);
+    const rightWing = leftWing.clone();
+    rightWing.position.x = (width + wingWidth) / 2;
+    group.add(rightWing);
+
+    const boundaryGeo = new THREE.BoxGeometry(0.06, 0.05, depth);
+    const boundaryMat = new THREE.MeshBasicMaterial({ color: 0xf59e0b });
+    const leftBoundary = new THREE.Mesh(boundaryGeo, boundaryMat);
+    leftBoundary.position.set(-width / 2, 0.025, 0);
+    group.add(leftBoundary);
+    const rightBoundary = leftBoundary.clone();
+    rightBoundary.position.x = width / 2;
+    group.add(rightBoundary);
+  }
+
   // Grid
-  const divisions = Math.round(4 * gridScale);
-  const grid = new THREE.GridHelper(width, divisions, 0x444444, 0x222222);
-  grid.position.y = 0.01;
-  grid.scale.z = depth / width;
-  group.add(grid);
+  if (includeGrid) {
+    const divisions = Math.max(1, Math.round(4 * gridScale * (totalWidth / width)));
+    const grid = new THREE.GridHelper(totalWidth, divisions, 0x444444, 0x222222);
+    grid.position.y = 0.01;
+    grid.scale.z = depth / totalWidth;
+    group.add(grid);
+  }
 
   // Red line at front edge
-  const redGeo = new THREE.BoxGeometry(width, 0.05, 0.1);
+  const redGeo = new THREE.BoxGeometry(totalWidth, 0.05, 0.1);
   const redMat = new THREE.MeshBasicMaterial({ color: 0xef4444 });
   const redLine = new THREE.Mesh(redGeo, redMat);
   redLine.position.set(0, 0.02, -depth / 2);
   group.add(redLine);
 
   // Blue line at back edge
-  const blueGeo = new THREE.BoxGeometry(width, 0.05, 0.1);
+  const blueGeo = new THREE.BoxGeometry(totalWidth, 0.05, 0.1);
   const blueMat = new THREE.MeshBasicMaterial({ color: 0x3b82f6 });
   const blueLine = new THREE.Mesh(blueGeo, blueMat);
   blueLine.position.set(0, 0.02, depth / 2);
@@ -72,7 +107,7 @@ function createStageFloor(width: number, depth: number, gridScale: number): THRE
 /** Create LED wall mesh matching LEDTV.tsx */
 function createLEDMesh(stageConfig: StageConfig): THREE.Mesh {
   const height = stageConfig.ledHeight || 6;
-  const width = stageConfig.width;
+  const width = stageConfig.ledWidth ?? stageConfig.width;
   const depth = stageConfig.depth;
 
   const geo = new THREE.PlaneGeometry(width, height);
@@ -124,6 +159,30 @@ function createPerformerMesh(color: string): THREE.Group {
   return group;
 }
 
+function createLabelSprite(text: string, height: number): THREE.Sprite {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+  ctx.roundRect(8, 8, 496, 112, 20);
+  ctx.fill();
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '600 48px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, 256, 64);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
+  const sprite = new THREE.Sprite(material);
+  sprite.position.set(0, height, 0);
+  sprite.scale.set(2.8, 0.7, 1);
+  sprite.renderOrder = 1000;
+  return sprite;
+}
+
 /** Create face material matching Prop3D.tsx createFaceMaterial */
 function createFaceMaterial(faceTexture?: { dataUrl?: string }, fallbackColor: string = '#475569'): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial({ color: fallbackColor, transparent: true, opacity: 1, side: THREE.FrontSide });
@@ -158,22 +217,18 @@ function createPropMesh(performer: Performer): THREE.Group {
     geo.translate(0, h / 2, 0);
 
     const hasTextures = performer.extrudedTextures;
-    let mat: THREE.Material;
     if (hasTextures) {
       const mats = [
         createFaceMaterial(hasTextures.side, performer.color),
         createFaceMaterial(hasTextures.top, performer.color),
         createFaceMaterial(hasTextures.bottom, performer.color),
       ];
-      mat = mats;
-      // Assign material groups
       const mesh = new THREE.Mesh(geo, mats);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       group.add(mesh);
     } else {
-      mat = new THREE.MeshStandardMaterial({ color: performer.color });
-      const mesh = new THREE.Mesh(geo, mat);
+      const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: performer.color }));
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       group.add(mesh);
@@ -240,6 +295,8 @@ export function createOfflineScene(
   cameraAngle: CameraAngle,
   gridScale: number = 1,
   mediaCache: Record<string, string> = {},
+  includeGrid: boolean = true,
+  includeLabels: boolean = true,
 ): OfflineSceneResult {
   // Renderer
   const renderer = new THREE.WebGLRenderer({
@@ -266,12 +323,11 @@ export function createOfflineScene(
   scene.add(directional);
 
   // Camera
-  const camera = createCamera(cameraAngle, stageConfig);
-  camera.aspect = width / height;
+  const camera = createCamera(cameraAngle, stageConfig, width / height);
   camera.updateProjectionMatrix();
 
   // Stage floor
-  const floor = createStageFloor(stageConfig.width, stageConfig.depth, gridScale);
+  const floor = createStageFloor(stageConfig.width, stageConfig.depth, getWingWidth(stageConfig), gridScale, includeGrid);
   scene.add(floor);
 
   // LED wall
@@ -281,7 +337,11 @@ export function createOfflineScene(
   // LED content handling
   let ledVideoElement: HTMLVideoElement | null = null;
   let ledVideoTexture: THREE.VideoTexture | null = null;
-  let ledImageTexture: THREE.CanvasTexture | null = null;
+  let ledImageTexture: THREE.Texture | null = null;
+  // Pre-captured video frames for fast offline export
+  let ledFrameCache: Map<number, ImageBitmap> | null = null;
+  let ledFrameCacheCanvas: HTMLCanvasElement | null = null;
+  let ledFrameInterval = 1; // seconds between cached frames
 
   const ledContent = stageConfig.ledContent;
   if (ledContent?.type === 'video' && ledContent.value && mediaCache[ledContent.value]) {
@@ -300,10 +360,13 @@ export function createOfflineScene(
     (ledMesh.material as THREE.MeshBasicMaterial).map = tex;
     (ledMesh.material as THREE.MeshBasicMaterial).color.set('#ffffff');
     video.load();
+
+    // Also create a canvas-based texture for the frame cache path
+    ledFrameCacheCanvas = document.createElement('canvas');
+    ledFrameCacheCanvas.width = 640;  // reasonable capture resolution
+    ledFrameCacheCanvas.height = 360;
   } else if (ledContent?.type === 'image' && ledContent.value && mediaCache[ledContent.value]) {
-    const img = new Image();
-    img.src = mediaCache[ledContent.value];
-    const tex = new THREE.CanvasTexture(img);
+    const tex = new THREE.TextureLoader().load(mediaCache[ledContent.value]);
     configureLEDTexture(tex);
     ledImageTexture = tex;
     (ledMesh.material as THREE.MeshBasicMaterial).map = tex;
@@ -334,14 +397,85 @@ export function createOfflineScene(
     } else {
       mesh = createPerformerMesh(p.color);
     }
+    if (includeLabels) {
+      const labelHeight = p.type === 'prop' ? (p.height || 1) + 0.6 : 2.5;
+      mesh.add(createLabelSprite(p.name, labelHeight));
+    }
     mesh.visible = false; // Hidden until updateAtTime sets positions
     meshMap.set(p.id, mesh);
     scene.add(mesh);
   });
 
   /**
+   * Pre-capture LED video frames for fast offline export.
+   * Seeks through the video at regular intervals, captures each frame as ImageBitmap.
+   * Call this ONCE before the render loop. After this, updateAtTime uses cached frames (no seek).
+   */
+  async function prerenderLEDVideo(inPointMs: number, outPointMs: number, fps: number = 30): Promise<void> {
+    if (!ledVideoElement || !ledFrameCacheCanvas) return;
+
+    const video = ledVideoElement;
+    const canvas = ledFrameCacheCanvas;
+    const ctx = canvas.getContext('2d')!;
+
+    // Wait for video metadata
+    if (video.readyState < HTMLMediaElement.HAVE_METADATA) {
+      await new Promise<void>(resolve => {
+        const onReady = () => { video.removeEventListener('loadedmetadata', onReady); resolve(); };
+        video.addEventListener('loadedmetadata', onReady, { once: true });
+        setTimeout(resolve, 3000); // fallback
+      });
+    }
+
+    const videoDuration = video.duration;
+    if (!Number.isFinite(videoDuration) || videoDuration <= 0) return;
+
+    const shouldLoop = video.loop;
+    const inSec = inPointMs / 1000;
+    const outSec = outPointMs / 1000;
+
+    // Capture at ~2fps intervals (enough for smooth-looking background video)
+    ledFrameInterval = 0.5;
+    ledFrameCache = new Map();
+
+    const captureTimes: number[] = [];
+    for (let t = inSec; t <= outSec; t += ledFrameInterval) {
+      const videoTime = shouldLoop ? t % videoDuration : Math.min(t, videoDuration - 0.001);
+      captureTimes.push(Math.round(videoTime / ledFrameInterval) * ledFrameInterval);
+    }
+    // Deduplicate
+    const uniqueTimes = [...new Set(captureTimes)].sort((a, b) => a - b);
+
+    for (const vt of uniqueTimes) {
+      video.currentTime = vt;
+      await new Promise<void>(resolve => {
+        const onSeeked = () => { video.removeEventListener('seeked', onSeeked); resolve(); };
+        video.addEventListener('seeked', onSeeked, { once: true });
+        setTimeout(() => { video.removeEventListener('seeked', onSeeked); resolve(); }, 2000);
+      });
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const bitmap = await createImageBitmap(canvas);
+      ledFrameCache.set(Math.round(vt / ledFrameInterval) * ledFrameInterval, bitmap);
+    }
+
+    // Switch LED material from VideoTexture to CanvasTexture for frame-cache playback
+    if (ledFrameCacheCanvas && ledFrameCache.size > 0) {
+      const canvasTex = new THREE.CanvasTexture(ledFrameCacheCanvas);
+      configureLEDTexture(canvasTex);
+      (ledMesh.material as THREE.MeshBasicMaterial).map = canvasTex;
+      (ledMesh.material as THREE.MeshBasicMaterial).color.set('#ffffff');
+      // Dispose old video texture
+      if (ledVideoTexture) {
+        ledVideoTexture.dispose();
+        ledVideoTexture = null;
+      }
+    }
+  }
+
+  /**
    * Update all performer/prop positions at a given time.
    * Positions are set directly (no lerp interpolation) for deterministic frame output.
+   * If frame cache exists, uses cached frames (fast). Otherwise falls back to direct seek.
    */
   function updateAtTime(timeMs: number, positions: Record<string, Position>, hiddenGroupIds: string[] = []): void {
     performers.forEach(p => {
@@ -368,21 +502,38 @@ export function createOfflineScene(
       mesh.rotation.y = -degToRad(p.rotation || 0);
     });
 
+    // Update LED image texture
+    if (ledImageTexture) {
+      ledImageTexture.needsUpdate = true;
+    }
+
     // Update LED video texture
-    if (ledVideoElement && ledVideoTexture) {
-      const timeSec = timeMs / 1000;
-      if (ledVideoElement.readyState >= HTMLMediaElement.HAVE_METADATA) {
+    if (ledVideoElement) {
+      if (ledFrameCache && ledFrameCacheCanvas) {
+        // Fast path: use pre-captured frame cache
+        const timeSec = timeMs / 1000;
+        const videoTime = ledVideoElement.loop
+          ? timeSec % (ledVideoElement.duration || 1)
+          : Math.min(timeSec, (ledVideoElement.duration || 1) - 0.001);
+        const cacheKey = Math.round(videoTime / ledFrameInterval) * ledFrameInterval;
+        const frame = ledFrameCache.get(cacheKey);
+        if (frame) {
+          const ctx = ledFrameCacheCanvas.getContext('2d')!;
+          ctx.drawImage(frame, 0, 0, ledFrameCacheCanvas.width, ledFrameCacheCanvas.height);
+          // The material map is now a CanvasTexture on this canvas
+          const map = (ledMesh.material as THREE.MeshBasicMaterial).map;
+          if (map) map.needsUpdate = true;
+        }
+      } else if (ledVideoTexture && ledVideoElement.readyState >= HTMLMediaElement.HAVE_METADATA) {
+        // Slow path: direct seek (for real-time MediaRecorder playback)
+        const timeSec = timeMs / 1000;
         const desired = getTimelineVideoTime(ledVideoElement, timeSec, ledVideoElement.loop);
-        if (Number.isFinite(desired) && Math.abs(ledVideoElement.currentTime - desired) > 0.03) {
-          try { ledVideoElement.currentTime = desired; } catch { /* ignore seek errors */ }
+        const drift = Math.abs(ledVideoElement.currentTime - desired);
+        if (drift > 0.08) {
+          try { ledVideoElement.currentTime = desired; } catch { }
         }
         ledVideoTexture.needsUpdate = true;
       }
-    }
-
-    // Update LED image texture (mark for update)
-    if (ledImageTexture) {
-      ledImageTexture.needsUpdate = true;
     }
   }
 
@@ -395,6 +546,13 @@ export function createOfflineScene(
     }
     if (ledVideoTexture) ledVideoTexture.dispose();
     if (ledImageTexture) ledImageTexture.dispose();
+    // Dispose frame cache
+    if (ledFrameCache) {
+      ledFrameCache.forEach(bitmap => bitmap.close());
+      ledFrameCache.clear();
+      ledFrameCache = null;
+    }
+    ledFrameCacheCanvas = null;
 
     // Dispose prop materials and textures
     propMaterials.forEach(mat => {
@@ -409,6 +567,9 @@ export function createOfflineScene(
       mesh.traverse(child => {
         if (child instanceof THREE.Mesh) {
           child.geometry.dispose();
+        } else if (child instanceof THREE.Sprite) {
+          child.material.map?.dispose();
+          child.material.dispose();
         }
       });
     });
@@ -423,7 +584,7 @@ export function createOfflineScene(
     renderer.dispose();
   }
 
-  return { renderer, scene, camera, updateAtTime, dispose };
+  return { renderer, scene, camera, updateAtTime, prerenderLEDVideo, dispose };
 }
 
 /**

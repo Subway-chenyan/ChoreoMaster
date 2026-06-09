@@ -1,6 +1,6 @@
 
 export interface Position {
-  x: number; // Percentage 0-100
+  x: number; // Main-stage percentage; wings may extend below 0 or above 100
   y: number; // Percentage 0-100
   z?: number; // Optional height in meters (0 = ground)
 }
@@ -10,6 +10,7 @@ export type PerformerShape = 'circle' | 'square' | 'triangle';
 export type PerformerType = 'performer' | 'prop';
 
 export type PropGeometryType = 'box' | 'extruded';
+
 
 export interface FaceTexture {
   dataUrl: string;
@@ -95,6 +96,8 @@ export enum ToolMode {
 export interface StageConfig {
   width: number; // Stage width in meters (default 20)
   depth: number; // Stage depth in meters
+  wingWidth?: number; // Width of each offstage wing in meters
+  ledWidth?: number; // LED wall width in meters
   ledHeight?: number; // LED wall height in meters
   ledContent?: LEDContent;
 }
