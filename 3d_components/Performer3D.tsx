@@ -9,6 +9,7 @@ import { useDragContext } from './Scene3D';
 interface Performer3DProps {
   performer: Performer;
   position: Position;
+  platformLift?: number;
   isSelected: boolean;
   onSelect: (id: string) => void;
   stageConfig: StageConfig;
@@ -20,6 +21,7 @@ interface Performer3DProps {
 const Performer3D: React.FC<Performer3DProps> = ({
   performer,
   position,
+  platformLift = 0,
   isSelected,
   onSelect,
   stageConfig,
@@ -47,7 +49,10 @@ const Performer3D: React.FC<Performer3DProps> = ({
 
   // Initialize position on mount or when position changes significantly
   useEffect(() => {
-    const [targetX, targetY, targetZ] = mapTo3D(position, stageConfig);
+    const [targetX, targetY, targetZ] = mapTo3D({
+      ...position,
+      z: (position.z || 0) + platformLift,
+    }, stageConfig);
     // Only jump if this is a large change (not smooth animation)
     const current = currentPositionRef.current;
     const dist = current.distanceTo(new THREE.Vector3(targetX, targetY, targetZ));
@@ -57,9 +62,12 @@ const Performer3D: React.FC<Performer3DProps> = ({
         meshRef.current.position.set(targetX, targetY, targetZ);
       }
     }
-  }, [performer.id, stageConfig]);
+  }, [performer.id, position, platformLift, stageConfig]);
 
-  const [targetX, targetY, targetZ] = mapTo3D(position, stageConfig);
+  const [targetX, targetY, targetZ] = mapTo3D({
+    ...position,
+    z: (position.z || 0) + platformLift,
+  }, stageConfig);
 
   useFrame(() => {
     if (meshRef.current) {
@@ -137,7 +145,6 @@ const Performer3D: React.FC<Performer3DProps> = ({
 
     const deltaY = e.pointer.y - dragStartPointerYRef.current;
     // Use camera distance to scale the movement appropriately
-    const { camera } = useThree();
     const scaleFactor = Math.abs(camera.position.z || 20) / 500;
     const heightChange = -deltaY * scaleFactor; // Negative because dragging up (negative y) should increase height
     const newHeight = Math.max(0, Math.min(10, dragStartHeightRef.current + heightChange));

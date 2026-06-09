@@ -8,6 +8,7 @@ import Prop3D from './Prop3D';
 import LEDTV from '../components/LEDTV';
 import { Performer, Position, StageConfig } from '../types';
 import { getTotalStageWidth, getWingWidth, mapTo2D } from '../utils/coordinates';
+import { buildPlatformOccupancy } from '../utils/platforms';
 
 interface DragContextType {
   isDragging: boolean;
@@ -128,6 +129,7 @@ const Scene3D: React.FC<Scene3DProps> = ({
   };
 
   const visiblePerformers = performers.filter(p => !p.groupId || !hiddenGroupIds.includes(p.groupId));
+  const platformOccupancy = buildPlatformOccupancy(visiblePerformers, positions, stageConfig);
 
   const handlePositionChange = (id: string, pos: Position) => {
     if (onPositionChange) {
@@ -177,8 +179,10 @@ const Scene3D: React.FC<Scene3DProps> = ({
           onDragEnd: handleHeightDragEnd,
           onPositionChange: readonly ? undefined : (newPos: Position) => handlePositionChange(p.id, newPos)
         };
-        if (p.type === 'prop') return <Prop3D {...commonProps} />;
-        return <Performer3D {...commonProps} />;
+        if (p.type === 'prop') {
+          return <Prop3D {...commonProps} platformLift={platformOccupancy.entityLiftById[p.id] ?? 0} />;
+        }
+        return <Performer3D {...commonProps} platformLift={platformOccupancy.entityLiftById[p.id] ?? 0} />;
       })}
       <mesh position={[0, 0, -stageConfig.depth / 2 - 5]} scale={[100, 100, 1]} visible={false} onClick={() => onSelect('')}>
         <planeGeometry />

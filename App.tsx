@@ -9,6 +9,7 @@ import { useTheme } from './contexts/ThemeContext';
 import { DEFAULT_COLORS, STAGE_ASPECT_RATIO } from './constants';
 import { createOfflineScene, preloadPropTextures, preloadLEDVideo, type CameraAngle } from './utils/OfflineRenderer3D';
 import { getTotalStageWidth, getWingWidth, stageXToViewPercent, getStageXBounds } from './utils/coordinates';
+import { buildPlatformOccupancy, isPlatformProp } from './utils/platforms';
 import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, Maximize2, ChevronDown, ChevronUp, Menu, X, Download, GripHorizontal, SlidersHorizontal } from 'lucide-react';
 import { StageConfig } from './types';
 
@@ -266,9 +267,12 @@ const App: React.FC = () => {
         const end = nextFrame.positions[p.id];
 
         if (start && end) {
+          const includeZ = start.z !== undefined || end.z !== undefined;
+          const interpolatedZ = (start.z ?? 0) + ((end.z ?? 0) - (start.z ?? 0)) * ease;
           interpolated[p.id] = {
             x: start.x + (end.x - start.x) * ease,
             y: start.y + (end.y - start.y) * ease,
+            ...(includeZ ? { z: interpolatedZ } : {}),
           };
         }
         // If in one but not other, they do not exist during transition (clean cut)
@@ -335,7 +339,13 @@ const App: React.FC = () => {
         const start = prevFrame.positions[p.id];
         const end = nextFrame.positions[p.id];
         if (start && end) {
-          interpolated[p.id] = { x: start.x + (end.x - start.x) * ease, y: start.y + (end.y - start.y) * ease };
+          const includeZ = start.z !== undefined || end.z !== undefined;
+          const interpolatedZ = (start.z ?? 0) + ((end.z ?? 0) - (start.z ?? 0)) * ease;
+          interpolated[p.id] = {
+            x: start.x + (end.x - start.x) * ease,
+            y: start.y + (end.y - start.y) * ease,
+            ...(includeZ ? { z: interpolatedZ } : {}),
+          };
         }
       });
       return interpolated;
@@ -357,6 +367,7 @@ const App: React.FC = () => {
       label: name.charAt(0).toUpperCase(),
       shape,
       type: extra?.type || 'performer',
+      propCategory: extra?.type === 'prop' ? (extra.propCategory ?? 'prop') : undefined,
       ...extra
     };
     setPerformers([...performers, newPerformer]);
@@ -898,6 +909,7 @@ const App: React.FC = () => {
         depth: entity.type === 'prop' ? (entity.depth ?? 0.3) : entity.depth,
         rotation: entity.rotation,
         propGeometryType: entity.propGeometryType || (entity.type === 'prop' ? 'box' : undefined),
+        propCategory: entity.type === 'prop' ? (entity.propCategory ?? 'prop') : undefined,
       };
     });
 
@@ -1561,6 +1573,7 @@ const App: React.FC = () => {
     const hiddenGroupIds = frame?.hiddenGroupIds || [];
 
     const positions = computePositionsAtTime(timeMs);
+    const platformOccupancy = buildPlatformOccupancy(performers, positions, stageConfig);
     const leftMainEdge = renderX + stageXToViewPercent(0, stageConfig) / 100 * renderW;
     const rightMainEdge = renderX + stageXToViewPercent(100, stageConfig) / 100 * renderW;
 
@@ -1587,8 +1600,14 @@ const App: React.FC = () => {
       ctx.fillText('右备场区', rightMainEdge + (renderX + renderW - rightMainEdge) / 2, renderY + 10 * scale);
     }
 
-    // Draw performers
-    performers.forEach(p => {
+    // Draw props first, then actors, so occupied platforms stay visually below actors in 2D exports.
+    [...performers]
+      .sort((a, b) => {
+        const aRank = isPlatformProp(a) ? 0 : a.type === 'prop' ? 1 : 2;
+        const bRank = isPlatformProp(b) ? 0 : b.type === 'prop' ? 1 : 2;
+        return aRank - bRank;
+      })
+      .forEach(p => {
       if (p.groupId && hiddenGroupIds.includes(p.groupId)) return;
       const pos = positions[p.id];
       if (!pos) return;
@@ -1596,6 +1615,7 @@ const App: React.FC = () => {
       const cy = renderY + (pos.y / 100) * renderH;
 
       if (p.type === 'prop') {
+        const propLift = platformOccupancy.entityLiftById[p.id] ?? 0;
         const propW = (p.width || 1) / totalStageW * renderW;
         const propD = (p.depth || 1) / stageD * renderH;
         const rot = (p.rotation || 0) * Math.PI / 180;
@@ -1634,9 +1654,10 @@ const App: React.FC = () => {
           ctx.font = `${Math.round(9 * scale)}px sans-serif`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'top';
-          ctx.fillText(p.name, cx, cy + propD / 2 + 4 * scale);
+          ctx.fillText(p.name, cx, cy + propD / 2 + 4 * scale - propLift * scale * 2);
         }
       } else {
+        const performerLift = platformOccupancy.entityLiftById[p.id] ?? 0;
         ctx.fillStyle = p.color;
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 2 * scale;
@@ -1665,7 +1686,7 @@ const App: React.FC = () => {
           ctx.font = `${Math.round(10 * scale)}px sans-serif`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'top';
-          ctx.fillText(p.name, cx, cy + Math.floor(shapeSize / 2));
+          ctx.fillText(p.name, cx, cy + Math.floor(shapeSize / 2) - performerLift * scale * 2);
         }
       }
     });

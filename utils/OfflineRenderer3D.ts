@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Performer, Position, StageConfig, LEDContent } from '../types';
 import { mapTo3D, degToRad, getTotalStageWidth, getWingWidth } from './coordinates';
 import { denormalizePoints } from '../components/prop-editor/PolygonUtils';
+import { buildPlatformOccupancy, isPlatformProp } from './platforms';
 
 export type CameraAngle = 'judge' | 'overhead';
 
@@ -478,6 +479,9 @@ export function createOfflineScene(
    * If frame cache exists, uses cached frames (fast). Otherwise falls back to direct seek.
    */
   function updateAtTime(timeMs: number, positions: Record<string, Position>, hiddenGroupIds: string[] = []): void {
+    const visiblePerformers = performers.filter((p) => !p.groupId || !hiddenGroupIds.includes(p.groupId));
+    const platformOccupancy = buildPlatformOccupancy(visiblePerformers, positions, stageConfig);
+
     performers.forEach(p => {
       const mesh = meshMap.get(p.id);
       if (!mesh) return;
@@ -489,7 +493,10 @@ export function createOfflineScene(
       }
 
       mesh.visible = true;
-      const [x3d, y3d, z3d] = mapTo3D(pos, stageConfig);
+      const [x3d, y3d, z3d] = mapTo3D({
+        ...pos,
+        z: (pos.z || 0) + (platformOccupancy.entityLiftById[p.id] ?? 0),
+      }, stageConfig);
 
       if (p.type === 'prop') {
         const dims = { height: p.height || 1 };

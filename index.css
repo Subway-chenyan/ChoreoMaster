@@ -4,11 +4,14 @@
 @source "./index.html";
 
 body {
-  font-family: 'Inter', sans-serif;
+  font-family: 'Inter', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
+    'Noto Sans SC', 'Source Han Sans SC', sans-serif;
   background-color: #0f172a;
   color: #e2e8f0;
   overscroll-behavior: none;
   touch-action: manipulation;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 html,
@@ -21,8 +24,29 @@ body,
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
+  line-height: 1.35;
+}
+
+input[type='number'] {
+  -moz-appearance: textfield;
+}
+
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+select {
+  appearance: none;
+}
+
+option {
+  background: #0f172a;
+  color: #f8fafc;
 }
 
 button {

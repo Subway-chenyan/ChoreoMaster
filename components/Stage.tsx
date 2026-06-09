@@ -8,6 +8,7 @@ import {
   stageXToViewPercent,
   viewPercentToStageX,
 } from '../utils/coordinates';
+import { buildPlatformOccupancy, isPlatformProp } from '../utils/platforms';
 
 interface StageProps {
   performers: Performer[];
@@ -141,6 +142,10 @@ export const Stage: React.FC<StageProps> = ({
       return !hiddenGroupIds.includes(performer.groupId); // Hide if group is in hiddenGroupIds
     });
   }, [performers, hiddenGroupIds]);
+  const platformOccupancy = useMemo(
+    () => buildPlatformOccupancy(visiblePerformers, positions, stageConfig),
+    [visiblePerformers, positions, stageConfig],
+  );
 
   // Convert client coordinates to percentage relative to stage
   const getPercentagePos = (clientX: number, clientY: number) => {
@@ -443,7 +448,13 @@ export const Stage: React.FC<StageProps> = ({
         <div className="absolute bottom-0 left-0 right-0 h-2 bg-slate-600 opacity-50 text-center text-[10px] tracking-widest text-white">舞台前沿</div>
 
         {/* Performers Layer */}
-        {visiblePerformers.map((performer) => {
+        {[...visiblePerformers]
+          .sort((a, b) => {
+            const aRank = isPlatformProp(a) ? 0 : a.type === 'prop' ? 1 : 2;
+            const bRank = isPlatformProp(b) ? 0 : b.type === 'prop' ? 1 : 2;
+            return aRank - bRank;
+          })
+          .map((performer) => {
           // Check if performer exists in the current frame positions
           const pos = positions[performer.id];
           if (!pos) return null; // Don't render if not in current frame/interpolation
@@ -453,6 +464,9 @@ export const Stage: React.FC<StageProps> = ({
           // Render Prop
           if (performer.type === 'prop') {
             const STAGE_DEPTH_METERS = stageConfig.depth;
+            const isPlatform = isPlatformProp(performer);
+            const isOccupiedPlatform = platformOccupancy.occupiedPlatformIds.has(performer.id);
+            const propLift = platformOccupancy.entityLiftById[performer.id] ?? 0;
 
             // width(长) for 2D x-axis, depth(宽) for 2D y-axis
             const widthPct = ((performer.width || 1) / totalStageWidth) * 100;
@@ -470,14 +484,23 @@ export const Stage: React.FC<StageProps> = ({
                   height: `${heightPct}%`,
                   backgroundColor: performer.color,
                   transform: `translate(-50%, -50%) rotate(${performer.rotation || 0}deg)`,
-                  border: isSelected ? '2px solid white' : '1px solid rgba(255,255,255,0.3)',
-                  boxShadow: isSelected ? '0 0 10px rgba(59,130,246,0.5)' : 'none',
+                  border: isSelected
+                    ? '2px solid white'
+                    : isPlatform
+                      ? '2px dashed rgba(251,191,36,0.85)'
+                      : '1px solid rgba(255,255,255,0.3)',
+                  boxShadow: isSelected
+                    ? '0 0 10px rgba(59,130,246,0.5)'
+                    : isOccupiedPlatform
+                      ? '0 0 0 2px rgba(251,191,36,0.25)'
+                      : 'none',
                   backgroundImage: performer.boxTextures?.front?.dataUrl || performer.textureDataUrl
                     ? `url(${performer.boxTextures?.front?.dataUrl || performer.textureDataUrl})`
                     : undefined,
                   backgroundSize: 'cover',
                   backgroundPosition: 'center',
                   clipPath: getPolygonClipPath(performer.polygonPoints),
+                  zIndex: isPlatform ? (isOccupiedPlatform ? 12 : 10) : propLift > 0 ? 13 : 11,
                 }}
               >
                 {/* Prop Label (Optional, maybe small text inside or standard label above) */}
@@ -506,6 +529,7 @@ export const Stage: React.FC<StageProps> = ({
               style={{
                 left: `${stageXToViewPercent(pos.x, stageConfig)}%`,
                 top: `${pos.y}%`,
+                zIndex: (platformOccupancy.entityLiftById[performer.id] ?? 0) > 0 ? 14 : 10,
               }}
             >
               <div className={`relative transition-transform duration-100 ${isSelected ? 'scale-125' : 'hover:scale-110'}`}>

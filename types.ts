@@ -11,6 +11,7 @@ export type PerformerType = 'performer' | 'prop';
 
 export type PropGeometryType = 'box' | 'extruded';
 
+export type PropCategory = 'prop' | 'platform';
 
 export interface FaceTexture {
   dataUrl: string;
@@ -51,6 +52,7 @@ export interface Performer {
   polygonPoints?: { x: number; y: number }[];
   textureDataUrl?: string;
   propShape?: 'rectangle' | 'ellipse' | 'triangle' | 'diamond' | 'hexagon' | 'custom';
+  propCategory?: PropCategory;
   boundToId?: string;
 }
 
@@ -164,6 +166,7 @@ export interface AIEntityCreate {
   depth?: number;
   rotation?: number;
   propGeometryType?: PropGeometryType;
+  propCategory?: PropCategory;
 }
 
 export interface AIFrameCreate {

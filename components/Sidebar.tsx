@@ -1,13 +1,14 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Performer, Frame, PerformerShape, PerformerGroup, PerformerType, AIConfig, AIChoreoPlan } from '../types';
+import { Performer, Frame, PerformerShape, PerformerGroup, PerformerType, PropCategory, AIConfig, AIChoreoPlan } from '../types';
 import { Plus, Users, Trash2, Download, Grid, Music, Sparkles, Wand2, Film, Copy, Search, Settings, Scaling, Upload, FilePlus, Circle, Square, Triangle, UserCheck, UserX, Eye, EyeOff, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreVertical, Palette, Edit2, Box, Library, Save } from 'lucide-react';
 import { PRESET_SHAPES, DEFAULT_COLORS } from '../constants';
 import { StageConfig } from '../types';
 import { ProjectBrowser } from './ProjectBrowser';
 import { PropEditorModal } from './PropEditorModal';
 import { ChoreoAgentModal } from './ChoreoAgentModal';
+import { SelectField, StepperNumberField } from './FormControls';
 import { validateAgentAccess } from '../services/choreoAgentService';
 
 interface SidebarProps {
@@ -217,6 +218,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const [newPropWidth, setNewPropWidth] = useState<number>(0.5); // Default 0.5m (宽)
     const [newPropDepth, setNewPropDepth] = useState<number>(0.5); // Default 0.5m (长)
     const [newPropHeight, setNewPropHeight] = useState<number>(0.5); // Default 0.5m (高)
+    const [newPropCategory, setNewPropCategory] = useState<PropCategory>('prop');
 
     // Preset State
     const [presetScale, setPresetScale] = useState(0.8); // Default 80% size to be safe
@@ -254,6 +256,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
     // Ref for context menu click outside detection
     const contextMenuRef = useRef<HTMLDivElement>(null);
+    const useSingleColumnPropFields = isCompactLayout || widthPx < 360;
 
     const filteredPerformers = useMemo(() => {
         let list = performers;
@@ -319,7 +322,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 width: newPropWidth,
                 depth: newPropDepth,
                 height: newPropHeight,
-                rotation: 0
+                rotation: 0,
+                propCategory: newPropCategory,
             });
             setNewPerformerName('');
             setShowAddForm(false);
@@ -513,7 +517,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         }}
                         className={`flex-1 text-sm font-medium bg-transparent p-0 truncate ${selectedPerformerIds.includes(p.id) ? 'text-white' : 'text-slate-300'}`}
                     >
-                        {p.name}
+                        <div className="flex items-center gap-2 min-w-0">
+                            <span className="truncate">{p.name}</span>
+                            {p.type === 'prop' && (
+                                <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium border ${
+                                    p.propCategory === 'platform'
+                                        ? 'border-amber-500/60 bg-amber-500/10 text-amber-300'
+                                        : 'border-slate-600 bg-slate-800 text-slate-400'
+                                }`}>
+                                    {p.propCategory === 'platform' ? '高台' : '道具'}
+                                </span>
+                            )}
+                        </div>
                     </div>
                 )}
 
@@ -892,32 +907,52 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         {/* Add New Performer / Prop */}
                         {showAddForm && (activeTab === 'props' ? (
                             <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700 mb-3">
-                                <div className="flex flex-col gap-2">
+                                <div className="flex flex-col gap-3">
                                     <input
                                         type="text"
                                         placeholder="道具名称"
-                                        className="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                                        className="w-full rounded-xl border border-slate-600 bg-slate-950/70 px-3 py-2.5 text-sm text-white outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                                         value={newPerformerName}
                                         onChange={(e) => setNewPerformerName(e.target.value)}
                                         onKeyDown={(e) => e.key === 'Enter' && handleAddProp()}
                                     />
-                                    <div className="flex gap-2 items-center">
-                                        <div className="flex items-center gap-1 bg-slate-900 px-2 py-1 rounded border border-slate-600 flex-1">
-                                            <span className="text-[10px] text-slate-400">长</span>
-                                            <input type="number" step="0.1" value={newPropWidth} onChange={(e) => setNewPropWidth(parseFloat(e.target.value))} className="w-full bg-transparent text-xs text-white focus:outline-none text-center" />
+                                    <div className={`grid gap-2 ${useSingleColumnPropFields ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                                        <StepperNumberField label="长度" value={newPropWidth} min={0.1} step={0.1} onChange={setNewPropWidth} />
+                                        <StepperNumberField label="宽度" value={newPropDepth} min={0.1} step={0.1} onChange={setNewPropDepth} />
+                                        <StepperNumberField label="高度" value={newPropHeight} min={0.1} step={0.1} onChange={setNewPropHeight} />
+                                        <div className="rounded-xl border border-slate-700 bg-slate-900/80 p-3 shadow-sm shadow-slate-950/20">
+                                            <label className="mb-2 block text-[11px] font-medium tracking-wide text-slate-400">
+                                                颜色
+                                            </label>
+                                            <div className="flex items-center justify-center rounded-lg border border-slate-600 bg-slate-950/70 px-3 py-3">
+                                                <input
+                                                    type="color"
+                                                    value={newPerformerColor}
+                                                    onChange={(e) => setNewPerformerColor(e.target.value)}
+                                                    className="h-14 w-20 cursor-pointer rounded-lg border border-slate-500 bg-transparent p-1"
+                                                    title="道具颜色"
+                                                />
+                                            </div>
                                         </div>
-                                        <div className="flex items-center gap-1 bg-slate-900 px-2 py-1 rounded border border-slate-600 flex-1">
-                                            <span className="text-[10px] text-slate-400">宽</span>
-                                            <input type="number" step="0.1" value={newPropDepth} onChange={(e) => setNewPropDepth(parseFloat(e.target.value))} className="w-full bg-transparent text-xs text-white focus:outline-none text-center" />
-                                        </div>
-                                        <div className="flex items-center gap-1 bg-slate-900 px-2 py-1 rounded border border-slate-600 flex-1">
-                                            <span className="text-[10px] text-slate-400">高</span>
-                                            <input type="number" step="0.1" value={newPropHeight} onChange={(e) => setNewPropHeight(parseFloat(e.target.value))} className="w-full bg-transparent text-xs text-white focus:outline-none text-center" />
-                                        </div>
-                                        <div className="w-px h-6 bg-slate-700 mx-1"></div>
-                                        <input type="color" value={newPerformerColor} onChange={(e) => setNewPerformerColor(e.target.value)} className="w-8 h-8 rounded cursor-pointer bg-slate-900 p-0.5 border border-slate-600" title="道具颜色" />
                                     </div>
-                                    <button onClick={handleAddProp} className="w-full bg-blue-600 hover:bg-blue-500 py-1.5 rounded text-white flex items-center justify-center gap-1 text-xs font-bold transition-all active:scale-95 shadow-lg shadow-blue-900/20">
+                                    <div className="grid grid-cols-1 gap-2">
+                                        <SelectField
+                                            label="类型"
+                                            value={newPropCategory}
+                                            onChange={setNewPropCategory}
+                                            options={[
+                                                { value: 'prop', label: '道具' },
+                                                { value: 'platform', label: '高台' },
+                                            ]}
+                                            helperText={
+                                                newPropCategory === 'platform'
+                                                    ? `演员与高台占地碰撞时，将按当前道具高度 ${newPropHeight.toFixed(1)}m 抬升`
+                                                    : '普通道具不抬升演员高度'
+                                            }
+                                            helperTone={newPropCategory === 'platform' ? 'accent' : 'default'}
+                                        />
+                                    </div>
+                                    <button onClick={handleAddProp} className="w-full rounded-xl bg-blue-600 py-2.5 text-white flex items-center justify-center gap-2 text-sm font-semibold transition-all hover:bg-blue-500 active:scale-[0.99] shadow-lg shadow-blue-900/20">
                                         <Plus size={14} /> 添加道具
                                     </button>
                                 </div>

@@ -21,6 +21,7 @@ function createFaceMaterial(faceTexture?: { dataUrl?: string }, fallbackColor: s
 interface Prop3DProps {
   performer: Performer;
   position: Position;
+  platformLift?: number;
   isSelected: boolean;
   onSelect: (id: string) => void;
   stageConfig: StageConfig;
@@ -32,6 +33,7 @@ interface Prop3DProps {
 const Prop3D: React.FC<Prop3DProps> = ({
   performer,
   position,
+  platformLift = 0,
   isSelected,
   onSelect,
   stageConfig,
@@ -126,7 +128,10 @@ const Prop3D: React.FC<Prop3DProps> = ({
 
   // Initialize position on mount or when position changes significantly
   useEffect(() => {
-    const [targetX, targetY, targetZ] = mapTo3D(position, stageConfig);
+    const [targetX, targetY, targetZ] = mapTo3D({
+      ...position,
+      z: (position.z || 0) + platformLift,
+    }, stageConfig);
     // Only jump if this is a large change (not smooth animation)
     const current = currentPositionRef.current;
     const targetWithHeight = new THREE.Vector3(targetX, targetY + dims.height / 2, targetZ);
@@ -137,9 +142,12 @@ const Prop3D: React.FC<Prop3DProps> = ({
         meshRef.current.position.copy(targetWithHeight);
       }
     }
-  }, [performer.id, stageConfig, dims.height]);
+  }, [performer.id, position, platformLift, stageConfig, dims.height]);
 
-  const [targetX, targetY, targetZ] = mapTo3D(position, stageConfig);
+  const [targetX, targetY, targetZ] = mapTo3D({
+    ...position,
+    z: (position.z || 0) + platformLift,
+  }, stageConfig);
 
   useFrame(() => {
     if (meshRef.current) {
