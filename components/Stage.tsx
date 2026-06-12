@@ -18,6 +18,8 @@ interface StageProps {
   selectedPerformerIds: string[];
   onSelectionChange: (ids: string[]) => void;
   onPositionChange: (updates: { id: string; pos: Position }[]) => void;
+  onDragStart?: (ids: string[]) => void;
+  onDragEnd?: (ids: string[]) => void;
   onUpdatePerformer?: (id: string, updates: Partial<Performer>) => void;
   readonly?: boolean;
   mode?: ToolMode;
@@ -73,6 +75,8 @@ export const Stage: React.FC<StageProps> = ({
   selectedPerformerIds,
   onSelectionChange,
   onPositionChange,
+  onDragStart,
+  onDragEnd,
   onUpdatePerformer,
   readonly = false,
   mode = ToolMode.SELECT,
@@ -271,9 +275,13 @@ export const Stage: React.FC<StageProps> = ({
 
   const handlePointerUp = (e: React.PointerEvent) => {
     if (readonly) return;
+    const draggedIds = dragState ? Object.keys(dragState.initialPositions) : [];
     setResizeState(null);
     setDragState(null);
     setSelectionBox(null);
+    if (draggedIds.length > 0) {
+      onDragEnd?.(draggedIds);
+    }
 
     // Context for selection box logic... (retained but moved logic out of if block to be safe, or just keep it)
     if (selectionBox && stageRef.current && !resizeState && !dragState) {
@@ -355,6 +363,7 @@ export const Stage: React.FC<StageProps> = ({
         startY: e.clientY,
         initialPositions
       });
+      onDragStart?.(Object.keys(initialPositions));
     }
   };
 

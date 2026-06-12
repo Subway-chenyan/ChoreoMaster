@@ -37,14 +37,25 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
                                 <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Space</kbd>
                             </li>
                             <li className="flex justify-between">
+                                <span>保存项目（桌面端）</span>
+                                <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Ctrl/⌘ + S</kbd>
+                            </li>
+                            <li className="flex justify-between">
                                 <span>撤销</span>
-                                <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Ctrl + Z</kbd>
+                                <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Ctrl/⌘ + Z</kbd>
                             </li>
                             <li className="flex justify-between">
                                 <span>重做</span>
                                 <div className="flex gap-1">
-                                    <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Ctrl + Y</kbd>
-                                    <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Shift + Ctrl + Z</kbd>
+                                    <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Ctrl/⌘ + Y</kbd>
+                                    <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Ctrl/⌘ + Shift + Z</kbd>
+                                </div>
+                            </li>
+                            <li className="flex justify-between">
+                                <span>打开帮助</span>
+                                <div className="flex gap-1">
+                                    <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">F1</kbd>
+                                    <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Ctrl + /</kbd>
                                 </div>
                             </li>
                         </ul>
@@ -57,23 +68,23 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
                         </h3>
                         <ul className="space-y-2">
                             <li className="flex justify-between">
-                                <span>多选演员</span>
-                                <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Ctrl + Click</kbd>
+                                <span>多选演员/道具</span>
+                                <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Ctrl/⌘ + Click</kbd>
                             </li>
                             <li className="flex justify-between">
-                                <span>框选演员</span>
+                                <span>框选演员/道具</span>
                                 <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Drag</kbd>
                             </li>
                             <li className="flex justify-between">
-                                <span>复制选中演员</span>
-                                <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Ctrl + C</kbd>
+                                <span>复制选中演员/道具</span>
+                                <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Ctrl/⌘ + C</kbd>
                             </li>
                             <li className="flex justify-between">
-                                <span>粘贴演员</span>
-                                <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Ctrl + V</kbd>
+                                <span>粘贴演员/道具</span>
+                                <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Ctrl/⌘ + V</kbd>
                             </li>
                             <li className="flex justify-between">
-                                <span>删除选中演员（仅当前队形）</span>
+                                <span>删除选中演员/道具（仅当前队形）</span>
                                 <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Delete / Backspace</kbd>
                             </li>
                             <li className="flex justify-between">
@@ -107,23 +118,26 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
                             </li>
                             <li className="flex justify-between">
                                 <span>复制当前队形</span>
-                                <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Ctrl + C (选中队形)</kbd>
+                                <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Ctrl/⌘ + C（未选中演员）</kbd>
                             </li>
                             <li className="flex justify-between">
                                 <span>粘贴队形</span>
-                                <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Ctrl + V</kbd>
+                                <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Ctrl/⌘ + V（未选中演员）</kbd>
                             </li>
                             <li className="flex justify-between">
                                 <span>重命名队形</span>
-                                <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Double Click</kbd>
+                                <div className="flex gap-1">
+                                    <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">双击</kbd>
+                                    <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Enter/Esc</kbd>
+                                </div>
                             </li>
                             <li className="flex justify-between">
                                 <span>删除队形</span>
-                                <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Delete</kbd>
+                                <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Delete（未选中演员）</kbd>
                             </li>
                             <li className="flex justify-between">
-                                <span>设为入点 / 出点</span>
-                                <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">工具栏按钮</kbd>
+                                <span>导出视频</span>
+                                <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">导出设置面板</kbd>
                             </li>
                         </ul>
                     </div>
@@ -134,7 +148,7 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
                             <Type size={16} /> 小贴士
                         </h3>
                         <ul className="space-y-2 list-disc pl-4 text-xs leading-relaxed">
-                            <li>导出视频为固定 720p，支持切换是否显示姓名与网格，导出时显示录制进度。</li>
+                            <li>导出支持 2D/3D，可选 1080p/2K/4K，导出时显示进度。</li>
                             <li>舞台底部“舞台前沿”指示条用于标记前沿方向。</li>
                             <li>时间轴的空白过渡区间会进行平滑插值，便于观察队形变换。</li>
                         </ul>

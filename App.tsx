@@ -1,5 +1,16 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Frame, Performer, Position, PerformerShape, PerformerGroup, PerformerType, AIConfig, AIChoreoPlan } from './types';
+import {
+  Frame,
+  Performer,
+  Position,
+  PerformerShape,
+  PerformerGroup,
+  PerformerType,
+  AIConfig,
+  AIChoreoPlan,
+  ProjectDocument,
+  ProjectLoadResult,
+} from './types';
 import { Sidebar } from './components/Sidebar';
 import { Stage } from './components/Stage';
 import Stage3D from './components/Stage3D';
@@ -21,11 +32,43 @@ const DEFAULT_FRAME: Frame = {
   positions: {}
 };
 
+const createDefaultStageConfig = (): StageConfig => ({
+  width: 20,
+  depth: 20 / (16 / 9),
+  wingWidth: 4,
+  ledWidth: 20,
+  ledHeight: 6,
+  ledContent: { type: 'none' },
+});
+
 // Clipboard Item Structure
 interface ClipboardItem {
   performer: Performer;
   positions: Record<string, Position>; // Map FrameID -> Position
 }
+
+type MovePerformersUndoAction = {
+  type: 'move-performers';
+  frameId: string;
+  performerIds: string[];
+  before: Record<string, Position>;
+  after: Record<string, Position>;
+};
+
+type PastePerformersUndoAction = {
+  type: 'paste-performers';
+  performers: Performer[];
+  frameUpdates: Record<string, Record<string, Position>>;
+  previousSelectedIds: string[];
+};
+
+type PasteFrameUndoAction = {
+  type: 'paste-frame';
+  frame: Frame;
+  previousCurrentFrameId: string | null;
+};
+
+type UndoAction = MovePerformersUndoAction | PastePerformersUndoAction | PasteFrameUndoAction;
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -42,6 +85,7 @@ const App: React.FC = () => {
   const [musicUrl, setMusicUrl] = useState<string | null>(null);
   const [audioBuffer, setAudioBuffer] = useState<AudioBuffer | null>(null);
   const [musicName, setMusicName] = useState<string | null>(null);
+  const [musicAsset, setMusicAsset] = useState<string | null>(null);
   const [inPointMs, setInPointMs] = useState<number | null>(null);
   const [outPointMs, setOutPointMs] = useState<number | null>(null);
   const [isExporting, setIsExporting] = useState(false);
@@ -62,14 +106,19 @@ const App: React.FC = () => {
   const [stageToolbarCollapsed, setStageToolbarCollapsed] = useState(() => window.matchMedia('(max-width: 1100px)').matches);
   const [sidebarWidth, setSidebarWidth] = useState<number>(320);
   const [timelineHeight, setTimelineHeight] = useState<number>(() => (
-    window.matchMedia('(max-width: 1100px)').matches ? 112 : 160
+    window.matchMedia('(max-width: 1100px)').matches ? 132 : 180
   ));
   const [timelineCollapsed, setTimelineCollapsed] = useState(false);
-  const previousTimelineHeightRef = useRef(160);
+  const previousTimelineHeightRef = useRef(180);
   const [isCompactLayout, setIsCompactLayout] = useState(() => window.matchMedia('(max-width: 1100px)').matches);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
-  const [undoStack, setUndoStack] = useState<any[]>([]);
-  const [redoStack, setRedoStack] = useState<any[]>([]);
+  const [undoStack, setUndoStack] = useState<UndoAction[]>([]);
+  const [redoStack, setRedoStack] = useState<UndoAction[]>([]);
+  const pendingMoveUndoRef = useRef<{
+    frameId: string;
+    performerIds: string[];
+    before: Record<string, Position>;
+  } | null>(null);
 
   useEffect(() => {
     const media = window.matchMedia('(max-width: 1100px)');
@@ -77,7 +126,7 @@ const App: React.FC = () => {
       setIsCompactLayout(media.matches);
       if (media.matches) {
         setSidebarCollapsed(true);
-        setTimelineHeight((height) => height === 160 ? 112 : Math.min(height, 320));
+        setTimelineHeight((height) => height === 180 ? 132 : Math.min(height, 320));
         setStageToolbarCollapsed(true);
       }
     };
@@ -109,14 +158,7 @@ const App: React.FC = () => {
 
   // 新增：3D 模式相关状态
   const [viewMode, setViewMode] = useState<'2d' | '3d'>('2d');
-  const [stageConfig, setStageConfig] = useState<StageConfig>({
-    width: 20,
-    depth: 20 / (16 / 9),
-    wingWidth: 4,
-    ledWidth: 20,
-    ledHeight: 6,
-    ledContent: { type: 'none' }
-  });
+  const [stageConfig, setStageConfig] = useState<StageConfig>(createDefaultStageConfig);
   const [mediaCache, setMediaCache] = useState<Record<string, string>>({});
   
   // Project storage state
@@ -124,6 +166,7 @@ const App: React.FC = () => {
   const [currentProjectPath, setCurrentProjectPath] = useState<string | null>(null);
   const [projectHasChanges, setProjectHasChanges] = useState(false);
   const [lastSavedState, setLastSavedState] = useState<string>('');
+  const [projectMessages, setProjectMessages] = useState<string[]>([]);
   
   const [aiConfig, setAiConfig] = useState<AIConfig>(() => {
     const saved = localStorage.getItem('choreo-ai-config');
@@ -143,37 +186,6 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('choreo-ai-config', JSON.stringify(aiConfig));
   }, [aiConfig]);
-
-  useEffect(() => {
-    if (!window.electronAPI?.isElectron) return;
-
-    let cancelled = false;
-    const syncDesktopAgent = async () => {
-      for (let attempt = 0; attempt < 60 && !cancelled; attempt += 1) {
-        try {
-          const runtime = await window.electronAPI.agent.getRuntime();
-          if (runtime.baseUrl && runtime.accessToken) {
-            setAiConfig((current) => ({
-              ...current,
-              backendUrl: runtime.baseUrl,
-              memberToken: runtime.accessToken,
-            }));
-            return;
-          }
-          if (runtime.state === 'error') return;
-        } catch (error) {
-          console.error('Failed to read desktop Agent runtime:', error);
-          return;
-        }
-        await new Promise((resolve) => setTimeout(resolve, 250));
-      }
-    };
-    void syncDesktopAgent();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   // Theme
   const { theme } = useTheme();
@@ -357,6 +369,56 @@ const App: React.FC = () => {
     return {};
   }, [frames, performers, getSortedFrames]);
 
+  const clonePositionMap = (positionsMap: Record<string, Position>): Record<string, Position> => (
+    Object.fromEntries(
+      Object.entries(positionsMap).map(([id, pos]) => [id, { ...pos }])
+    )
+  );
+
+  const positionsEqual = (a: Position | undefined, b: Position | undefined) => (
+    a?.x === b?.x && a?.y === b?.y && a?.z === b?.z
+  );
+
+  const pushUndoAction = useCallback((action: UndoAction) => {
+    setUndoStack((prev) => [...prev, action]);
+    setRedoStack([]);
+  }, []);
+
+  const removePerformerIdsFromFrames = useCallback((targetIds: string[]) => {
+    const idSet = new Set(targetIds);
+    setFrames((prev) => prev.map((frame) => {
+      let changed = false;
+      const nextPositions = { ...frame.positions } as Record<string, Position>;
+      Object.keys(nextPositions).forEach((performerId) => {
+        if (idSet.has(performerId)) {
+          delete nextPositions[performerId];
+          changed = true;
+        }
+      });
+      return changed ? { ...frame, positions: nextPositions } : frame;
+    }));
+  }, []);
+
+  const restoreFrameUpdates = useCallback((frameUpdates: Record<string, Record<string, Position>>) => {
+    setFrames((prev) => prev.map((frame) => {
+      const updates = frameUpdates[frame.id];
+      if (!updates) return frame;
+      return {
+        ...frame,
+        positions: { ...frame.positions, ...clonePositionMap(updates) }
+      };
+    }));
+  }, []);
+
+  const createFrameCopy = useCallback((source: Frame, overrides?: Partial<Frame>): Frame => ({
+    ...source,
+    id: overrides?.id ?? generateId(),
+    name: overrides?.name ?? source.name,
+    startTime: overrides?.startTime ?? source.startTime,
+    duration: overrides?.duration ?? source.duration,
+    positions: JSON.parse(JSON.stringify(overrides?.positions ?? source.positions))
+  }), []);
+
   // --- Actions ---
 
   const handleAddPerformer = (name: string, color: string, shape: PerformerShape, extra?: Partial<Performer>) => {
@@ -471,10 +533,30 @@ const App: React.FC = () => {
   };
 
   // LED 内容上传处理
-  const handleLEDContentUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleLEDContentUpload = async (e?: React.ChangeEvent<HTMLInputElement>) => {
+    if (window.electronAPI?.isElectron) {
+      if (!currentProjectId) {
+        setProjectMessages(['请先新建或打开一个项目，再导入背景资源']);
+        return;
+      }
+      const sourcePath = await window.electronAPI.openFile([
+        { name: 'Image and Video', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'mp4', 'webm', 'mov'] },
+      ]);
+      if (!sourcePath) return;
+      const asset = await window.electronAPI.project.ingestAsset(currentProjectId, sourcePath, 'background');
+      const extension = asset.displayName.split('.').pop()?.toLowerCase() || '';
+      const type = ['mp4', 'webm', 'mov'].includes(extension) ? 'video' : 'image';
+      setMediaCache({ [asset.relativePath]: asset.url });
+      setStageConfig(prev => ({
+        ...prev,
+        ledContent: { type, value: asset.relativePath, loop: true },
+      }));
+      setProjectMessages(['背景资源已复制到项目']);
+      return;
+    }
 
+    const file = e?.target.files?.[0];
+    if (!file) return;
     const url = URL.createObjectURL(file);
     const fileName = `led_${Date.now()}_${file.name}`;
     const previousValue = stageConfig.ledContent?.value;
@@ -482,7 +564,7 @@ const App: React.FC = () => {
     setMediaCache(prev => {
       const next = { ...prev, [fileName]: url };
       if (previousValue && next[previousValue]) {
-        URL.revokeObjectURL(next[previousValue]);
+        if (next[previousValue].startsWith('blob:')) URL.revokeObjectURL(next[previousValue]);
         delete next[previousValue];
       }
       return next;
@@ -493,7 +575,7 @@ const App: React.FC = () => {
       ...prev,
       ledContent: { type, value: fileName, loop: true }
     }));
-    e.target.value = '';
+    if (e) e.target.value = '';
   };
 
   // 清除 LED 内容
@@ -502,7 +584,7 @@ const App: React.FC = () => {
     if (previousValue) {
       setMediaCache(prev => {
         if (!prev[previousValue]) return prev;
-        URL.revokeObjectURL(prev[previousValue]);
+        if (prev[previousValue].startsWith('blob:')) URL.revokeObjectURL(prev[previousValue]);
         const next = { ...prev };
         delete next[previousValue];
         return next;
@@ -521,6 +603,49 @@ const App: React.FC = () => {
 
   // ==================== Project Storage Handlers ====================
 
+  const applyLoadedProject = useCallback(async (projectId: string, result: ProjectLoadResult) => {
+    const { data, projectPath, audioUrl, mediaUrls, warnings } = result;
+    setCurrentProjectId(projectId);
+    setCurrentProjectPath(projectPath);
+    setPerformers(data.performers);
+    setPerformerGroups(data.performerGroups);
+    setFrames(data.frames);
+    setMusicName(data.musicName || null);
+    setMusicAsset(data.musicAsset || null);
+    setStageConfig(data.stageConfig);
+    setMediaCache(mediaUrls);
+    setCurrentTime(0);
+    setAudioBuffer(null);
+    setMusicUrl(audioUrl);
+    setSelectedPerformerIds([]);
+    if (data.frames.length > 0) {
+      setCurrentFrameId(data.frames[0].id);
+    }
+
+    const messages = warnings.map((warning) => warning.message);
+    if (audioUrl && audioContextRef.current) {
+      try {
+        const response = await fetch(audioUrl);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        setAudioBuffer(await audioContextRef.current.decodeAudioData(await response.arrayBuffer()));
+      } catch (error) {
+        console.error('Failed to restore project audio:', error);
+        messages.push(`音频无法解码：${data.musicName || data.musicAsset || '未知音频'}`);
+      }
+    }
+
+    setLastSavedState(JSON.stringify({
+      performers: data.performers,
+      performerGroups: data.performerGroups,
+      frames: data.frames,
+      stageConfig: data.stageConfig,
+      musicName: data.musicName || null,
+      musicAsset: data.musicAsset || null,
+    }));
+    setProjectHasChanges(false);
+    setProjectMessages(messages.length > 0 ? messages : ['项目已完整恢复']);
+  }, []);
+
   // Get current project state as JSON string for comparison
   const getProjectStateString = useCallback(() => {
     return JSON.stringify({
@@ -529,8 +654,9 @@ const App: React.FC = () => {
       frames,
       stageConfig,
       musicName,
+      musicAsset,
     });
-  }, [performers, performerGroups, frames, stageConfig, musicName]);
+  }, [performers, performerGroups, frames, stageConfig, musicName, musicAsset]);
 
   // Track changes to project
   useEffect(() => {
@@ -538,7 +664,7 @@ const App: React.FC = () => {
       const currentState = getProjectStateString();
       setProjectHasChanges(currentState !== lastSavedState);
     }
-  }, [performers, performerGroups, frames, stageConfig, musicName, currentProjectId, lastSavedState, getProjectStateString]);
+  }, [performers, performerGroups, frames, stageConfig, musicName, musicAsset, currentProjectId, lastSavedState, getProjectStateString]);
 
   // Create a new project
   const handleCreateProject = async (name: string): Promise<string> => {
@@ -547,19 +673,22 @@ const App: React.FC = () => {
     // Auto-save current project before creating new one
     if (currentProjectId && projectHasChanges) {
       try {
-        const projectData = {
-          version: '2.0',
+        const projectData: ProjectDocument = {
+          version: '3.0',
           name: '',
           performers,
           performerGroups,
           frames,
           stageConfig,
           musicName,
+          musicAsset,
         };
         await window.electronAPI.project.save(currentProjectId, projectData);
         console.log('Auto-saved current project before creating new');
       } catch (error) {
         console.error('Failed to auto-save before creating:', error);
+        setProjectMessages(['当前项目自动保存失败，已取消新建项目']);
+        return '';
       }
     }
     
@@ -570,24 +699,36 @@ const App: React.FC = () => {
       
       // Reset to fresh state
       const newFrameId = generateId();
-      setPerformers([]);
-      setPerformerGroups([]);
-      setFrames([{
+      const newFrames: Frame[] = [{
         id: newFrameId,
         name: 'Opening',
         startTime: 0,
         duration: 2000,
-        positions: {}
-      }]);
+        positions: {},
+      }];
+      const newStageConfig = createDefaultStageConfig();
+      setPerformers([]);
+      setPerformerGroups([]);
+      setFrames(newFrames);
       setCurrentFrameId(newFrameId);
+      setStageConfig(newStageConfig);
+      setMediaCache({});
       setMusicName(null);
+      setMusicAsset(null);
       setAudioBuffer(null);
       setMusicUrl(null);
       setCurrentTime(0);
       setSelectedPerformerIds([]);
       
       // Mark as saved
-      setLastSavedState(getProjectStateString());
+      setLastSavedState(JSON.stringify({
+        performers: [],
+        performerGroups: [],
+        frames: newFrames,
+        stageConfig: newStageConfig,
+        musicName: null,
+        musicAsset: null,
+      }));
       setProjectHasChanges(false);
       
       return id;
@@ -603,9 +744,22 @@ const App: React.FC = () => {
     // Auto-save current project before switching
     if (currentProjectId && projectHasChanges) {
       try {
-        const projectData = { version: '2.0', name: '', performers, performerGroups, frames, stageConfig, musicName };
+        const projectData: ProjectDocument = {
+          version: '3.0',
+          name: '',
+          performers,
+          performerGroups,
+          frames,
+          stageConfig,
+          musicName,
+          musicAsset,
+        };
         await window.electronAPI.project.save(currentProjectId, projectData);
-      } catch (error) { /* ignore */ }
+      } catch (error) {
+        console.error('Failed to auto-save before creating template project:', error);
+        setProjectMessages(['当前项目自动保存失败，已取消创建模板项目']);
+        return '';
+      }
     }
 
     try {
@@ -613,7 +767,16 @@ const App: React.FC = () => {
       const { id, path } = await window.electronAPI.project.create(name);
 
       // Save template data into the new project
-      const saveData = { version: '2.0', name: '', performers: templateData.performers || [], performerGroups: templateData.performerGroups || [], frames: templateData.frames || [], stageConfig: templateData.stageConfig || stageConfig, musicName: null };
+      const saveData: ProjectDocument = {
+        version: '3.0',
+        name: '',
+        performers: templateData.performers || [],
+        performerGroups: templateData.performerGroups || [],
+        frames: templateData.frames || [],
+        stageConfig: templateData.stageConfig || stageConfig,
+        musicName: null,
+        musicAsset: null,
+      };
       await window.electronAPI.project.save(id, saveData);
 
       setCurrentProjectId(id);
@@ -626,12 +789,20 @@ const App: React.FC = () => {
       setStageConfig(saveData.stageConfig);
       setCurrentFrameId(saveData.frames[0]?.id || '');
       setMusicName(null);
+      setMusicAsset(null);
       setAudioBuffer(null);
       setMusicUrl(null);
       setCurrentTime(0);
       setSelectedPerformerIds([]);
 
-      setLastSavedState(JSON.stringify({ performers: saveData.performers, performerGroups: saveData.performerGroups, frames: saveData.frames, stageConfig: saveData.stageConfig, musicName: null }));
+      setLastSavedState(JSON.stringify({
+        performers: saveData.performers,
+        performerGroups: saveData.performerGroups,
+        frames: saveData.frames,
+        stageConfig: saveData.stageConfig,
+        musicName: null,
+        musicAsset: null,
+      }));
       setProjectHasChanges(false);
 
       return id;
@@ -653,6 +824,7 @@ const App: React.FC = () => {
     setStageConfig(config);
     setCurrentFrameId(frames[0]?.id || '');
     setMusicName(null);
+    setMusicAsset(null);
     setAudioBuffer(null);
     setMusicUrl(null);
     setCurrentTime(0);
@@ -667,90 +839,104 @@ const App: React.FC = () => {
     // Auto-save current project before switching
     if (currentProjectId && projectHasChanges) {
       try {
-        const projectData = {
-          version: '2.0',
+        const projectData: ProjectDocument = {
+          version: '3.0',
           name: '',
           performers,
           performerGroups,
           frames,
           stageConfig,
           musicName,
+          musicAsset,
         };
         await window.electronAPI.project.save(currentProjectId, projectData);
         console.log('Auto-saved current project before switching');
       } catch (error) {
         console.error('Failed to auto-save before switching:', error);
+        setProjectMessages(['当前项目自动保存失败，已取消切换项目']);
+        return;
       }
     }
     
     try {
-      const { data, projectPath } = await window.electronAPI.project.load(projectId);
-      
-      setCurrentProjectId(projectId);
-      setCurrentProjectPath(projectPath);
-      
-      // Load project data
-      setPerformers(data.performers || []);
-      setPerformerGroups(data.performerGroups || []);
-      setFrames(data.frames || []);
-      setMusicName(data.musicName || null);
-      
-      if (data.stageConfig) {
-        setStageConfig(data.stageConfig);
-      }
-      
-      // Reset playback
-      setCurrentTime(0);
-      setAudioBuffer(null);
-      setMusicUrl(null);
-      setSelectedPerformerIds([]);
-      
-      if (data.frames?.length > 0) {
-        setCurrentFrameId(data.frames[0].id);
-      }
-      
-      // Mark as saved (use setTimeout to ensure state is updated)
-      setTimeout(() => {
-        setLastSavedState(JSON.stringify({
-          performers: data.performers || [],
-          performerGroups: data.performerGroups || [],
-          frames: data.frames || [],
-          stageConfig: data.stageConfig || stageConfig,
-          musicName: data.musicName || null,
-        }));
-        setProjectHasChanges(false);
-      }, 100);
+      await applyLoadedProject(projectId, await window.electronAPI.project.load(projectId));
       
     } catch (error) {
       console.error('Failed to load project:', error);
-      alert('加载项目失败');
+      setProjectMessages(['项目加载失败，请检查项目文件是否完整']);
     }
   };
 
   // Save current project
-  const handleSaveProject = async () => {
-    if (!window.electronAPI?.isElectron || !currentProjectId) return;
+  const handleSaveProject = async (): Promise<boolean> => {
+    if (!window.electronAPI?.isElectron || !currentProjectId) return false;
     
     try {
-      const projectData = {
-        version: '2.0',
+      const projectData: ProjectDocument = {
+        version: '3.0',
         name: '', // Will be preserved from existing project.json
         performers,
         performerGroups,
         frames,
         stageConfig,
         musicName,
+        musicAsset,
       };
       
-      await window.electronAPI.project.save(currentProjectId, projectData);
-      
-      // Mark as saved
-      setLastSavedState(getProjectStateString());
+      const saved = await window.electronAPI.project.save(currentProjectId, projectData);
+      setPerformers(saved.data.performers);
+      setMediaCache(saved.mediaUrls);
+      setLastSavedState(JSON.stringify({
+        performers: saved.data.performers,
+        performerGroups: saved.data.performerGroups,
+        frames: saved.data.frames,
+        stageConfig: saved.data.stageConfig,
+        musicName: saved.data.musicName || null,
+        musicAsset: saved.data.musicAsset || null,
+      }));
       setProjectHasChanges(false);
-      
+      return true;
     } catch (error) {
       console.error('Failed to save project:', error);
-      alert('保存项目失败');
+      setProjectMessages(['项目保存失败，请检查磁盘空间和目录权限']);
+      return false;
+    }
+  };
+
+  const handleImportProjectPackage = async () => {
+    if (!window.electronAPI?.isElectron) return;
+    try {
+      const result = await window.electronAPI.project.importPackage();
+      if (result) await applyLoadedProject(result.projectId, result);
+    } catch (error) {
+      console.error('Project package import failed:', error);
+      setProjectMessages(['项目包导入失败，文件可能已损坏或格式不受支持']);
+    }
+  };
+
+  const handleImportLegacyProject = async () => {
+    if (!window.electronAPI?.isElectron) return;
+    try {
+      const result = await window.electronAPI.project.importLegacy();
+      if (result) await applyLoadedProject(result.projectId, result);
+    } catch (error) {
+      console.error('Legacy project import failed:', error);
+      setProjectMessages(['旧 JSON 导入失败，文件可能已损坏或格式不受支持']);
+    }
+  };
+
+  const handleExportProjectPackage = async () => {
+    if (!window.electronAPI?.isElectron || !currentProjectId) {
+      setProjectMessages(['请先打开需要导出的项目']);
+      return;
+    }
+    try {
+      if (projectHasChanges && !await handleSaveProject()) return;
+      const exportedPath = await window.electronAPI.project.exportPackage(currentProjectId);
+      if (exportedPath) setProjectMessages([`项目包已导出：${exportedPath}`]);
+    } catch (error) {
+      console.error('Project package export failed:', error);
+      setProjectMessages(['项目包导出失败，请检查目标目录权限和磁盘空间']);
     }
   };
 
@@ -775,10 +961,6 @@ const App: React.FC = () => {
     const ids = new Set(selectedPerformerIds);
     const currentFrame = frames.find(fr => fr.id === currentFrameId);
     if (!currentFrame) return;
-    const backup: Record<string, Position> = {};
-    Object.entries(currentFrame.positions).forEach(([pid, pos]) => { if (ids.has(pid)) backup[pid] = pos as Position; });
-    setUndoStack(prev => [...prev, { type: 'delete-performers-in-frame', frameId: currentFrameId, positionsBackup: backup, deletedIds: selectedPerformerIds }]);
-    setRedoStack([]);
     setFrames(prev => prev.map(f => {
       if (f.id !== currentFrameId) return f;
       const newPositions = { ...f.positions } as Record<string, Position>;
@@ -829,6 +1011,53 @@ const App: React.FC = () => {
       return f;
     }));
   };
+
+  const handleStageDragStart = useCallback((performerIds: string[]) => {
+    if (!currentFrameId || performerIds.length === 0) {
+      pendingMoveUndoRef.current = null;
+      return;
+    }
+    const currentFrame = frames.find((frame) => frame.id === currentFrameId);
+    if (!currentFrame) {
+      pendingMoveUndoRef.current = null;
+      return;
+    }
+    const before = clonePositionMap(
+      Object.fromEntries(
+        performerIds
+          .map((id) => [id, currentFrame.positions[id]] as const)
+          .filter((entry): entry is [string, Position] => entry[1] !== undefined)
+      )
+    );
+    pendingMoveUndoRef.current = Object.keys(before).length > 0
+      ? { frameId: currentFrameId, performerIds: Object.keys(before), before }
+      : null;
+  }, [currentFrameId, frames]);
+
+  const handleStageDragEnd = useCallback((performerIds: string[]) => {
+    const snapshot = pendingMoveUndoRef.current;
+    pendingMoveUndoRef.current = null;
+    if (!snapshot || snapshot.frameId !== currentFrameId) return;
+    const currentFrame = frames.find((frame) => frame.id === snapshot.frameId);
+    if (!currentFrame) return;
+    const relevantIds = snapshot.performerIds.filter((id) => performerIds.length === 0 || performerIds.includes(id));
+    const after = clonePositionMap(
+      Object.fromEntries(
+        relevantIds
+          .map((id) => [id, currentFrame.positions[id]] as const)
+          .filter((entry): entry is [string, Position] => entry[1] !== undefined)
+      )
+    );
+    const changedIds = relevantIds.filter((id) => !positionsEqual(snapshot.before[id], after[id]));
+    if (changedIds.length === 0) return;
+    pushUndoAction({
+      type: 'move-performers',
+      frameId: snapshot.frameId,
+      performerIds: changedIds,
+      before: clonePositionMap(Object.fromEntries(changedIds.map((id) => [id, snapshot.before[id]]))),
+      after: clonePositionMap(Object.fromEntries(changedIds.map((id) => [id, after[id]]))),
+    });
+  }, [currentFrameId, frames, pushUndoAction]);
 
   const handleApplyPreset = (coords: Position[]) => {
     const targets = selectedPerformerIds.length > 0
@@ -1000,12 +1229,7 @@ const App: React.FC = () => {
   const handleDeleteFrame = (id: string) => {
     if (frames.length <= 0) return;
     if (isPlaying) handlePlayPause();
-    const target = frames.find(f => f.id === id);
     const filtered = frames.filter(f => f.id !== id);
-    if (target) {
-      setUndoStack(prev => [...prev, { type: 'delete-frame', frame: JSON.parse(JSON.stringify(target)), prevCurrentFrameId: currentFrameId }]);
-      setRedoStack([]);
-    }
     if (filtered.length === 0) {
       const nf: Frame = { id: generateId(), name: 'Opening', startTime: 0, duration: 2000, positions: {} };
       setFrames([nf]);
@@ -1022,55 +1246,73 @@ const App: React.FC = () => {
     const last = undoStack[undoStack.length - 1];
     if (!last) return;
     setUndoStack(prev => prev.slice(0, -1));
-    if (last.type === 'delete-performers-in-frame') {
-      setFrames(prev => prev.map(f => f.id === last.frameId ? { ...f, positions: { ...f.positions, ...last.positionsBackup } } : f));
-      setSelectedPerformerIds(last.deletedIds);
-      setRedoStack(prev => [...prev, last]);
-    } else if (last.type === 'delete-frame') {
-      setFrames(prev => {
-        const nf = [...prev, last.frame];
-        nf.sort((a, b) => a.startTime - b.startTime);
-        return nf;
-      });
-      setCurrentFrameId(last.frame.id);
-      setRedoStack(prev => [...prev, last]);
+    if (last.type === 'move-performers') {
+      setFrames((prev) => prev.map((frame) => {
+        if (frame.id !== last.frameId) return frame;
+        return {
+          ...frame,
+          positions: { ...frame.positions, ...clonePositionMap(last.before) }
+        };
+      }));
+      setSelectedPerformerIds(last.performerIds);
+    } else if (last.type === 'paste-performers') {
+      const pastedIds = last.performers.map((performer) => performer.id);
+      setPerformers((prev) => prev.filter((performer) => !pastedIds.includes(performer.id)));
+      removePerformerIdsFromFrames(pastedIds);
+      setSelectedPerformerIds(last.previousSelectedIds);
+    } else if (last.type === 'paste-frame') {
+      setFrames((prev) => prev.filter((frame) => frame.id !== last.frame.id));
+      if (last.previousCurrentFrameId) {
+        setCurrentFrameId(last.previousCurrentFrameId);
+      }
     }
+    setRedoStack(prev => [...prev, last]);
   };
 
   const handleRedo = () => {
     const last = redoStack[redoStack.length - 1];
     if (!last) return;
     setRedoStack(prev => prev.slice(0, -1));
-    if (last.type === 'delete-performers-in-frame') {
-      const ids = new Set(Object.keys(last.positionsBackup));
-      setFrames(prev => prev.map(f => {
-        if (f.id !== last.frameId) return f;
-        const newPositions = { ...f.positions } as Record<string, Position>;
-        Object.keys(newPositions).forEach(pid => { if (ids.has(pid)) delete (newPositions as any)[pid]; });
-        return { ...f, positions: newPositions };
+    if (last.type === 'move-performers') {
+      setFrames((prev) => prev.map((frame) => {
+        if (frame.id !== last.frameId) return frame;
+        return {
+          ...frame,
+          positions: { ...frame.positions, ...clonePositionMap(last.after) }
+        };
       }));
-      setSelectedPerformerIds([]);
-      setUndoStack(prev => [...prev, last]);
-    } else if (last.type === 'delete-frame') {
-      setFrames(prev => prev.filter(f => f.id !== last.frame.id));
-      setCurrentFrameId(last.prevCurrentFrameId || null as any);
-      setUndoStack(prev => [...prev, last]);
+      setSelectedPerformerIds(last.performerIds);
+    } else if (last.type === 'paste-performers') {
+      setPerformers((prev) => [...prev, ...last.performers.map((performer) => ({ ...performer }))]);
+      restoreFrameUpdates(last.frameUpdates);
+      setSelectedPerformerIds(last.performers.map((performer) => performer.id));
+    } else if (last.type === 'paste-frame') {
+      setFrames((prev) => {
+        const nextFrames = [...prev, createFrameCopy(last.frame, { id: last.frame.id })];
+        nextFrames.sort((a, b) => a.startTime - b.startTime);
+        return nextFrames;
+      });
+      setCurrentFrameId(last.frame.id);
     }
+    setUndoStack(prev => [...prev, last]);
   };
 
   const handleDuplicateFrame = (id: string) => {
     const f = frames.find(fr => fr.id === id);
     if (!f) return;
-
-    const newFrame = {
-      ...f,
-      id: generateId(),
+    const newFrame = createFrameCopy(f, {
       name: `${f.name} (Copy)`,
-      startTime: f.startTime + f.duration + 1000 // Place it after
-    };
+      startTime: f.startTime + f.duration + 1000,
+    });
     const newFrames = [...frames, newFrame];
     newFrames.sort((a, b) => a.startTime - b.startTime);
     setFrames(newFrames);
+    setCurrentFrameId(newFrame.id);
+    pushUndoAction({
+      type: 'paste-frame',
+      frame: createFrameCopy(newFrame, { id: newFrame.id }),
+      previousCurrentFrameId: currentFrameId,
+    });
   };
 
   // --- Project Export / Import ---
@@ -1271,6 +1513,7 @@ const App: React.FC = () => {
 
     const newPerformers: Performer[] = [];
     const frameUpdates: Record<string, Record<string, Position>> = {}; // frameId -> { perfId: pos }
+    const previousSelectedIds = [...selectedPerformerIds];
 
     items.forEach(item => {
       const newId = generateId();
@@ -1303,8 +1546,15 @@ const App: React.FC = () => {
     }));
 
     setSelectedPerformerIds(newPerformers.map(p => p.id));
-
-  }, [clipboard, frames]);
+    pushUndoAction({
+      type: 'paste-performers',
+      performers: newPerformers.map((performer) => ({ ...performer })),
+      frameUpdates: Object.fromEntries(
+        Object.entries(frameUpdates).map(([frameId, updates]) => [frameId, clonePositionMap(updates)])
+      ),
+      previousSelectedIds,
+    });
+  }, [clipboard, frames, selectedPerformerIds, pushUndoAction, stageConfig]);
 
   const handleDuplicateSelected = () => {
     const items: ClipboardItem[] = [];
@@ -1430,17 +1680,19 @@ const App: React.FC = () => {
         } else if (frameClipboard) {
           // Paste a frame only when the performer clipboard is empty.
           e.preventDefault();
-          const newFrame: Frame = {
-            ...frameClipboard,
-            id: generateId(),
+          const newFrame = createFrameCopy(frameClipboard, {
             name: `${frameClipboard.name} (复制)`,
             startTime: currentTime,
-            positions: JSON.parse(JSON.stringify(frameClipboard.positions))
-          };
+          });
           const newFrames = [...frames, newFrame];
           newFrames.sort((a, b) => a.startTime - b.startTime);
           setFrames(newFrames);
           setCurrentFrameId(newFrame.id);
+          pushUndoAction({
+            type: 'paste-frame',
+            frame: createFrameCopy(newFrame, { id: newFrame.id }),
+            previousCurrentFrameId: currentFrameId,
+          });
         }
       }
 
@@ -1460,15 +1712,38 @@ const App: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedPerformerIds, clipboard, frameClipboard, copyPerformersToClipboard, pastePerformers, handlePlayPause, frames, currentTime, currentFrameId]);
+  }, [selectedPerformerIds, clipboard, frameClipboard, copyPerformersToClipboard, pastePerformers, handlePlayPause, frames, currentTime, currentFrameId, createFrameCopy, pushUndoAction]);
 
 
   // --- Audio Logic ---
-  const handleImportMusic = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const handleImportMusic = async (e?: React.ChangeEvent<HTMLInputElement>) => {
+    if (window.electronAPI?.isElectron) {
+      if (!currentProjectId) {
+        setProjectMessages(['请先新建或打开一个项目，再导入音频']);
+        return;
+      }
+      const sourcePath = await window.electronAPI.openFile([
+        { name: 'Audio', extensions: ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac'] },
+      ]);
+      if (!sourcePath) return;
+      const asset = await window.electronAPI.project.ingestAsset(currentProjectId, sourcePath, 'audio');
+      setMusicName(asset.displayName);
+      setMusicAsset(asset.relativePath);
+      setMusicUrl(asset.url);
+      const response = await fetch(asset.url);
+      if (!response.ok) throw new Error(`Failed to read imported audio: ${response.status}`);
+      if (audioContextRef.current) {
+        setAudioBuffer(await audioContextRef.current.decodeAudioData(await response.arrayBuffer()));
+      }
+      setProjectMessages(['音频已复制到项目']);
+      return;
+    }
+
+    const file = e?.target.files?.[0];
     if (!file) return;
 
     setMusicName(file.name);
+    setMusicAsset(null);
     const url = URL.createObjectURL(file);
     setMusicUrl(url);
 
@@ -1703,13 +1978,13 @@ const App: React.FC = () => {
   const handleExportVideo2D = async () => {
     if (inPointMs == null || outPointMs == null || outPointMs <= inPointMs) {
       if (inPointMs == null && outPointMs == null) {
-        alert('请先设置导出范围。\n\n1. 将播放头移动到视频开始位置，点击“设为入点”。\n2. 将播放头移动到视频结束位置，点击“设为出点”。\n3. 再点击“导出视频”。');
+        alert('请先设置导出范围。\n\n1. 将播放头移动到导出开始位置。\n2. 点击“导出视频”，在导出设置中把“入点”设为“当前”。\n3. 将播放头移动到导出结束位置，把“出点”设为“当前”。\n4. 再确认导出。');
       } else if (inPointMs == null) {
-        alert('还没有设置入点。\n\n将播放头移动到导出开始位置，然后点击时间轴上的“设为入点”。');
+        alert('还没有设置入点。\n\n将播放头移动到导出开始位置，打开“导出视频”，在导出设置中把“入点”设为“当前”。');
       } else if (outPointMs == null) {
-        alert('还没有设置出点。\n\n将播放头移动到导出结束位置，然后点击时间轴上的“设为出点”。');
+        alert('还没有设置出点。\n\n将播放头移动到导出结束位置，打开“导出视频”，在导出设置中把“出点”设为“当前”。');
       } else {
-        alert('导出范围无效：出点必须晚于入点。\n\n请把播放头移动到更靠后的位置，重新点击“设为出点”。');
+        alert('导出范围无效：出点必须晚于入点。\n\n请把播放头移动到更靠后的位置，在导出设置中把“出点”设为“当前”。');
       }
       return;
     }
@@ -2489,7 +2764,7 @@ const App: React.FC = () => {
       setTimelineHeight(previousTimelineHeightRef.current);
       return;
     }
-    const presets = isCompactLayout ? [112, 200, 320] : [100, 180, 300];
+    const presets = isCompactLayout ? [132, 200, 320] : [152, 220, 300];
     const next = presets.find((height) => height > timelineHeight + 12) ?? presets[0];
     setTimelineHeight(next);
   };
@@ -2589,6 +2864,9 @@ const App: React.FC = () => {
             onImportMusic={handleImportMusic}
             onExport={handleExportProject}
             onImportProject={handleImportProject}
+            onImportProjectPackage={handleImportProjectPackage}
+            onImportLegacyProject={handleImportLegacyProject}
+            onExportProjectPackage={handleExportProjectPackage}
             selectedPerformerIds={selectedPerformerIds}
             onSelectionChange={setSelectedPerformerIds}
             musicName={musicName}
@@ -2680,6 +2958,8 @@ const App: React.FC = () => {
               selectedPerformerIds={selectedPerformerIds}
               onSelectionChange={setSelectedPerformerIds}
               onPositionChange={handlePositionChange}
+              onDragStart={handleStageDragStart}
+              onDragEnd={handleStageDragEnd}
               onUpdatePerformer={handleUpdatePerformer}
               readonly={isPlaying}
               showLabels={showLabels}
@@ -2695,6 +2975,8 @@ const App: React.FC = () => {
               onSelect={setSelectedPerformerIds}
               hiddenGroupIds={activeHiddenGroupIds}
               onPositionChange={handlePositionChange}
+              onDragStart={handleStageDragStart}
+              onDragEnd={handleStageDragEnd}
               onUpdatePerformer={handleUpdatePerformer}
               onRemovePerformer={handleRemovePerformer}
               stageConfig={stageConfig}
@@ -2721,7 +3003,7 @@ const App: React.FC = () => {
               const onMove = (ev: PointerEvent) => {
                 const dy = ev.clientY - startY;
                 if (Math.abs(dy) > 4) moved = true;
-                const minimum = isCompactLayout ? 88 : 100;
+                const minimum = isCompactLayout ? 132 : 152;
                 const maximum = Math.min(
                   isCompactLayout ? 360 : 300,
                   Math.round(window.innerHeight * 0.58),
@@ -2742,7 +3024,7 @@ const App: React.FC = () => {
             className={`timeline-resizer relative z-30 h-7 min-h-7 cursor-ns-resize touch-none flex items-center justify-center transition-colors ${theme === 'dark' ? 'bg-slate-800 hover:bg-slate-700' : 'bg-gray-300 hover:bg-gray-400'}`}
             role="slider"
             aria-label="调整时间轴高度"
-            aria-valuemin={isCompactLayout ? 88 : 100}
+            aria-valuemin={isCompactLayout ? 132 : 152}
             aria-valuemax={isCompactLayout ? 360 : 300}
             aria-valuenow={timelineCollapsed ? 0 : Math.round(timelineHeight)}
             title="上下拖动调整时间轴高度，轻点切换高度"
@@ -2829,6 +3111,24 @@ const App: React.FC = () => {
           />}
         </div>
       </div>
+
+      {projectMessages.length > 0 && (
+        <div className="fixed right-4 top-4 z-[60000] w-[min(420px,calc(100vw-2rem))] rounded-lg border border-blue-500/40 bg-slate-950/95 p-4 shadow-2xl">
+          <div className="flex items-start justify-between gap-3">
+            <div className="space-y-1 text-sm text-slate-200">
+              {projectMessages.map((message, index) => <div key={`${message}-${index}`}>{message}</div>)}
+            </div>
+            <button
+              type="button"
+              onClick={() => setProjectMessages([])}
+              className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-white"
+              aria-label="关闭项目提示"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
 
       {showExportModal && (
         <div className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">

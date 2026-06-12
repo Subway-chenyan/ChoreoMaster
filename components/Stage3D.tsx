@@ -19,8 +19,8 @@ interface Stage3DProps {
   isPlaying?: boolean;
   gridScale?: number;
   readonly?: boolean;
-  onDragStart?: () => void;
-  onDragEnd?: () => void;
+  onDragStart?: (ids: string[]) => void;
+  onDragEnd?: (ids: string[]) => void;
 }
 
 const Stage3D: React.FC<Stage3DProps> = ({

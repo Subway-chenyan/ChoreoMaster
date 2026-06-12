@@ -50,6 +50,9 @@ export const Timeline: React.FC<TimelineProps> = ({
     const [isScrubbing, setIsScrubbing] = useState(false);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState<string>('');
+    const toolbarHeight = 48;
+    const trackHeight = Math.max(84, heightPx - toolbarHeight);
+    const clipHeight = Math.min(80, Math.max(52, trackHeight - 28));
 
     // Dragging State
     const [draggingState, setDraggingState] = useState<{
@@ -89,19 +92,26 @@ export const Timeline: React.FC<TimelineProps> = ({
         if (!ctx) return;
 
         const dpr = window.devicePixelRatio || 1;
-        canvas.width = totalWidth * dpr;
-        canvas.height = heightPx * dpr;
+        const cssWidth = Number.isFinite(totalWidth) && totalWidth > 0 ? totalWidth : (containerRef.current?.clientWidth || 0);
+        const maxCanvasCssWidth = Math.floor(32767 / dpr);
+        const renderWidth = Math.max(1, Math.min(cssWidth, maxCanvasCssWidth));
+        const scaleX = cssWidth > 0 ? renderWidth / cssWidth : 1;
+        canvas.width = renderWidth * dpr;
+        canvas.height = trackHeight * dpr;
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.scale(dpr, dpr);
 
-        ctx.clearRect(0, 0, totalWidth, heightPx);
+        ctx.fillStyle = '#020617';
+        ctx.fillRect(0, 0, renderWidth, trackHeight);
 
         // Draw grid lines (seconds)
         ctx.strokeStyle = '#334155';
         ctx.lineWidth = 1;
         ctx.beginPath();
-        for (let i = 0; i < totalWidth; i += zoom) {
+        const gridStep = Math.max(1, zoom * scaleX);
+        for (let i = 0; i < renderWidth; i += gridStep) {
             ctx.moveTo(i, 0);
-            ctx.lineTo(i, heightPx);
+            ctx.lineTo(i, trackHeight);
         }
         ctx.stroke();
 
@@ -112,10 +122,10 @@ export const Timeline: React.FC<TimelineProps> = ({
         ctx.globalAlpha = 0.5;
 
         const data = audioBuffer.getChannelData(0);
-        const step = Math.ceil(data.length / totalWidth);
-        const amp = Math.max(20, (heightPx / 2) - 20);
+        const step = Math.ceil(data.length / renderWidth);
+        const amp = Math.max(20, (trackHeight / 2) - 20);
 
-        for (let i = 0; i < totalWidth; i++) {
+        for (let i = 0; i < renderWidth; i++) {
             let min = 1.0;
             let max = -1.0;
             for (let j = 0; j < step; j++) {
@@ -123,10 +133,10 @@ export const Timeline: React.FC<TimelineProps> = ({
                 if (datum < min) min = datum;
                 if (datum > max) max = datum;
             }
-            ctx.fillRect(i, (heightPx / 2) + min * amp, 1, Math.max(1, (max - min) * amp));
+            ctx.fillRect(i, (trackHeight / 2) + min * amp, 1, Math.max(1, (max - min) * amp));
         }
         ctx.globalAlpha = 1.0;
-    }, [audioBuffer, totalWidth, zoom, heightPx]);
+    }, [audioBuffer, totalWidth, zoom, trackHeight]);
 
     // Calculate gaps (Transitions) between frames
     const gapSegments = useMemo(() => {
@@ -255,7 +265,8 @@ export const Timeline: React.FC<TimelineProps> = ({
 
     return (
         <div
-            className="h-auto bg-slate-950 border-t border-slate-800 flex flex-col select-none"
+            className="flex-none bg-slate-950 border-t border-slate-800 flex flex-col select-none overflow-hidden"
+            style={{ height: heightPx }}
             onPointerUp={onPointerUp}
             onPointerMove={onPointerMove}
             onPointerCancel={onPointerUp}
@@ -314,10 +325,9 @@ export const Timeline: React.FC<TimelineProps> = ({
             </div>
             {/* Scrollable Timeline Area */}
             <div
-                className={`timeline-scroll overflow-x-auto max-[1100px]:overflow-x-hidden overflow-y-hidden relative custom-scrollbar bg-slate-950 ${isScrubbing ? 'cursor-col-resize' : 'cursor-default'}`}
+                className={`timeline-scroll min-h-0 flex-1 overflow-x-auto max-[1100px]:overflow-x-hidden overflow-y-hidden relative custom-scrollbar bg-slate-950 ${isScrubbing ? 'cursor-col-resize' : 'cursor-default'}`}
                 ref={containerRef}
                 onPointerDown={handlePointerDown}
-                style={{ height: heightPx }}
             >
                 <div style={{ width: totalWidth, minWidth: '100%' }} className="h-full relative">
 
@@ -325,7 +335,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                     <canvas
                         ref={canvasRef}
                         className="absolute top-0 left-0 h-full pointer-events-none opacity-100"
-                        style={{ width: totalWidth, height: heightPx }}
+                        style={{ width: totalWidth, height: trackHeight }}
                     />
 
                     {/* Ruler */}
@@ -362,10 +372,11 @@ export const Timeline: React.FC<TimelineProps> = ({
                         {gapSegments.map((gap, i) => (
                             <div
                                 key={`gap-${i}`}
-                                className="absolute h-20 top-0 flex items-center justify-center overflow-hidden pointer-events-none"
+                                className="absolute top-0 flex items-center justify-center overflow-hidden pointer-events-none"
                                 style={{
                                     left: (gap.start / 1000) * zoom,
-                                    width: (gap.duration / 1000) * zoom
+                                    width: (gap.duration / 1000) * zoom,
+                                    height: clipHeight,
                                 }}
                             >
                                 <div className="w-full h-full relative opacity-30">
@@ -384,8 +395,11 @@ export const Timeline: React.FC<TimelineProps> = ({
                         {frames.map((frame) => (
                             <div
                                 key={frame.id}
-                                className="absolute h-20 top-0 group"
-                                style={{ left: (frame.startTime / 1000) * zoom }}
+                                className="absolute top-0 group"
+                                style={{
+                                    left: (frame.startTime / 1000) * zoom,
+                                    height: clipHeight,
+                                }}
                             >
                                 <div
                                         onPointerDown={(e) => handleFrameDragStart(e, frame, 'move')}

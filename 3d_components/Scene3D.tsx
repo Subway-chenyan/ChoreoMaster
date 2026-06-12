@@ -32,8 +32,8 @@ interface Scene3DProps {
   isPlaying?: boolean;
   hiddenGroupIds?: string[];
   gridScale?: number;
-  onDragStart?: () => void;
-  onDragEnd?: () => void;
+  onDragStart?: (ids: string[]) => void;
+  onDragEnd?: (ids: string[]) => void;
   onPositionChange?: (updates: { id: string; pos: Position }[]) => void;
   readonly?: boolean;
 }
@@ -85,7 +85,7 @@ const Scene3D: React.FC<Scene3DProps> = ({
   const onPlaneDragStart = (id: string) => {
     if (readonly) return;
     draggingIdRef.current = id;
-    onDragStart?.();
+    onDragStart?.([id]);
   };
 
   const onPlaneDragMove = (id: string, point: THREE.Vector3) => {
@@ -105,8 +105,9 @@ const Scene3D: React.FC<Scene3DProps> = ({
   };
 
   const onPlaneDragEnd = () => {
+    const draggedId = draggingIdRef.current;
     draggingIdRef.current = null;
-    onDragEnd?.();
+    onDragEnd?.(draggedId ? [draggedId] : []);
   };
 
   const registerDraggable = (id: string, mesh: THREE.Object3D) => {
@@ -138,11 +139,11 @@ const Scene3D: React.FC<Scene3DProps> = ({
   };
 
   const handleHeightDragStart = () => {
-    onDragStart?.();
+    onDragStart?.([]);
   };
 
   const handleHeightDragEnd = () => {
-    onDragEnd?.();
+    onDragEnd?.([]);
   };
 
   return (
