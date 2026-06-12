@@ -4,13 +4,15 @@
 // ---------------------------------------------------------------------------
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Box as BoxIcon, Pentagon } from 'lucide-react';
-import { Performer, PropGeometryType, BoxTextures, FaceTexture, ExtrudedTextures } from '../types';
+import { Performer, PropGeometryType, PropCategory, BoxTextures, FaceTexture, ExtrudedTextures } from '../types';
 import { Point } from './prop-editor/PolygonUtils';
 import { ShapeEditor2D } from './prop-editor/ShapeEditor2D';
 import { BoxTextureEditor } from './prop-editor/BoxTextureEditor';
 import { ExtrudedTextureEditor } from './prop-editor/ExtrudedTextureEditor';
 import PropPreview3D from './prop-editor/PropPreview3D';
+import { SelectField, StepperNumberField } from './FormControls';
 
 // ── Public types ───────────────────────────────────────────────────────────
 
@@ -37,6 +39,7 @@ export const PropEditorModal: React.FC<PropEditorModalProps> = ({
   const [color, setColor] = useState('#475569');
   const [rotation, setRotation] = useState(0);
   const [geometryType, setGeometryType] = useState<PropGeometryType>('box');
+  const [propCategory, setPropCategory] = useState<PropCategory>('prop');
 
   // ── Box state ─────────────────────────────────────────────────────────────
 
@@ -66,6 +69,7 @@ export const PropEditorModal: React.FC<PropEditorModalProps> = ({
       setColor(performer.color || '#475569');
       setRotation(performer.rotation || 0);
       setGeometryType(performer.propGeometryType || 'box');
+      setPropCategory(performer.propCategory || 'prop');
 
       if (performer.propGeometryType === 'extruded') {
         setBoxWidth(1);
@@ -96,6 +100,7 @@ export const PropEditorModal: React.FC<PropEditorModalProps> = ({
       setColor('#475569');
       setRotation(0);
       setGeometryType('box');
+      setPropCategory('prop');
       setBoxWidth(1);
       setBoxDepth(1);
       setBoxHeight(1);
@@ -115,6 +120,7 @@ export const PropEditorModal: React.FC<PropEditorModalProps> = ({
   const currentWidth = geometryType === 'box' ? boxWidth : extWidth;
   const currentDepth = geometryType === 'box' ? boxDepth : extDepth;
   const currentHeight = geometryType === 'box' ? boxHeight : extHeight;
+  const useSingleColumnFields = true;
 
   // ── Handle shape size changes from ShapeEditor2D ──────────────────────────
 
@@ -131,6 +137,7 @@ export const PropEditorModal: React.FC<PropEditorModalProps> = ({
       color,
       rotation,
       propGeometryType: geometryType,
+      propCategory,
     };
 
     if (geometryType === 'box') {
@@ -175,11 +182,10 @@ export const PropEditorModal: React.FC<PropEditorModalProps> = ({
 
   if (!isOpen) return null;
 
-  return (
-    <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+  return createPortal(
+    <div className="fixed inset-0 z-[2147483000] flex items-center justify-center bg-black/60 backdrop-blur-sm">
       <div
-        className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl flex flex-col overflow-hidden"
-        style={{ width: 900, height: 620 }}
+        className="flex h-[min(860px,calc(100dvh-24px))] w-[min(1180px,calc(100vw-24px))] flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-2xl"
       >
         {/* ── Header ─────────────────────────────────────────────────────── */}
         <div className="flex items-center justify-between px-5 py-3 border-b border-slate-700 bg-slate-800/50">
@@ -196,9 +202,9 @@ export const PropEditorModal: React.FC<PropEditorModalProps> = ({
         </div>
 
         {/* ── Body ───────────────────────────────────────────────────────── */}
-        <div className="flex flex-1 min-h-0">
+        <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
           {/* Left panel */}
-          <div className="w-80 flex-shrink-0 flex flex-col border-r border-slate-700 overflow-hidden">
+          <div className="flex min-h-0 w-full flex-shrink-0 flex-col overflow-hidden border-b border-slate-700 lg:w-[380px] lg:border-b-0 lg:border-r xl:w-[420px]">
             {/* Scrollable content area */}
             <div className="flex-1 overflow-y-auto">
 
@@ -239,101 +245,77 @@ export const PropEditorModal: React.FC<PropEditorModalProps> = ({
                 <label className="block text-xs font-medium text-slate-400 mb-2">
                   属性
                 </label>
-                <div className="grid grid-cols-3 gap-2 mb-2">
-                  <div>
-                    <label className="block text-[10px] text-slate-500 mb-0.5">
-                      长 (m)
-                    </label>
-                    <input
-                      type="number"
-                      min={0.1}
-                      step={0.1}
-                      value={
-                        geometryType === 'box' ? boxWidth : extWidth
-                      }
-                      onChange={(e) => {
-                        const v = parseFloat(e.target.value);
-                        if (!isNaN(v) && v > 0) {
-                          geometryType === 'box'
-                            ? setBoxWidth(v)
-                            : setExtWidth(v);
-                        }
-                      }}
-                      className="w-full px-2 py-1 bg-slate-800 border border-slate-600 rounded text-xs text-white focus:outline-none focus:border-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] text-slate-500 mb-0.5">
-                      宽 (m)
-                    </label>
-                    <input
-                      type="number"
-                      min={0.1}
-                      step={0.1}
-                      value={
-                        geometryType === 'box' ? boxDepth : extDepth
-                      }
-                      onChange={(e) => {
-                        const v = parseFloat(e.target.value);
-                        if (!isNaN(v) && v > 0) {
-                          geometryType === 'box'
-                            ? setBoxDepth(v)
-                            : setExtDepth(v);
-                        }
-                      }}
-                      className="w-full px-2 py-1 bg-slate-800 border border-slate-600 rounded text-xs text-white focus:outline-none focus:border-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] text-slate-500 mb-0.5">
-                      高 (m)
-                    </label>
-                    <input
-                      type="number"
-                      min={0.1}
-                      step={0.1}
-                      value={
-                        geometryType === 'box' ? boxHeight : extHeight
-                      }
-                      onChange={(e) => {
-                        const v = parseFloat(e.target.value);
-                        if (!isNaN(v) && v > 0) {
-                          geometryType === 'box'
-                            ? setBoxHeight(v)
-                            : setExtHeight(v);
-                        }
-                      }}
-                      className="w-full px-2 py-1 bg-slate-800 border border-slate-600 rounded text-xs text-white focus:outline-none focus:border-blue-500"
-                    />
-                  </div>
+                <div className="mb-3">
+                  <SelectField<PropCategory>
+                    label="类型"
+                    value={propCategory}
+                    onChange={setPropCategory}
+                    options={[
+                      { value: 'prop', label: '道具' },
+                      { value: 'platform', label: '高台' },
+                    ]}
+                    helperText={
+                      propCategory === 'platform'
+                        ? `演员站上高台时，将按当前道具高度 ${currentHeight.toFixed(1)}m 自动抬升`
+                        : '普通道具不抬升演员高度'
+                    }
+                    helperTone={propCategory === 'platform' ? 'accent' : 'default'}
+                  />
+                </div>
+                <div className={`mb-2 grid gap-2 ${useSingleColumnFields ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                  <StepperNumberField
+                    label="长度"
+                    value={geometryType === 'box' ? boxWidth : extWidth}
+                    min={0.1}
+                    step={0.1}
+                    onChange={(value) => {
+                      geometryType === 'box' ? setBoxWidth(value) : setExtWidth(value);
+                    }}
+                  />
+                  <StepperNumberField
+                    label="宽度"
+                    value={geometryType === 'box' ? boxDepth : extDepth}
+                    min={0.1}
+                    step={0.1}
+                    onChange={(value) => {
+                      geometryType === 'box' ? setBoxDepth(value) : setExtDepth(value);
+                    }}
+                  />
+                  <StepperNumberField
+                    label="高度"
+                    value={geometryType === 'box' ? boxHeight : extHeight}
+                    min={0.1}
+                    step={0.1}
+                    onChange={(value) => {
+                      geometryType === 'box' ? setBoxHeight(value) : setExtHeight(value);
+                    }}
+                  />
                 </div>
 
                 {/* Rotation */}
                 <div className="mb-2">
-                  <label className="block text-[10px] text-slate-500 mb-0.5">
-                    旋转角度
-                  </label>
-                  <input
-                    type="number"
+                  <StepperNumberField
+                    label="旋转角度"
+                    value={rotation}
                     min={0}
                     max={360}
                     step={1}
-                    value={rotation}
-                    onChange={(e) => setRotation(parseFloat(e.target.value) || 0)}
-                    className="w-full px-2 py-1 bg-slate-800 border border-slate-600 rounded text-xs text-white focus:outline-none focus:border-blue-500"
+                    unit="deg"
+                    onChange={setRotation}
                   />
                 </div>
 
                 {/* Color picker */}
-                <div className="flex items-center gap-2">
-                  <label className="text-[10px] text-slate-500">颜色</label>
-                  <input
-                    type="color"
-                    value={color}
-                    onChange={(e) => setColor(e.target.value)}
-                    className="w-8 h-6 rounded border border-slate-600 bg-transparent cursor-pointer"
-                  />
-                  <span className="text-xs text-slate-400 font-mono">{color}</span>
+                <div className="rounded-xl border border-slate-700 bg-slate-900/80 p-3 shadow-sm shadow-slate-950/20">
+                  <label className="mb-2 block text-[11px] font-medium tracking-wide text-slate-400">颜色</label>
+                  <div className="flex items-center justify-center rounded-lg border border-slate-600 bg-slate-950/70 px-3 py-3">
+                    <input
+                      type="color"
+                      value={color}
+                      onChange={(e) => setColor(e.target.value)}
+                      className="h-14 w-20 cursor-pointer rounded-lg border border-slate-500 bg-transparent p-1"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -375,7 +357,7 @@ export const PropEditorModal: React.FC<PropEditorModalProps> = ({
           </div>
 
           {/* Right panel -- PropPreview3D */}
-          <div className="flex-1 min-w-0">
+          <div className="min-h-[260px] flex-1 min-w-0">
             <PropPreview3D
               performer={{
                 name,
@@ -412,7 +394,8 @@ export const PropEditorModal: React.FC<PropEditorModalProps> = ({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };
 

@@ -31,6 +31,9 @@ interface ProjectBrowserProps {
   onNewProject: () => void;
   onCreateFromTemplate?: (templateData: any) => Promise<string>;
   onLoadTemplate?: (templateData: any) => void;
+  onImportPackage?: () => void;
+  onImportLegacy?: () => void;
+  onExportPackage?: () => void;
 }
 
 export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
@@ -40,6 +43,9 @@ export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
   onNewProject,
   onCreateFromTemplate,
   onLoadTemplate,
+  onImportPackage,
+  onImportLegacy,
+  onExportPackage,
 }) => {
   const [projects, setProjects] = useState<ProjectMeta[]>([]);
   const [loading, setLoading] = useState(true);
@@ -74,7 +80,7 @@ export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
 
   useEffect(() => {
     loadProjects();
-  }, [loadProjects]);
+  }, [loadProjects, currentProjectId]);
 
   // Close context menu on click outside
   useEffect(() => {
@@ -90,10 +96,10 @@ export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
     
     try {
       const projectId = await onCreateProject(newProjectName.trim());
+      if (!projectId) return;
       setNewProjectName('');
       setShowNewProjectForm(false);
       await loadProjects();
-      onLoadProject(projectId);
     } catch (error) {
       console.error('Failed to create project:', error);
     }
@@ -153,13 +159,17 @@ export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
 
   const handleUseTemplate = async () => {
     try {
-      const resp = await fetch('/tutorial-project.json');
+      const tutorialUrl = new URL('./tutorial-project.json', window.location.href);
+      const resp = await fetch(tutorialUrl);
+      if (!resp.ok) {
+        throw new Error(`Tutorial project request failed: ${resp.status}`);
+      }
       const templateData = await resp.json();
 
       if (isElectron && onCreateFromTemplate) {
         const projectId = await onCreateFromTemplate(templateData);
+        if (!projectId) return;
         await loadProjects();
-        onLoadProject(projectId);
       } else if (onLoadTemplate) {
         onLoadTemplate(templateData);
       }
@@ -308,6 +318,33 @@ export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
           <Plus size={16} />
           新建项目
         </button>
+      )}
+
+      {isElectron && (
+        <div className="grid grid-cols-3 gap-2 mb-3">
+          <button
+            type="button"
+            onClick={onImportPackage}
+            className="px-2 py-2 rounded bg-blue-900/40 hover:bg-blue-900/60 text-xs text-blue-200"
+          >
+            导入项目包
+          </button>
+          <button
+            type="button"
+            onClick={onImportLegacy}
+            className="px-2 py-2 rounded bg-slate-800 hover:bg-slate-700 text-xs text-slate-300"
+          >
+            导入旧 JSON
+          </button>
+          <button
+            type="button"
+            onClick={onExportPackage}
+            disabled={!currentProjectId}
+            className="px-2 py-2 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-xs text-slate-300"
+          >
+            导出项目包
+          </button>
+        </div>
       )}
 
       {/* Template Section */}

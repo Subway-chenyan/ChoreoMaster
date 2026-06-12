@@ -2,6 +2,7 @@ import { ipcMain, dialog, shell } from 'electron';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { createManagedProject, exportProjectPackage, importLegacyProject, importProjectPackage, ingestProjectAsset, loadManagedProject, saveManagedProject, } from './project-service.js';
 // ==================== Default Settings ====================
 const DEFAULT_STORAGE_PATH = path.join(os.homedir(), '.choreo');
 function getSettingsPath() {
@@ -26,6 +27,9 @@ async function loadSettings() {
         };
     }
 }
+export async function getProjectStoragePath() {
+    return (await loadSettings()).storagePath;
+}
 async function saveSettings(settings) {
     await ensureStorageDir(DEFAULT_STORAGE_PATH);
     const settingsPath = getSettingsPath();
@@ -33,10 +37,10 @@ async function saveSettings(settings) {
 }
 export function registerIpcHandlers(mainWindow) {
     // ==================== Dialog Handlers ====================
-    ipcMain.handle('dialog:saveFile', async (_, defaultName) => {
+    ipcMain.handle('dialog:saveFile', async (_, defaultName, filters) => {
         const { filePath } = await dialog.showSaveDialog(mainWindow, {
             defaultPath: defaultName,
-            filters: [
+            filters: filters && filters.length > 0 ? filters : [
                 { name: 'ChoreoMaster Project', extensions: ['json'] },
                 { name: 'All Files', extensions: ['*'] },
             ],
@@ -88,6 +92,17 @@ export function registerIpcHandlers(mainWindow) {
         }
         catch (error) {
             console.error('Failed to write file:', error);
+            throw error;
+        }
+    });
+    ipcMain.handle('fs:writeBinaryFile', async (_, filePath, content) => {
+        try {
+            const dir = path.dirname(filePath);
+            await fs.mkdir(dir, { recursive: true });
+            await fs.writeFile(filePath, Buffer.from(content));
+        }
+        catch (error) {
+            console.error('Failed to write binary file:', error);
             throw error;
         }
     });
@@ -163,58 +178,85 @@ export function registerIpcHandlers(mainWindow) {
     ipcMain.handle('project:create', async (_, name) => {
         const settings = await loadSettings();
         await ensureStorageDir(settings.storagePath);
-        // Generate unique project ID (slug from name + timestamp)
-        const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-        const id = `${slug}-${Date.now()}`;
-        const projectDir = path.join(settings.storagePath, 'projects', id);
-        // Create project directories
-        await fs.mkdir(path.join(projectDir, 'audio'), { recursive: true });
-        await fs.mkdir(path.join(projectDir, 'media'), { recursive: true });
-        // Create initial project.json
-        const projectData = {
-            version: '2.0',
-            name,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            performers: [],
-            performerGroups: [],
-            frames: [],
-            stageConfig: {
-                width: 20,
-                depth: 11.25,
-                ledHeight: 6,
-                ledContent: { type: 'none' },
-            },
-        };
-        await fs.writeFile(path.join(projectDir, 'project.json'), JSON.stringify(projectData, null, 2), 'utf-8');
+        const created = await createManagedProject(settings.storagePath, name);
         // Update recent projects
-        settings.recentProjects = [id, ...settings.recentProjects.filter(p => p !== id)].slice(0, settings.maxRecentProjects);
+        settings.recentProjects = [created.id, ...settings.recentProjects.filter(p => p !== created.id)]
+            .slice(0, settings.maxRecentProjects);
         await saveSettings(settings);
-        return { id, path: projectDir };
+        return created;
     });
     // Load a project
     ipcMain.handle('project:load', async (_, projectId) => {
         const settings = await loadSettings();
-        const projectDir = path.join(settings.storagePath, 'projects', projectId);
-        const projectPath = path.join(projectDir, 'project.json');
-        const content = await fs.readFile(projectPath, 'utf-8');
-        const data = JSON.parse(content);
+        const result = await loadManagedProject(settings.storagePath, projectId);
         // Update recent projects
         settings.recentProjects = [projectId, ...settings.recentProjects.filter(p => p !== projectId)].slice(0, settings.maxRecentProjects);
         await saveSettings(settings);
-        return { data, projectPath: projectDir };
+        return result;
     });
     // Save a project
     ipcMain.handle('project:save', async (_, projectId, projectData) => {
         const settings = await loadSettings();
-        const projectDir = path.join(settings.storagePath, 'projects', projectId);
-        const projectPath = path.join(projectDir, 'project.json');
-        // Update timestamp
-        projectData.updatedAt = new Date().toISOString();
-        await fs.writeFile(projectPath, JSON.stringify(projectData, null, 2), 'utf-8');
+        await saveManagedProject(settings.storagePath, projectId, projectData);
         // Update recent projects
         settings.recentProjects = [projectId, ...settings.recentProjects.filter(p => p !== projectId)].slice(0, settings.maxRecentProjects);
         await saveSettings(settings);
+        return loadManagedProject(settings.storagePath, projectId);
+    });
+    ipcMain.handle('project:ingestAsset', async (_, projectId, sourcePath, kind) => {
+        const settings = await loadSettings();
+        return ingestProjectAsset(settings.storagePath, projectId, sourcePath, kind);
+    });
+    ipcMain.handle('project:exportPackage', async (_, projectId) => {
+        const settings = await loadSettings();
+        const projectDir = path.join(settings.storagePath, 'projects', projectId);
+        const content = JSON.parse(await fs.readFile(path.join(projectDir, 'project.json'), 'utf8'));
+        const defaultName = `${content.name || 'choreomaster-project'}.choreo`;
+        const { filePath } = await dialog.showSaveDialog(mainWindow, {
+            defaultPath: defaultName,
+            filters: [
+                { name: 'ChoreoMaster Project Package', extensions: ['choreo'] },
+                { name: 'All Files', extensions: ['*'] },
+            ],
+        });
+        if (!filePath)
+            return null;
+        await exportProjectPackage(projectDir, filePath);
+        return filePath;
+    });
+    ipcMain.handle('project:importPackage', async () => {
+        const { filePaths } = await dialog.showOpenDialog(mainWindow, {
+            properties: ['openFile'],
+            filters: [
+                { name: 'ChoreoMaster Project Package', extensions: ['choreo'] },
+                { name: 'All Files', extensions: ['*'] },
+            ],
+        });
+        if (filePaths.length === 0)
+            return null;
+        const settings = await loadSettings();
+        const result = await importProjectPackage(settings.storagePath, filePaths[0]);
+        settings.recentProjects = [result.projectId, ...settings.recentProjects.filter(p => p !== result.projectId)]
+            .slice(0, settings.maxRecentProjects);
+        await saveSettings(settings);
+        return result;
+    });
+    ipcMain.handle('project:importLegacy', async () => {
+        const { filePaths } = await dialog.showOpenDialog(mainWindow, {
+            properties: ['openFile'],
+            filters: [
+                { name: 'Legacy ChoreoMaster JSON', extensions: ['json'] },
+                { name: 'JSON Files', extensions: ['json'] },
+            ],
+        });
+        if (filePaths.length === 0)
+            return null;
+        const settings = await loadSettings();
+        const result = await importLegacyProject(settings.storagePath, filePaths[0]);
+        settings.recentProjects = [result.projectId, ...settings.recentProjects.filter(p => p !== result.projectId)]
+            .slice(0, settings.maxRecentProjects);
+        await saveSettings(settings);
+        return result;
     });
     // Delete a project
     ipcMain.handle('project:delete', async (_, projectId) => {

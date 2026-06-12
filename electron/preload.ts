@@ -1,4 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type {
+  ProjectAssetKind,
+  ProjectAssetResult,
+  ProjectDocument,
+  ProjectImportResult,
+  ProjectLoadResult,
+} from './project-contract.js';
 
 // ==================== Project Storage Types ====================
 
@@ -18,7 +25,7 @@ export interface AppSettings {
 
 export interface ElectronAPI {
   // Dialog operations
-  saveFile: (defaultName: string) => Promise<string | null>;
+  saveFile: (defaultName: string, filters?: Electron.FileFilter[]) => Promise<string | null>;
   openFile: (filters: Electron.FileFilter[]) => Promise<string | null>;
   openMultipleFiles: (filters: Electron.FileFilter[]) => Promise<string[]>;
   selectDirectory: () => Promise<string | null>;
@@ -26,6 +33,7 @@ export interface ElectronAPI {
   // File system operations
   readFile: (filePath: string) => Promise<string>;
   writeFile: (filePath: string, content: string) => Promise<void>;
+  writeBinaryFile: (filePath: string, content: Uint8Array) => Promise<void>;
 
   // Project storage operations
   project: {
@@ -34,8 +42,12 @@ export interface ElectronAPI {
     setStoragePath: (newPath: string) => Promise<AppSettings>;
     list: () => Promise<ProjectMeta[]>;
     create: (name: string) => Promise<{ id: string; path: string }>;
-    load: (projectId: string) => Promise<{ data: any; projectPath: string }>;
-    save: (projectId: string, projectData: any) => Promise<void>;
+    load: (projectId: string) => Promise<ProjectLoadResult>;
+    save: (projectId: string, projectData: ProjectDocument) => Promise<ProjectLoadResult>;
+    ingestAsset: (projectId: string, sourcePath: string, kind: ProjectAssetKind) => Promise<ProjectAssetResult>;
+    exportPackage: (projectId: string) => Promise<string | null>;
+    importPackage: () => Promise<ProjectImportResult | null>;
+    importLegacy: () => Promise<ProjectImportResult | null>;
     delete: (projectId: string) => Promise<void>;
     copyMedia: (projectId: string, sourcePath: string, mediaType: 'audio' | 'media') => Promise<string>;
     getMediaPath: (projectId: string, fileName: string, mediaType: 'audio' | 'media') => Promise<string>;
@@ -53,8 +65,8 @@ export interface ElectronAPI {
 
 const electronAPI: ElectronAPI = {
   // Dialog operations
-  saveFile: (defaultName: string) =>
-    ipcRenderer.invoke('dialog:saveFile', defaultName),
+  saveFile: (defaultName: string, filters?: Electron.FileFilter[]) =>
+    ipcRenderer.invoke('dialog:saveFile', defaultName, filters),
   openFile: (filters: Electron.FileFilter[]) =>
     ipcRenderer.invoke('dialog:openFile', filters),
   openMultipleFiles: (filters: Electron.FileFilter[]) =>
@@ -67,6 +79,8 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.invoke('fs:readFile', filePath),
   writeFile: (filePath: string, content: string) =>
     ipcRenderer.invoke('fs:writeFile', filePath, content),
+  writeBinaryFile: (filePath: string, content: Uint8Array) =>
+    ipcRenderer.invoke('fs:writeBinaryFile', filePath, content),
 
   // Project storage operations
   project: {
@@ -77,6 +91,10 @@ const electronAPI: ElectronAPI = {
     create: (name) => ipcRenderer.invoke('project:create', name),
     load: (projectId) => ipcRenderer.invoke('project:load', projectId),
     save: (projectId, projectData) => ipcRenderer.invoke('project:save', projectId, projectData),
+    ingestAsset: (projectId, sourcePath, kind) => ipcRenderer.invoke('project:ingestAsset', projectId, sourcePath, kind),
+    exportPackage: (projectId) => ipcRenderer.invoke('project:exportPackage', projectId),
+    importPackage: () => ipcRenderer.invoke('project:importPackage'),
+    importLegacy: () => ipcRenderer.invoke('project:importLegacy'),
     delete: (projectId) => ipcRenderer.invoke('project:delete', projectId),
     copyMedia: (projectId, sourcePath, mediaType) => ipcRenderer.invoke('project:copyMedia', projectId, sourcePath, mediaType),
     getMediaPath: (projectId, fileName, mediaType) => ipcRenderer.invoke('project:getMediaPath', projectId, fileName, mediaType),

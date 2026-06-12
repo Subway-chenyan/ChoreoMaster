@@ -1,5 +1,16 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Frame, Performer, Position, PerformerShape, PerformerGroup, PerformerType, AIConfig, AIChoreoPlan } from './types';
+import {
+  Frame,
+  Performer,
+  Position,
+  PerformerShape,
+  PerformerGroup,
+  PerformerType,
+  AIConfig,
+  AIChoreoPlan,
+  ProjectDocument,
+  ProjectLoadResult,
+} from './types';
 import { Sidebar } from './components/Sidebar';
 import { Stage } from './components/Stage';
 import Stage3D from './components/Stage3D';
@@ -7,7 +18,10 @@ import { Timeline } from './components/Timeline';
 import { HelpModal } from './components/HelpModal';
 import { useTheme } from './contexts/ThemeContext';
 import { DEFAULT_COLORS, STAGE_ASPECT_RATIO } from './constants';
-import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, Maximize2, ChevronDown, ChevronUp } from 'lucide-react';
+import { createOfflineScene, preloadPropTextures, preloadLEDVideo, type CameraAngle } from './utils/OfflineRenderer3D';
+import { getTotalStageWidth, getWingWidth, stageXToViewPercent, getStageXBounds } from './utils/coordinates';
+import { buildPlatformOccupancy, isPlatformProp } from './utils/platforms';
+import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, Maximize2, ChevronDown, ChevronUp, Menu, X, Download, GripHorizontal, SlidersHorizontal } from 'lucide-react';
 import { StageConfig } from './types';
 
 const DEFAULT_FRAME: Frame = {
@@ -18,10 +32,47 @@ const DEFAULT_FRAME: Frame = {
   positions: {}
 };
 
+const createDefaultStageConfig = (): StageConfig => ({
+  width: 20,
+  depth: 20 / (16 / 9),
+  wingWidth: 4,
+  ledWidth: 20,
+  ledHeight: 6,
+  ledContent: { type: 'none' },
+});
+
 // Clipboard Item Structure
 interface ClipboardItem {
   performer: Performer;
   positions: Record<string, Position>; // Map FrameID -> Position
+}
+
+type MovePerformersUndoAction = {
+  type: 'move-performers';
+  frameId: string;
+  performerIds: string[];
+  before: Record<string, Position>;
+  after: Record<string, Position>;
+};
+
+type PastePerformersUndoAction = {
+  type: 'paste-performers';
+  performers: Performer[];
+  frameUpdates: Record<string, Record<string, Position>>;
+  previousSelectedIds: string[];
+};
+
+type PasteFrameUndoAction = {
+  type: 'paste-frame';
+  frame: Frame;
+  previousCurrentFrameId: string | null;
+};
+
+type UndoAction = MovePerformersUndoAction | PastePerformersUndoAction | PasteFrameUndoAction;
+
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
 }
 
 const App: React.FC = () => {
@@ -34,6 +85,7 @@ const App: React.FC = () => {
   const [musicUrl, setMusicUrl] = useState<string | null>(null);
   const [audioBuffer, setAudioBuffer] = useState<AudioBuffer | null>(null);
   const [musicName, setMusicName] = useState<string | null>(null);
+  const [musicAsset, setMusicAsset] = useState<string | null>(null);
   const [inPointMs, setInPointMs] = useState<number | null>(null);
   const [outPointMs, setOutPointMs] = useState<number | null>(null);
   const [isExporting, setIsExporting] = useState(false);
@@ -41,30 +93,72 @@ const App: React.FC = () => {
   const [exportIncludeLabels, setExportIncludeLabels] = useState<boolean>(true);
   const [exportIncludeGrid, setExportIncludeGrid] = useState<boolean>(true);
   const [exportResolution, setExportResolution] = useState<'1080p' | '2k' | '4k'>('1080p');
+  const [exportCameraAngle, setExportCameraAngle] = useState<CameraAngle>('judge');
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [export2D, setExport2D] = useState(true);
+  const [export3D, setExport3D] = useState(false);
 
   // Stage View State
   const [showLabels, setShowLabels] = useState(true);
   const [gridScale, setGridScale] = useState(1);
-  const [stageAspectRatio, setStageAspectRatio] = useState(16 / 9);
-  const [stageMaxWidth, setStageMaxWidth] = useState<number>(1200);
-  const [ratioW, setRatioW] = useState<number>(16);
-  const [ratioH, setRatioH] = useState<number>(9);
   const [showHelp, setShowHelp] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [stageToolbarCollapsed, setStageToolbarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.matchMedia('(max-width: 1100px)').matches);
+  const [stageToolbarCollapsed, setStageToolbarCollapsed] = useState(() => window.matchMedia('(max-width: 1100px)').matches);
   const [sidebarWidth, setSidebarWidth] = useState<number>(320);
-  const [timelineHeight, setTimelineHeight] = useState<number>(160);
-  const [undoStack, setUndoStack] = useState<any[]>([]);
-  const [redoStack, setRedoStack] = useState<any[]>([]);
+  const [timelineHeight, setTimelineHeight] = useState<number>(() => (
+    window.matchMedia('(max-width: 1100px)').matches ? 132 : 180
+  ));
+  const [timelineCollapsed, setTimelineCollapsed] = useState(false);
+  const previousTimelineHeightRef = useRef(180);
+  const [isCompactLayout, setIsCompactLayout] = useState(() => window.matchMedia('(max-width: 1100px)').matches);
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [undoStack, setUndoStack] = useState<UndoAction[]>([]);
+  const [redoStack, setRedoStack] = useState<UndoAction[]>([]);
+  const pendingMoveUndoRef = useRef<{
+    frameId: string;
+    performerIds: string[];
+    before: Record<string, Position>;
+  } | null>(null);
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 1100px)');
+    const syncLayout = () => {
+      setIsCompactLayout(media.matches);
+      if (media.matches) {
+        setSidebarCollapsed(true);
+        setTimelineHeight((height) => height === 180 ? 132 : Math.min(height, 320));
+        setStageToolbarCollapsed(true);
+      }
+    };
+    syncLayout();
+    media.addEventListener('change', syncLayout);
+    return () => media.removeEventListener('change', syncLayout);
+  }, []);
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setInstallPrompt(event as BeforeInstallPromptEvent);
+    };
+    const handleInstalled = () => setInstallPrompt(null);
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleInstalled);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleInstalled);
+    };
+  }, []);
+
+  const handleInstallPwa = async () => {
+    if (!installPrompt) return;
+    await installPrompt.prompt();
+    await installPrompt.userChoice;
+    setInstallPrompt(null);
+  };
 
   // 新增：3D 模式相关状态
   const [viewMode, setViewMode] = useState<'2d' | '3d'>('2d');
-  const [stageConfig, setStageConfig] = useState<StageConfig>({
-    width: 20,
-    depth: 20 / (16 / 9),
-    ledHeight: 6,
-    ledContent: { type: 'none' }
-  });
+  const [stageConfig, setStageConfig] = useState<StageConfig>(createDefaultStageConfig);
   const [mediaCache, setMediaCache] = useState<Record<string, string>>({});
   
   // Project storage state
@@ -72,33 +166,26 @@ const App: React.FC = () => {
   const [currentProjectPath, setCurrentProjectPath] = useState<string | null>(null);
   const [projectHasChanges, setProjectHasChanges] = useState(false);
   const [lastSavedState, setLastSavedState] = useState<string>('');
+  const [projectMessages, setProjectMessages] = useState<string[]>([]);
   
   const [aiConfig, setAiConfig] = useState<AIConfig>(() => {
     const saved = localStorage.getItem('choreo-ai-config');
     if (saved) {
       const parsed = JSON.parse(saved);
       return {
-        backendUrl: parsed.backendUrl || 'http://localhost:8000',
-        memberToken: parsed.memberToken || '',
+        backendUrl: parsed.backendUrl || import.meta.env.VITE_AI_BACKEND_URL || 'http://localhost:8000',
+        memberToken: parsed.memberToken || import.meta.env.VITE_MEMBER_TOKEN || '',
       };
     }
     return {
-      backendUrl: 'http://localhost:8000',
-      memberToken: ''
+      backendUrl: import.meta.env.VITE_AI_BACKEND_URL || 'http://localhost:8000',
+      memberToken: import.meta.env.VITE_MEMBER_TOKEN || ''
     };
   });
 
   useEffect(() => {
     localStorage.setItem('choreo-ai-config', JSON.stringify(aiConfig));
   }, [aiConfig]);
-
-  // Sync 3D stage config depth with 2D aspect ratio
-  useEffect(() => {
-    setStageConfig(prev => ({
-      ...prev,
-      depth: prev.width / stageAspectRatio
-    }));
-  }, [stageAspectRatio]);
 
   // Theme
   const { theme } = useTheme();
@@ -192,9 +279,12 @@ const App: React.FC = () => {
         const end = nextFrame.positions[p.id];
 
         if (start && end) {
+          const includeZ = start.z !== undefined || end.z !== undefined;
+          const interpolatedZ = (start.z ?? 0) + ((end.z ?? 0) - (start.z ?? 0)) * ease;
           interpolated[p.id] = {
             x: start.x + (end.x - start.x) * ease,
             y: start.y + (end.y - start.y) * ease,
+            ...(includeZ ? { z: interpolatedZ } : {}),
           };
         }
         // If in one but not other, they do not exist during transition (clean cut)
@@ -261,7 +351,13 @@ const App: React.FC = () => {
         const start = prevFrame.positions[p.id];
         const end = nextFrame.positions[p.id];
         if (start && end) {
-          interpolated[p.id] = { x: start.x + (end.x - start.x) * ease, y: start.y + (end.y - start.y) * ease };
+          const includeZ = start.z !== undefined || end.z !== undefined;
+          const interpolatedZ = (start.z ?? 0) + ((end.z ?? 0) - (start.z ?? 0)) * ease;
+          interpolated[p.id] = {
+            x: start.x + (end.x - start.x) * ease,
+            y: start.y + (end.y - start.y) * ease,
+            ...(includeZ ? { z: interpolatedZ } : {}),
+          };
         }
       });
       return interpolated;
@@ -273,6 +369,198 @@ const App: React.FC = () => {
     return {};
   }, [frames, performers, getSortedFrames]);
 
+  const clonePositionMap = (positionsMap: Record<string, Position>): Record<string, Position> => (
+    Object.fromEntries(
+      Object.entries(positionsMap).map(([id, pos]) => [id, { ...pos }])
+    )
+  );
+
+  const positionsEqual = (a: Position | undefined, b: Position | undefined) => (
+    a?.x === b?.x && a?.y === b?.y && a?.z === b?.z
+  );
+
+  const pushUndoAction = useCallback((action: UndoAction) => {
+    setUndoStack((prev) => [...prev, action]);
+    setRedoStack([]);
+  }, []);
+
+  const removePerformerIdsFromFrames = useCallback((targetIds: string[]) => {
+    const idSet = new Set(targetIds);
+    setFrames((prev) => prev.map((frame) => {
+      let changed = false;
+      const nextPositions = { ...frame.positions } as Record<string, Position>;
+      Object.keys(nextPositions).forEach((performerId) => {
+        if (idSet.has(performerId)) {
+          delete nextPositions[performerId];
+          changed = true;
+        }
+      });
+      return changed ? { ...frame, positions: nextPositions } : frame;
+    }));
+  }, []);
+
+  const restoreFrameUpdates = useCallback((frameUpdates: Record<string, Record<string, Position>>) => {
+    setFrames((prev) => prev.map((frame) => {
+      const updates = frameUpdates[frame.id];
+      if (!updates) return frame;
+      return {
+        ...frame,
+        positions: { ...frame.positions, ...clonePositionMap(updates) }
+      };
+    }));
+  }, []);
+
+  const createFrameCopy = useCallback((source: Frame, overrides?: Partial<Frame>): Frame => ({
+    ...source,
+    id: overrides?.id ?? generateId(),
+    name: overrides?.name ?? source.name,
+    startTime: overrides?.startTime ?? source.startTime,
+    duration: overrides?.duration ?? source.duration,
+    positions: JSON.parse(JSON.stringify(overrides?.positions ?? source.positions))
+  }), []);
+
+  const writeBlobToElectronPath = useCallback(async (filePath: string, blob: Blob) => {
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    await window.electronAPI.writeBinaryFile(filePath, bytes);
+  }, []);
+
+  const requestElectronExportPath = useCallback(async (
+    baseName: string,
+    extension: 'mp4' | 'webm'
+  ): Promise<string | null> => {
+    if (!window.electronAPI?.isElectron) return null;
+    return window.electronAPI.saveFile(`${baseName}.${extension}`, [
+      { name: extension === 'mp4' ? 'MP4 Video' : 'WebM Video', extensions: [extension] },
+      { name: 'All Files', extensions: ['*'] },
+    ]);
+  }, []);
+
+  const downloadBlob = useCallback((blob: Blob, fileName: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }, []);
+
+  const withTimeout = useCallback(async <T,>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> => {
+    return new Promise<T>((resolve, reject) => {
+      const timer = window.setTimeout(() => reject(new Error(`${label} 超时`)), timeoutMs);
+      promise.then(
+        (value) => {
+          window.clearTimeout(timer);
+          resolve(value);
+        },
+        (error) => {
+          window.clearTimeout(timer);
+          reject(error);
+        }
+      );
+    });
+  }, []);
+
+  const getExportVideoTime = useCallback((video: HTMLVideoElement, timelineTimeSec: number, shouldLoop: boolean) => {
+    const duration = video.duration;
+    if (!Number.isFinite(duration) || duration <= 0) return Math.max(0, timelineTimeSec);
+    if (shouldLoop) return timelineTimeSec % duration;
+    return Math.min(Math.max(0, timelineTimeSec), Math.max(0, duration - 0.001));
+  }, []);
+
+  const create2DExportLedRenderer = useCallback(async () => {
+    const ledContent = stageConfig.ledContent;
+    if (!ledContent || ledContent.type === 'none' || !ledContent.value) {
+      return null;
+    }
+
+    if (ledContent.type === 'color') {
+      return {
+        draw: async (ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number) => {
+          ctx.fillStyle = ledContent.value!;
+          ctx.fillRect(x, y, width, height);
+        },
+        dispose: () => {},
+      };
+    }
+
+    const assetUrl = mediaCache[ledContent.value];
+    if (!assetUrl) return null;
+
+    if (ledContent.type === 'image') {
+      const image = new Image();
+      await new Promise<void>((resolve, reject) => {
+        image.onload = () => resolve();
+        image.onerror = reject;
+        image.src = assetUrl;
+      });
+      return {
+        draw: async (ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number) => {
+          ctx.drawImage(image, x, y, width, height);
+        },
+        dispose: () => {},
+      };
+    }
+
+    if (ledContent.type === 'video') {
+      const video = document.createElement('video');
+      video.crossOrigin = 'anonymous';
+      video.src = assetUrl;
+      video.loop = ledContent.loop ?? true;
+      video.muted = true;
+      video.playsInline = true;
+      video.preload = 'auto';
+
+      await new Promise<void>((resolve) => {
+        const onReady = () => {
+          video.removeEventListener('loadedmetadata', onReady);
+          video.removeEventListener('loadeddata', onReady);
+          resolve();
+        };
+        video.addEventListener('loadedmetadata', onReady, { once: true });
+        video.addEventListener('loadeddata', onReady, { once: true });
+        window.setTimeout(resolve, 3000);
+        video.load();
+      });
+
+      return {
+        draw: async (ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, timeMs: number) => {
+          if (video.readyState < HTMLMediaElement.HAVE_METADATA) return;
+          const desired = getExportVideoTime(video, timeMs / 1000, video.loop);
+          if (Math.abs(video.currentTime - desired) > 0.03) {
+            await new Promise<void>((resolve) => {
+              const onSeeked = () => {
+                video.removeEventListener('seeked', onSeeked);
+                resolve();
+              };
+              video.addEventListener('seeked', onSeeked, { once: true });
+              window.setTimeout(() => {
+                video.removeEventListener('seeked', onSeeked);
+                resolve();
+              }, 250);
+              try {
+                video.currentTime = desired;
+              } catch {
+                resolve();
+              }
+            });
+          }
+          if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+            ctx.drawImage(video, x, y, width, height);
+          }
+        },
+        dispose: () => {
+          video.pause();
+          video.removeAttribute('src');
+          video.load();
+        },
+      };
+    }
+
+    return null;
+  }, [getExportVideoTime, mediaCache, stageConfig.ledContent]);
+
   // --- Actions ---
 
   const handleAddPerformer = (name: string, color: string, shape: PerformerShape, extra?: Partial<Performer>) => {
@@ -283,6 +571,7 @@ const App: React.FC = () => {
       label: name.charAt(0).toUpperCase(),
       shape,
       type: extra?.type || 'performer',
+      propCategory: extra?.type === 'prop' ? (extra.propCategory ?? 'prop') : undefined,
       ...extra
     };
     setPerformers([...performers, newPerformer]);
@@ -386,10 +675,30 @@ const App: React.FC = () => {
   };
 
   // LED 内容上传处理
-  const handleLEDContentUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleLEDContentUpload = async (e?: React.ChangeEvent<HTMLInputElement>) => {
+    if (window.electronAPI?.isElectron) {
+      if (!currentProjectId) {
+        setProjectMessages(['请先新建或打开一个项目，再导入背景资源']);
+        return;
+      }
+      const sourcePath = await window.electronAPI.openFile([
+        { name: 'Image and Video', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'mp4', 'webm', 'mov'] },
+      ]);
+      if (!sourcePath) return;
+      const asset = await window.electronAPI.project.ingestAsset(currentProjectId, sourcePath, 'background');
+      const extension = asset.displayName.split('.').pop()?.toLowerCase() || '';
+      const type = ['mp4', 'webm', 'mov'].includes(extension) ? 'video' : 'image';
+      setMediaCache({ [asset.relativePath]: asset.url });
+      setStageConfig(prev => ({
+        ...prev,
+        ledContent: { type, value: asset.relativePath, loop: true },
+      }));
+      setProjectMessages(['背景资源已复制到项目']);
+      return;
+    }
 
+    const file = e?.target.files?.[0];
+    if (!file) return;
     const url = URL.createObjectURL(file);
     const fileName = `led_${Date.now()}_${file.name}`;
     const previousValue = stageConfig.ledContent?.value;
@@ -397,7 +706,7 @@ const App: React.FC = () => {
     setMediaCache(prev => {
       const next = { ...prev, [fileName]: url };
       if (previousValue && next[previousValue]) {
-        URL.revokeObjectURL(next[previousValue]);
+        if (next[previousValue].startsWith('blob:')) URL.revokeObjectURL(next[previousValue]);
         delete next[previousValue];
       }
       return next;
@@ -408,7 +717,7 @@ const App: React.FC = () => {
       ...prev,
       ledContent: { type, value: fileName, loop: true }
     }));
-    e.target.value = '';
+    if (e) e.target.value = '';
   };
 
   // 清除 LED 内容
@@ -417,7 +726,7 @@ const App: React.FC = () => {
     if (previousValue) {
       setMediaCache(prev => {
         if (!prev[previousValue]) return prev;
-        URL.revokeObjectURL(prev[previousValue]);
+        if (prev[previousValue].startsWith('blob:')) URL.revokeObjectURL(prev[previousValue]);
         const next = { ...prev };
         delete next[previousValue];
         return next;
@@ -436,6 +745,49 @@ const App: React.FC = () => {
 
   // ==================== Project Storage Handlers ====================
 
+  const applyLoadedProject = useCallback(async (projectId: string, result: ProjectLoadResult) => {
+    const { data, projectPath, audioUrl, mediaUrls, warnings } = result;
+    setCurrentProjectId(projectId);
+    setCurrentProjectPath(projectPath);
+    setPerformers(data.performers);
+    setPerformerGroups(data.performerGroups);
+    setFrames(data.frames);
+    setMusicName(data.musicName || null);
+    setMusicAsset(data.musicAsset || null);
+    setStageConfig(data.stageConfig);
+    setMediaCache(mediaUrls);
+    setCurrentTime(0);
+    setAudioBuffer(null);
+    setMusicUrl(audioUrl);
+    setSelectedPerformerIds([]);
+    if (data.frames.length > 0) {
+      setCurrentFrameId(data.frames[0].id);
+    }
+
+    const messages = warnings.map((warning) => warning.message);
+    if (audioUrl && audioContextRef.current) {
+      try {
+        const response = await fetch(audioUrl);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        setAudioBuffer(await audioContextRef.current.decodeAudioData(await response.arrayBuffer()));
+      } catch (error) {
+        console.error('Failed to restore project audio:', error);
+        messages.push(`音频无法解码：${data.musicName || data.musicAsset || '未知音频'}`);
+      }
+    }
+
+    setLastSavedState(JSON.stringify({
+      performers: data.performers,
+      performerGroups: data.performerGroups,
+      frames: data.frames,
+      stageConfig: data.stageConfig,
+      musicName: data.musicName || null,
+      musicAsset: data.musicAsset || null,
+    }));
+    setProjectHasChanges(false);
+    setProjectMessages(messages.length > 0 ? messages : ['项目已完整恢复']);
+  }, []);
+
   // Get current project state as JSON string for comparison
   const getProjectStateString = useCallback(() => {
     return JSON.stringify({
@@ -444,8 +796,9 @@ const App: React.FC = () => {
       frames,
       stageConfig,
       musicName,
+      musicAsset,
     });
-  }, [performers, performerGroups, frames, stageConfig, musicName]);
+  }, [performers, performerGroups, frames, stageConfig, musicName, musicAsset]);
 
   // Track changes to project
   useEffect(() => {
@@ -453,7 +806,7 @@ const App: React.FC = () => {
       const currentState = getProjectStateString();
       setProjectHasChanges(currentState !== lastSavedState);
     }
-  }, [performers, performerGroups, frames, stageConfig, musicName, currentProjectId, lastSavedState, getProjectStateString]);
+  }, [performers, performerGroups, frames, stageConfig, musicName, musicAsset, currentProjectId, lastSavedState, getProjectStateString]);
 
   // Create a new project
   const handleCreateProject = async (name: string): Promise<string> => {
@@ -462,19 +815,22 @@ const App: React.FC = () => {
     // Auto-save current project before creating new one
     if (currentProjectId && projectHasChanges) {
       try {
-        const projectData = {
-          version: '2.0',
+        const projectData: ProjectDocument = {
+          version: '3.0',
           name: '',
           performers,
           performerGroups,
           frames,
           stageConfig,
           musicName,
+          musicAsset,
         };
         await window.electronAPI.project.save(currentProjectId, projectData);
         console.log('Auto-saved current project before creating new');
       } catch (error) {
         console.error('Failed to auto-save before creating:', error);
+        setProjectMessages(['当前项目自动保存失败，已取消新建项目']);
+        return '';
       }
     }
     
@@ -485,24 +841,36 @@ const App: React.FC = () => {
       
       // Reset to fresh state
       const newFrameId = generateId();
-      setPerformers([]);
-      setPerformerGroups([]);
-      setFrames([{
+      const newFrames: Frame[] = [{
         id: newFrameId,
         name: 'Opening',
         startTime: 0,
         duration: 2000,
-        positions: {}
-      }]);
+        positions: {},
+      }];
+      const newStageConfig = createDefaultStageConfig();
+      setPerformers([]);
+      setPerformerGroups([]);
+      setFrames(newFrames);
       setCurrentFrameId(newFrameId);
+      setStageConfig(newStageConfig);
+      setMediaCache({});
       setMusicName(null);
+      setMusicAsset(null);
       setAudioBuffer(null);
       setMusicUrl(null);
       setCurrentTime(0);
       setSelectedPerformerIds([]);
       
       // Mark as saved
-      setLastSavedState(getProjectStateString());
+      setLastSavedState(JSON.stringify({
+        performers: [],
+        performerGroups: [],
+        frames: newFrames,
+        stageConfig: newStageConfig,
+        musicName: null,
+        musicAsset: null,
+      }));
       setProjectHasChanges(false);
       
       return id;
@@ -518,9 +886,22 @@ const App: React.FC = () => {
     // Auto-save current project before switching
     if (currentProjectId && projectHasChanges) {
       try {
-        const projectData = { version: '2.0', name: '', performers, performerGroups, frames, stageConfig, musicName };
+        const projectData: ProjectDocument = {
+          version: '3.0',
+          name: '',
+          performers,
+          performerGroups,
+          frames,
+          stageConfig,
+          musicName,
+          musicAsset,
+        };
         await window.electronAPI.project.save(currentProjectId, projectData);
-      } catch (error) { /* ignore */ }
+      } catch (error) {
+        console.error('Failed to auto-save before creating template project:', error);
+        setProjectMessages(['当前项目自动保存失败，已取消创建模板项目']);
+        return '';
+      }
     }
 
     try {
@@ -528,7 +909,16 @@ const App: React.FC = () => {
       const { id, path } = await window.electronAPI.project.create(name);
 
       // Save template data into the new project
-      const saveData = { version: '2.0', name: '', performers: templateData.performers || [], performerGroups: templateData.performerGroups || [], frames: templateData.frames || [], stageConfig: templateData.stageConfig || stageConfig, musicName: null };
+      const saveData: ProjectDocument = {
+        version: '3.0',
+        name: '',
+        performers: templateData.performers || [],
+        performerGroups: templateData.performerGroups || [],
+        frames: templateData.frames || [],
+        stageConfig: templateData.stageConfig || stageConfig,
+        musicName: null,
+        musicAsset: null,
+      };
       await window.electronAPI.project.save(id, saveData);
 
       setCurrentProjectId(id);
@@ -541,12 +931,20 @@ const App: React.FC = () => {
       setStageConfig(saveData.stageConfig);
       setCurrentFrameId(saveData.frames[0]?.id || '');
       setMusicName(null);
+      setMusicAsset(null);
       setAudioBuffer(null);
       setMusicUrl(null);
       setCurrentTime(0);
       setSelectedPerformerIds([]);
 
-      setLastSavedState(JSON.stringify({ performers: saveData.performers, performerGroups: saveData.performerGroups, frames: saveData.frames, stageConfig: saveData.stageConfig, musicName: null }));
+      setLastSavedState(JSON.stringify({
+        performers: saveData.performers,
+        performerGroups: saveData.performerGroups,
+        frames: saveData.frames,
+        stageConfig: saveData.stageConfig,
+        musicName: null,
+        musicAsset: null,
+      }));
       setProjectHasChanges(false);
 
       return id;
@@ -568,6 +966,7 @@ const App: React.FC = () => {
     setStageConfig(config);
     setCurrentFrameId(frames[0]?.id || '');
     setMusicName(null);
+    setMusicAsset(null);
     setAudioBuffer(null);
     setMusicUrl(null);
     setCurrentTime(0);
@@ -582,90 +981,104 @@ const App: React.FC = () => {
     // Auto-save current project before switching
     if (currentProjectId && projectHasChanges) {
       try {
-        const projectData = {
-          version: '2.0',
+        const projectData: ProjectDocument = {
+          version: '3.0',
           name: '',
           performers,
           performerGroups,
           frames,
           stageConfig,
           musicName,
+          musicAsset,
         };
         await window.electronAPI.project.save(currentProjectId, projectData);
         console.log('Auto-saved current project before switching');
       } catch (error) {
         console.error('Failed to auto-save before switching:', error);
+        setProjectMessages(['当前项目自动保存失败，已取消切换项目']);
+        return;
       }
     }
     
     try {
-      const { data, projectPath } = await window.electronAPI.project.load(projectId);
-      
-      setCurrentProjectId(projectId);
-      setCurrentProjectPath(projectPath);
-      
-      // Load project data
-      setPerformers(data.performers || []);
-      setPerformerGroups(data.performerGroups || []);
-      setFrames(data.frames || []);
-      setMusicName(data.musicName || null);
-      
-      if (data.stageConfig) {
-        setStageConfig(data.stageConfig);
-      }
-      
-      // Reset playback
-      setCurrentTime(0);
-      setAudioBuffer(null);
-      setMusicUrl(null);
-      setSelectedPerformerIds([]);
-      
-      if (data.frames?.length > 0) {
-        setCurrentFrameId(data.frames[0].id);
-      }
-      
-      // Mark as saved (use setTimeout to ensure state is updated)
-      setTimeout(() => {
-        setLastSavedState(JSON.stringify({
-          performers: data.performers || [],
-          performerGroups: data.performerGroups || [],
-          frames: data.frames || [],
-          stageConfig: data.stageConfig || stageConfig,
-          musicName: data.musicName || null,
-        }));
-        setProjectHasChanges(false);
-      }, 100);
+      await applyLoadedProject(projectId, await window.electronAPI.project.load(projectId));
       
     } catch (error) {
       console.error('Failed to load project:', error);
-      alert('加载项目失败');
+      setProjectMessages(['项目加载失败，请检查项目文件是否完整']);
     }
   };
 
   // Save current project
-  const handleSaveProject = async () => {
-    if (!window.electronAPI?.isElectron || !currentProjectId) return;
+  const handleSaveProject = async (): Promise<boolean> => {
+    if (!window.electronAPI?.isElectron || !currentProjectId) return false;
     
     try {
-      const projectData = {
-        version: '2.0',
+      const projectData: ProjectDocument = {
+        version: '3.0',
         name: '', // Will be preserved from existing project.json
         performers,
         performerGroups,
         frames,
         stageConfig,
         musicName,
+        musicAsset,
       };
       
-      await window.electronAPI.project.save(currentProjectId, projectData);
-      
-      // Mark as saved
-      setLastSavedState(getProjectStateString());
+      const saved = await window.electronAPI.project.save(currentProjectId, projectData);
+      setPerformers(saved.data.performers);
+      setMediaCache(saved.mediaUrls);
+      setLastSavedState(JSON.stringify({
+        performers: saved.data.performers,
+        performerGroups: saved.data.performerGroups,
+        frames: saved.data.frames,
+        stageConfig: saved.data.stageConfig,
+        musicName: saved.data.musicName || null,
+        musicAsset: saved.data.musicAsset || null,
+      }));
       setProjectHasChanges(false);
-      
+      return true;
     } catch (error) {
       console.error('Failed to save project:', error);
-      alert('保存项目失败');
+      setProjectMessages(['项目保存失败，请检查磁盘空间和目录权限']);
+      return false;
+    }
+  };
+
+  const handleImportProjectPackage = async () => {
+    if (!window.electronAPI?.isElectron) return;
+    try {
+      const result = await window.electronAPI.project.importPackage();
+      if (result) await applyLoadedProject(result.projectId, result);
+    } catch (error) {
+      console.error('Project package import failed:', error);
+      setProjectMessages(['项目包导入失败，文件可能已损坏或格式不受支持']);
+    }
+  };
+
+  const handleImportLegacyProject = async () => {
+    if (!window.electronAPI?.isElectron) return;
+    try {
+      const result = await window.electronAPI.project.importLegacy();
+      if (result) await applyLoadedProject(result.projectId, result);
+    } catch (error) {
+      console.error('Legacy project import failed:', error);
+      setProjectMessages(['旧 JSON 导入失败，文件可能已损坏或格式不受支持']);
+    }
+  };
+
+  const handleExportProjectPackage = async () => {
+    if (!window.electronAPI?.isElectron || !currentProjectId) {
+      setProjectMessages(['请先打开需要导出的项目']);
+      return;
+    }
+    try {
+      if (projectHasChanges && !await handleSaveProject()) return;
+      const exportedPath = await window.electronAPI.project.exportPackage(currentProjectId);
+      if (exportedPath) setProjectMessages([`项目包已导出：${exportedPath}`]);
+    } catch (error) {
+      console.error('Project package export failed:', error);
+      setProjectMessages(['项目包导出失败，请检查目标目录权限和磁盘空间']);
     }
   };
 
@@ -690,10 +1103,6 @@ const App: React.FC = () => {
     const ids = new Set(selectedPerformerIds);
     const currentFrame = frames.find(fr => fr.id === currentFrameId);
     if (!currentFrame) return;
-    const backup: Record<string, Position> = {};
-    Object.entries(currentFrame.positions).forEach(([pid, pos]) => { if (ids.has(pid)) backup[pid] = pos as Position; });
-    setUndoStack(prev => [...prev, { type: 'delete-performers-in-frame', frameId: currentFrameId, positionsBackup: backup, deletedIds: selectedPerformerIds }]);
-    setRedoStack([]);
     setFrames(prev => prev.map(f => {
       if (f.id !== currentFrameId) return f;
       const newPositions = { ...f.positions } as Record<string, Position>;
@@ -744,6 +1153,53 @@ const App: React.FC = () => {
       return f;
     }));
   };
+
+  const handleStageDragStart = useCallback((performerIds: string[]) => {
+    if (!currentFrameId || performerIds.length === 0) {
+      pendingMoveUndoRef.current = null;
+      return;
+    }
+    const currentFrame = frames.find((frame) => frame.id === currentFrameId);
+    if (!currentFrame) {
+      pendingMoveUndoRef.current = null;
+      return;
+    }
+    const before = clonePositionMap(
+      Object.fromEntries(
+        performerIds
+          .map((id) => [id, currentFrame.positions[id]] as const)
+          .filter((entry): entry is [string, Position] => entry[1] !== undefined)
+      )
+    );
+    pendingMoveUndoRef.current = Object.keys(before).length > 0
+      ? { frameId: currentFrameId, performerIds: Object.keys(before), before }
+      : null;
+  }, [currentFrameId, frames]);
+
+  const handleStageDragEnd = useCallback((performerIds: string[]) => {
+    const snapshot = pendingMoveUndoRef.current;
+    pendingMoveUndoRef.current = null;
+    if (!snapshot || snapshot.frameId !== currentFrameId) return;
+    const currentFrame = frames.find((frame) => frame.id === snapshot.frameId);
+    if (!currentFrame) return;
+    const relevantIds = snapshot.performerIds.filter((id) => performerIds.length === 0 || performerIds.includes(id));
+    const after = clonePositionMap(
+      Object.fromEntries(
+        relevantIds
+          .map((id) => [id, currentFrame.positions[id]] as const)
+          .filter((entry): entry is [string, Position] => entry[1] !== undefined)
+      )
+    );
+    const changedIds = relevantIds.filter((id) => !positionsEqual(snapshot.before[id], after[id]));
+    if (changedIds.length === 0) return;
+    pushUndoAction({
+      type: 'move-performers',
+      frameId: snapshot.frameId,
+      performerIds: changedIds,
+      before: clonePositionMap(Object.fromEntries(changedIds.map((id) => [id, snapshot.before[id]]))),
+      after: clonePositionMap(Object.fromEntries(changedIds.map((id) => [id, after[id]]))),
+    });
+  }, [currentFrameId, frames, pushUndoAction]);
 
   const handleApplyPreset = (coords: Position[]) => {
     const targets = selectedPerformerIds.length > 0
@@ -819,11 +1275,12 @@ const App: React.FC = () => {
         shape: entity.shape || (entity.type === 'prop' ? 'square' : 'circle'),
         type: entity.type,
         groupId: entity.groupTempId ? groupIdByTempId.get(entity.groupTempId) : undefined,
-        width: entity.width,
-        height: entity.height,
-        depth: entity.depth,
+        width: entity.type === 'prop' ? (entity.width ?? 1) : entity.width,
+        height: entity.type === 'prop' ? (entity.height ?? 2) : entity.height,
+        depth: entity.type === 'prop' ? (entity.depth ?? 0.3) : entity.depth,
         rotation: entity.rotation,
         propGeometryType: entity.propGeometryType || (entity.type === 'prop' ? 'box' : undefined),
+        propCategory: entity.type === 'prop' ? (entity.propCategory ?? 'prop') : undefined,
       };
     });
 
@@ -914,12 +1371,7 @@ const App: React.FC = () => {
   const handleDeleteFrame = (id: string) => {
     if (frames.length <= 0) return;
     if (isPlaying) handlePlayPause();
-    const target = frames.find(f => f.id === id);
     const filtered = frames.filter(f => f.id !== id);
-    if (target) {
-      setUndoStack(prev => [...prev, { type: 'delete-frame', frame: JSON.parse(JSON.stringify(target)), prevCurrentFrameId: currentFrameId }]);
-      setRedoStack([]);
-    }
     if (filtered.length === 0) {
       const nf: Frame = { id: generateId(), name: 'Opening', startTime: 0, duration: 2000, positions: {} };
       setFrames([nf]);
@@ -936,55 +1388,73 @@ const App: React.FC = () => {
     const last = undoStack[undoStack.length - 1];
     if (!last) return;
     setUndoStack(prev => prev.slice(0, -1));
-    if (last.type === 'delete-performers-in-frame') {
-      setFrames(prev => prev.map(f => f.id === last.frameId ? { ...f, positions: { ...f.positions, ...last.positionsBackup } } : f));
-      setSelectedPerformerIds(last.deletedIds);
-      setRedoStack(prev => [...prev, last]);
-    } else if (last.type === 'delete-frame') {
-      setFrames(prev => {
-        const nf = [...prev, last.frame];
-        nf.sort((a, b) => a.startTime - b.startTime);
-        return nf;
-      });
-      setCurrentFrameId(last.frame.id);
-      setRedoStack(prev => [...prev, last]);
+    if (last.type === 'move-performers') {
+      setFrames((prev) => prev.map((frame) => {
+        if (frame.id !== last.frameId) return frame;
+        return {
+          ...frame,
+          positions: { ...frame.positions, ...clonePositionMap(last.before) }
+        };
+      }));
+      setSelectedPerformerIds(last.performerIds);
+    } else if (last.type === 'paste-performers') {
+      const pastedIds = last.performers.map((performer) => performer.id);
+      setPerformers((prev) => prev.filter((performer) => !pastedIds.includes(performer.id)));
+      removePerformerIdsFromFrames(pastedIds);
+      setSelectedPerformerIds(last.previousSelectedIds);
+    } else if (last.type === 'paste-frame') {
+      setFrames((prev) => prev.filter((frame) => frame.id !== last.frame.id));
+      if (last.previousCurrentFrameId) {
+        setCurrentFrameId(last.previousCurrentFrameId);
+      }
     }
+    setRedoStack(prev => [...prev, last]);
   };
 
   const handleRedo = () => {
     const last = redoStack[redoStack.length - 1];
     if (!last) return;
     setRedoStack(prev => prev.slice(0, -1));
-    if (last.type === 'delete-performers-in-frame') {
-      const ids = new Set(Object.keys(last.positionsBackup));
-      setFrames(prev => prev.map(f => {
-        if (f.id !== last.frameId) return f;
-        const newPositions = { ...f.positions } as Record<string, Position>;
-        Object.keys(newPositions).forEach(pid => { if (ids.has(pid)) delete (newPositions as any)[pid]; });
-        return { ...f, positions: newPositions };
+    if (last.type === 'move-performers') {
+      setFrames((prev) => prev.map((frame) => {
+        if (frame.id !== last.frameId) return frame;
+        return {
+          ...frame,
+          positions: { ...frame.positions, ...clonePositionMap(last.after) }
+        };
       }));
-      setSelectedPerformerIds([]);
-      setUndoStack(prev => [...prev, last]);
-    } else if (last.type === 'delete-frame') {
-      setFrames(prev => prev.filter(f => f.id !== last.frame.id));
-      setCurrentFrameId(last.prevCurrentFrameId || null as any);
-      setUndoStack(prev => [...prev, last]);
+      setSelectedPerformerIds(last.performerIds);
+    } else if (last.type === 'paste-performers') {
+      setPerformers((prev) => [...prev, ...last.performers.map((performer) => ({ ...performer }))]);
+      restoreFrameUpdates(last.frameUpdates);
+      setSelectedPerformerIds(last.performers.map((performer) => performer.id));
+    } else if (last.type === 'paste-frame') {
+      setFrames((prev) => {
+        const nextFrames = [...prev, createFrameCopy(last.frame, { id: last.frame.id })];
+        nextFrames.sort((a, b) => a.startTime - b.startTime);
+        return nextFrames;
+      });
+      setCurrentFrameId(last.frame.id);
     }
+    setUndoStack(prev => [...prev, last]);
   };
 
   const handleDuplicateFrame = (id: string) => {
     const f = frames.find(fr => fr.id === id);
     if (!f) return;
-
-    const newFrame = {
-      ...f,
-      id: generateId(),
+    const newFrame = createFrameCopy(f, {
       name: `${f.name} (Copy)`,
-      startTime: f.startTime + f.duration + 1000 // Place it after
-    };
+      startTime: f.startTime + f.duration + 1000,
+    });
     const newFrames = [...frames, newFrame];
     newFrames.sort((a, b) => a.startTime - b.startTime);
     setFrames(newFrames);
+    setCurrentFrameId(newFrame.id);
+    pushUndoAction({
+      type: 'paste-frame',
+      frame: createFrameCopy(newFrame, { id: newFrame.id }),
+      previousCurrentFrameId: currentFrameId,
+    });
   };
 
   // --- Project Export / Import ---
@@ -1185,6 +1655,7 @@ const App: React.FC = () => {
 
     const newPerformers: Performer[] = [];
     const frameUpdates: Record<string, Record<string, Position>> = {}; // frameId -> { perfId: pos }
+    const previousSelectedIds = [...selectedPerformerIds];
 
     items.forEach(item => {
       const newId = generateId();
@@ -1199,7 +1670,7 @@ const App: React.FC = () => {
         const originalPos = item.positions[f.id] || { x: 50, y: 50 };
         if (!frameUpdates[f.id]) frameUpdates[f.id] = {};
         frameUpdates[f.id][newId] = {
-          x: Math.min(100, Math.max(0, originalPos.x + 2)),
+          x: Math.min(getStageXBounds(stageConfig).max, Math.max(getStageXBounds(stageConfig).min, originalPos.x + 2)),
           y: Math.min(100, Math.max(0, originalPos.y + 2))
         };
       });
@@ -1217,8 +1688,15 @@ const App: React.FC = () => {
     }));
 
     setSelectedPerformerIds(newPerformers.map(p => p.id));
-
-  }, [clipboard, frames]);
+    pushUndoAction({
+      type: 'paste-performers',
+      performers: newPerformers.map((performer) => ({ ...performer })),
+      frameUpdates: Object.fromEntries(
+        Object.entries(frameUpdates).map(([frameId, updates]) => [frameId, clonePositionMap(updates)])
+      ),
+      previousSelectedIds,
+    });
+  }, [clipboard, frames, selectedPerformerIds, pushUndoAction, stageConfig]);
 
   const handleDuplicateSelected = () => {
     const items: ClipboardItem[] = [];
@@ -1237,6 +1715,16 @@ const App: React.FC = () => {
     pastePerformers(items);
   };
 
+  const getPlaybackEndMs = useCallback(() => {
+    const lastFrameEnd = frames.reduce(
+      (maximum, frame) => Math.max(maximum, frame.startTime + frame.duration),
+      0,
+    );
+    const visualTimelineEnd = Math.max(lastFrameEnd + 10000, 30000);
+    const audioEnd = audioBuffer ? audioBuffer.duration * 1000 : 0;
+    return Math.max(visualTimelineEnd, audioEnd);
+  }, [frames, audioBuffer]);
+
   // Keyboard Shortcuts
   const handlePlayPause = useCallback(() => {
     if (isPlaying) {
@@ -1245,6 +1733,9 @@ const App: React.FC = () => {
       stopAudio();
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     } else {
+      const playbackEnd = getPlaybackEndMs();
+      const restartTime = currentTime >= playbackEnd - 50 ? 0 : currentTime;
+
       // Play
       if (audioContextRef.current?.state === 'suspended') {
         audioContextRef.current.resume();
@@ -1254,8 +1745,11 @@ const App: React.FC = () => {
       isPlayingRef.current = true; // Force Ref True immediately for loop
 
       // Important: Start from CURRENT Time
-      startTimeRef.current = performance.now() - currentTime;
-      playAudio(currentTime);
+      if (restartTime !== currentTime) {
+        setCurrentTime(restartTime);
+      }
+      startTimeRef.current = performance.now() - restartTime;
+      playAudio(restartTime);
 
       const loop = () => {
         // Critical: Check ref, not state variable which is stale in closure
@@ -1264,16 +1758,12 @@ const App: React.FC = () => {
         const now = performance.now();
         let newTime = now - startTimeRef.current;
 
-        // Auto-stop at end
-        if (frames.length > 0) {
-          const lastFrame = frames[frames.length - 1];
-          const end = lastFrame.startTime + lastFrame.duration + 2000; // stop 2s after last frame
-          if (newTime > end && end > 10000) {
-            newTime = end;
-            setIsPlaying(false);
-            stopAudio();
-            return; // Stop animation
-          }
+        if (newTime >= playbackEnd) {
+          setCurrentTime(playbackEnd);
+          setIsPlaying(false);
+          isPlayingRef.current = false;
+          stopAudio();
+          return;
         }
 
         rafRef.current = requestAnimationFrame(loop);
@@ -1281,7 +1771,7 @@ const App: React.FC = () => {
       };
       rafRef.current = requestAnimationFrame(loop);
     }
-  }, [isPlaying, currentTime, frames]);
+  }, [isPlaying, currentTime, getPlaybackEndMs]);
 
   // Separate effect for spacebar to ensure latest handlePlayPause closure is used
   useEffect(() => {
@@ -1313,12 +1803,13 @@ const App: React.FC = () => {
         if (selectedPerformerIds.length > 0) {
           e.preventDefault();
           copyPerformersToClipboard();
-        }
-        // Copy selected frame
-        if (currentFrameId) {
+          setFrameClipboard(null);
+        } else if (currentFrameId) {
+          // Copy the current frame only when no performer is selected.
           const f = frames.find(fr => fr.id === currentFrameId);
           if (f) {
             e.preventDefault();
+            setClipboard([]);
             setFrameClipboard(JSON.parse(JSON.stringify(f)));
           }
         }
@@ -1328,21 +1819,22 @@ const App: React.FC = () => {
         if (clipboard.length > 0) {
           e.preventDefault();
           pastePerformers();
-        }
-        // Paste frame at playhead
-        if (frameClipboard) {
+        } else if (frameClipboard) {
+          // Paste a frame only when the performer clipboard is empty.
           e.preventDefault();
-          const newFrame: Frame = {
-            ...frameClipboard,
-            id: generateId(),
+          const newFrame = createFrameCopy(frameClipboard, {
             name: `${frameClipboard.name} (复制)`,
             startTime: currentTime,
-            positions: JSON.parse(JSON.stringify(frameClipboard.positions))
-          };
+          });
           const newFrames = [...frames, newFrame];
           newFrames.sort((a, b) => a.startTime - b.startTime);
           setFrames(newFrames);
           setCurrentFrameId(newFrame.id);
+          pushUndoAction({
+            type: 'paste-frame',
+            frame: createFrameCopy(newFrame, { id: newFrame.id }),
+            previousCurrentFrameId: currentFrameId,
+          });
         }
       }
 
@@ -1362,15 +1854,38 @@ const App: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedPerformerIds, clipboard, frameClipboard, copyPerformersToClipboard, pastePerformers, handlePlayPause, frames, currentTime, currentFrameId]);
+  }, [selectedPerformerIds, clipboard, frameClipboard, copyPerformersToClipboard, pastePerformers, handlePlayPause, frames, currentTime, currentFrameId, createFrameCopy, pushUndoAction]);
 
 
   // --- Audio Logic ---
-  const handleImportMusic = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const handleImportMusic = async (e?: React.ChangeEvent<HTMLInputElement>) => {
+    if (window.electronAPI?.isElectron) {
+      if (!currentProjectId) {
+        setProjectMessages(['请先新建或打开一个项目，再导入音频']);
+        return;
+      }
+      const sourcePath = await window.electronAPI.openFile([
+        { name: 'Audio', extensions: ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac'] },
+      ]);
+      if (!sourcePath) return;
+      const asset = await window.electronAPI.project.ingestAsset(currentProjectId, sourcePath, 'audio');
+      setMusicName(asset.displayName);
+      setMusicAsset(asset.relativePath);
+      setMusicUrl(asset.url);
+      const response = await fetch(asset.url);
+      if (!response.ok) throw new Error(`Failed to read imported audio: ${response.status}`);
+      if (audioContextRef.current) {
+        setAudioBuffer(await audioContextRef.current.decodeAudioData(await response.arrayBuffer()));
+      }
+      setProjectMessages(['音频已复制到项目']);
+      return;
+    }
+
+    const file = e?.target.files?.[0];
     if (!file) return;
 
     setMusicName(file.name);
+    setMusicAsset(null);
     const url = URL.createObjectURL(file);
     setMusicUrl(url);
 
@@ -1386,6 +1901,11 @@ const App: React.FC = () => {
 
     if (audioSourceRef.current) {
       try { audioSourceRef.current.stop(); } catch (e) { }
+    }
+
+    if (offset >= audioBuffer.duration * 1000) {
+      audioSourceRef.current = null;
+      return;
     }
 
     const source = audioContextRef.current.createBufferSource();
@@ -1419,7 +1939,11 @@ const App: React.FC = () => {
     }
   };
 
-  const renderFrameToCanvas = (canvas: HTMLCanvasElement, timeMs: number, opts?: { includeLabels?: boolean; includeGrid?: boolean; bgColor?: string; }) => {
+  const renderFrameToCanvas = async (
+    canvas: HTMLCanvasElement,
+    timeMs: number,
+    opts?: { includeLabels?: boolean; includeGrid?: boolean; bgColor?: string; ledRenderer?: { draw: (ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, timeMs: number) => Promise<void> | void } | null; }
+  ) => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     const includeLabels = opts?.includeLabels ?? true;
@@ -1428,11 +1952,31 @@ const App: React.FC = () => {
     const w = canvas.width;
     const h = canvas.height;
     const scale = w / 1280; // baseline: 1280px wide
-    ctx.fillStyle = bgColor;
+    const stageW = stageConfig.width || 20;
+    const stageD = stageConfig.depth || stageW / STAGE_ASPECT_RATIO;
+    const totalStageW = getTotalStageWidth(stageConfig);
+    const stageAspect = totalStageW / stageD;
+    let renderW = w;
+    let renderH = renderW / stageAspect;
+    if (renderH > h) {
+      renderH = h;
+      renderW = renderH * stageAspect;
+    }
+    const renderX = (w - renderW) / 2;
+    const renderY = (h - renderH) / 2;
+    const leftMainEdge = renderX + stageXToViewPercent(0, stageConfig) / 100 * renderW;
+    const rightMainEdge = renderX + stageXToViewPercent(100, stageConfig) / 100 * renderW;
+
+    ctx.fillStyle = '#0f172a';
     ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = bgColor;
+    ctx.fillRect(renderX, renderY, renderW, renderH);
+    if (opts?.ledRenderer) {
+      await opts.ledRenderer.draw(ctx, leftMainEdge, renderY, rightMainEdge - leftMainEdge, renderH, timeMs);
+    }
     ctx.strokeStyle = '#334155';
     ctx.lineWidth = scale;
-    ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
+    ctx.strokeRect(renderX + 0.5, renderY + 0.5, renderW - 1, renderH - 1);
 
     if (includeGrid) {
       const divisions = Math.round(4 * gridScale);
@@ -1440,10 +1984,10 @@ const App: React.FC = () => {
       ctx.lineWidth = scale;
       ctx.globalAlpha = 0.2;
       for (let i = 0; i <= divisions; i++) {
-        const gx = (i / divisions) * w;
-        ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, h); ctx.stroke();
-        const gy = (i / divisions) * h;
-        ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(w, gy); ctx.stroke();
+        const gx = renderX + (i / divisions) * renderW;
+        ctx.beginPath(); ctx.moveTo(gx, renderY); ctx.lineTo(gx, renderY + renderH); ctx.stroke();
+        const gy = renderY + (i / divisions) * renderH;
+        ctx.beginPath(); ctx.moveTo(renderX, gy); ctx.lineTo(renderX + renderW, gy); ctx.stroke();
       }
       ctx.globalAlpha = 1;
     }
@@ -1455,20 +1999,49 @@ const App: React.FC = () => {
     const hiddenGroupIds = frame?.hiddenGroupIds || [];
 
     const positions = computePositionsAtTime(timeMs);
-    const stageW = stageConfig.width || 20;
-    const stageD = stageConfig.depth || stageW / STAGE_ASPECT_RATIO;
+    const platformOccupancy = buildPlatformOccupancy(performers, positions, stageConfig);
 
-    // Draw performers
-    performers.forEach(p => {
+    ctx.fillStyle = 'rgba(2,6,23,0.55)';
+    ctx.fillRect(renderX, renderY, leftMainEdge - renderX, renderH);
+    ctx.fillRect(rightMainEdge, renderY, renderX + renderW - rightMainEdge, renderH);
+    ctx.strokeStyle = 'rgba(245,158,11,0.8)';
+    ctx.lineWidth = Math.max(2, 2 * scale);
+    ctx.setLineDash([8 * scale, 6 * scale]);
+    ctx.beginPath();
+    ctx.moveTo(leftMainEdge, renderY);
+    ctx.lineTo(leftMainEdge, renderY + renderH);
+    ctx.moveTo(rightMainEdge, renderY);
+    ctx.lineTo(rightMainEdge, renderY + renderH);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    if (getWingWidth(stageConfig) > 0) {
+      ctx.fillStyle = 'rgba(252,211,77,0.8)';
+      ctx.font = `${Math.round(11 * scale)}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText('左备场区', renderX + (leftMainEdge - renderX) / 2, renderY + 10 * scale);
+      ctx.fillText('右备场区', rightMainEdge + (renderX + renderW - rightMainEdge) / 2, renderY + 10 * scale);
+    }
+
+    // Draw props first, then actors, so occupied platforms stay visually below actors in 2D exports.
+    [...performers]
+      .sort((a, b) => {
+        const aRank = isPlatformProp(a) ? 0 : a.type === 'prop' ? 1 : 2;
+        const bRank = isPlatformProp(b) ? 0 : b.type === 'prop' ? 1 : 2;
+        return aRank - bRank;
+      })
+      .forEach(p => {
       if (p.groupId && hiddenGroupIds.includes(p.groupId)) return;
       const pos = positions[p.id];
       if (!pos) return;
-      const cx = (pos.x / 100) * w;
-      const cy = (pos.y / 100) * h;
+      const cx = renderX + (stageXToViewPercent(pos.x, stageConfig) / 100) * renderW;
+      const cy = renderY + (pos.y / 100) * renderH;
 
       if (p.type === 'prop') {
-        const propW = (p.width || 1) / stageW * w;
-        const propD = (p.depth || 1) / stageD * h;
+        const propLift = platformOccupancy.entityLiftById[p.id] ?? 0;
+        const propW = (p.width || 1) / totalStageW * renderW;
+        const propD = (p.depth || 1) / stageD * renderH;
         const rot = (p.rotation || 0) * Math.PI / 180;
 
         ctx.save();
@@ -1505,9 +2078,10 @@ const App: React.FC = () => {
           ctx.font = `${Math.round(9 * scale)}px sans-serif`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'top';
-          ctx.fillText(p.name, cx, cy + propD / 2 + 4 * scale);
+          ctx.fillText(p.name, cx, cy + propD / 2 + 4 * scale - propLift * scale * 2);
         }
       } else {
+        const performerLift = platformOccupancy.entityLiftById[p.id] ?? 0;
         ctx.fillStyle = p.color;
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 2 * scale;
@@ -1536,33 +2110,30 @@ const App: React.FC = () => {
           ctx.font = `${Math.round(10 * scale)}px sans-serif`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'top';
-          ctx.fillText(p.name, cx, cy + Math.floor(shapeSize / 2));
+          ctx.fillText(p.name, cx, cy + Math.floor(shapeSize / 2) - performerLift * scale * 2);
         }
       }
     });
 
     ctx.fillStyle = 'rgba(100,116,139,0.5)';
-    ctx.fillRect(0, h - 8 * scale, w, 8 * scale);
+    ctx.fillRect(renderX, renderY + renderH - 8 * scale, renderW, 8 * scale);
     ctx.fillStyle = '#ffffff';
     ctx.font = `${Math.round(10 * scale)}px sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'alphabetic';
-    ctx.fillText('舞台前沿', Math.floor(w / 2), h - 2 * scale);
+    ctx.fillText('舞台前沿', Math.floor(renderX + renderW / 2), renderY + renderH - 2 * scale);
   };
 
-  const handleSetInPoint = () => { setInPointMs(currentTime); };
-  const handleSetOutPoint = () => { setOutPointMs(currentTime); };
-
-  const handleExportVideo = async () => {
+  const handleExportVideo2D = async () => {
     if (inPointMs == null || outPointMs == null || outPointMs <= inPointMs) {
       if (inPointMs == null && outPointMs == null) {
-        alert('请先设置导出范围。\n\n1. 将播放头移动到视频开始位置，点击“设为入点”。\n2. 将播放头移动到视频结束位置，点击“设为出点”。\n3. 再点击“导出视频”。');
+        alert('请先设置导出范围。\n\n1. 将播放头移动到导出开始位置。\n2. 点击“导出视频”，在导出设置中把“入点”设为“当前”。\n3. 将播放头移动到导出结束位置，把“出点”设为“当前”。\n4. 再确认导出。');
       } else if (inPointMs == null) {
-        alert('还没有设置入点。\n\n将播放头移动到导出开始位置，然后点击时间轴上的“设为入点”。');
+        alert('还没有设置入点。\n\n将播放头移动到导出开始位置，打开“导出视频”，在导出设置中把“入点”设为“当前”。');
       } else if (outPointMs == null) {
-        alert('还没有设置出点。\n\n将播放头移动到导出结束位置，然后点击时间轴上的“设为出点”。');
+        alert('还没有设置出点。\n\n将播放头移动到导出结束位置，打开“导出视频”，在导出设置中把“出点”设为“当前”。');
       } else {
-        alert('导出范围无效：出点必须晚于入点。\n\n请把播放头移动到更靠后的位置，重新点击“设为出点”。');
+        alert('导出范围无效：出点必须晚于入点。\n\n请把播放头移动到更靠后的位置，在导出设置中把“出点”设为“当前”。');
       }
       return;
     }
@@ -1573,14 +2144,19 @@ const App: React.FC = () => {
     const totalFrames = Math.ceil(totalMs / 1000 * fps);
     const stepMs = 1000 / fps;
     const downloadBaseName = `choreomaster-export-${Math.round(inPointMs)}-${Math.round(outPointMs)}`;
+    const isDesktopElectron = Boolean(window.electronAPI?.isElectron);
     const hasWebCodecs = typeof VideoEncoder !== 'undefined';
     const showSaveFilePicker = (window as any).showSaveFilePicker as
       | ((options?: any) => Promise<any>)
       | undefined;
     let mp4Writable: any = null;
     let webmWritable: any = null;
+    let desktopExportPath: string | null = null;
 
-    if (showSaveFilePicker) {
+    if (window.electronAPI?.isElectron) {
+      desktopExportPath = await requestElectronExportPath(downloadBaseName, hasWebCodecs ? 'mp4' : 'webm');
+      if (!desktopExportPath) return;
+    } else if (showSaveFilePicker) {
       try {
         const handle = await showSaveFilePicker({
           suggestedName: `${downloadBaseName}.${hasWebCodecs ? 'mp4' : 'webm'}`,
@@ -1603,22 +2179,10 @@ const App: React.FC = () => {
     }
 
     setIsExporting(true);
-    setExportProgress(0);
+    setExportProgress(0.02);
 
-    // Pre-load prop textures
-    const texturePromises = performers
-      .filter(p => p.type === 'prop')
-      .map(async (p) => {
-        const texUrl = p.boxTextures?.front?.dataUrl || p.textureDataUrl;
-        if (!texUrl) return;
-        const img = new Image();
-        await new Promise<void>((resolve, reject) => {
-          img.onload = () => { (texUrl as any).loaded = img; resolve(); };
-          img.onerror = reject;
-          img.src = texUrl;
-        });
-      });
-    await Promise.all(texturePromises);
+    // Desktop 2D export intentionally ignores prop textures / LED media to keep the path stable.
+    const ledRenderer = isDesktopElectron ? null : await create2DExportLedRenderer();
 
     // Shared canvas for rendering (reused across both paths to avoid holding all frames in memory)
     const tmpCanvas = document.createElement('canvas');
@@ -1659,27 +2223,15 @@ const App: React.FC = () => {
     if (hasWebCodecs) {
       // --- WebCodecs + mp4-muxer (fast, offline) ---
       try {
-        const { Muxer, StreamTarget, FileSystemWritableFileStreamTarget } = await import('mp4-muxer');
+        const { Muxer, ArrayBufferTarget, FileSystemWritableFileStreamTarget } = await import('mp4-muxer');
 
         const hasAudio = audioBuffer != null && typeof AudioEncoder !== 'undefined';
         const sampleRate = audioBuffer?.sampleRate ?? 44100;
         const numChannels = audioBuffer?.numberOfChannels ?? 1;
-        const mp4Chunks: Uint8Array[] = [];
-        let mp4BytesWritten = 0;
-
+        const arrayBufferTarget = !mp4Writable ? new ArrayBufferTarget() : null;
         const target = mp4Writable
           ? new FileSystemWritableFileStreamTarget(mp4Writable, { chunkSize: 16 * 1024 * 1024 })
-          : new StreamTarget({
-            onData: (data: Uint8Array, position: number) => {
-              if (position !== mp4BytesWritten) {
-                throw new Error('MP4 stream wrote non-sequential data; cannot build download blob safely.');
-              }
-              mp4Chunks.push(data);
-              mp4BytesWritten += data.byteLength;
-            },
-            chunked: true,
-            chunkSize: 16 * 1024 * 1024,
-          });
+          : arrayBufferTarget;
         const muxer = new Muxer({
           target,
           video: { codec: 'avc', width, height },
@@ -1708,7 +2260,11 @@ const App: React.FC = () => {
 
         for (let i = 0; i <= totalFrames; i++) {
           const t = inPointMs + i * stepMs;
-          renderFrameToCanvas(tmpCanvas, Math.min(t, outPointMs), { includeLabels: exportIncludeLabels, includeGrid: exportIncludeGrid });
+          await renderFrameToCanvas(tmpCanvas, Math.min(t, outPointMs), {
+            includeLabels: exportIncludeLabels,
+            includeGrid: exportIncludeGrid,
+            ledRenderer,
+          });
           const frame = await createFrameFromCanvas((i * 1_000_000) / fps, 1_000_000 / fps);
           videoEncoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
           frame.close();
@@ -1717,7 +2273,7 @@ const App: React.FC = () => {
           if (i % 30 === 0) await new Promise(r => setTimeout(r, 0));
         }
 
-        await videoEncoder.flush();
+        await withTimeout(videoEncoder.flush(), 15000, '2D 视频编码');
         videoEncoder.close();
 
         // --- Step 2: Encode audio (after video is fully flushed) ---
@@ -1775,39 +2331,65 @@ const App: React.FC = () => {
           }
 
           setExportProgress(0.95);
-          await audioEncoder.flush();
+          await withTimeout(audioEncoder.flush(), 15000, '2D 音频编码');
           audioEncoder.close();
         }
 
         muxer.finalize();
         if (mp4Writable) {
           await mp4Writable.close();
+        } else if (arrayBufferTarget) {
+          const bytes = new Uint8Array(arrayBufferTarget.buffer);
+          if (desktopExportPath) {
+            await window.electronAPI.writeBinaryFile(desktopExportPath, bytes);
+          } else {
+            downloadBlob(new Blob([bytes], { type: 'video/mp4' }), `${downloadBaseName}.mp4`);
+          }
         } else {
-          const blob = new Blob(mp4Chunks, { type: 'video/mp4' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `${downloadBaseName}.mp4`;
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          URL.revokeObjectURL(url);
+          throw new Error('MP4 export target was not initialized.');
         }
 
         setIsExporting(false);
         setExportProgress(1);
+        ledRenderer?.dispose();
         return;
       } catch (err) {
         if (mp4Writable) {
           try { await mp4Writable.abort?.(); } catch { }
           mp4Writable = null;
         }
+        ledRenderer?.dispose();
         console.error('WebCodecs export failed, falling back to MediaRecorder:', err);
         alert('高速导出失败，已回退到实时录制模式。\n错误: ' + (err instanceof Error ? err.message : String(err)));
       }
     }
 
     // --- Fallback: MediaRecorder (real-time playback, render on-the-fly) ---
+    if (hasWebCodecs) {
+      if (window.electronAPI?.isElectron) {
+        desktopExportPath = await requestElectronExportPath(downloadBaseName, 'webm');
+        if (!desktopExportPath) {
+          setIsExporting(false);
+          return;
+        }
+      } else if (showSaveFilePicker && !webmWritable) {
+        try {
+          const handle = await showSaveFilePicker({
+            suggestedName: `${downloadBaseName}.webm`,
+            types: [{
+              description: 'WebM video',
+              accept: { 'video/webm': ['.webm'] },
+            }],
+          });
+          webmWritable = await handle.createWritable();
+        } catch (err) {
+          setIsExporting(false);
+          if (err instanceof DOMException && err.name === 'AbortError') return;
+          console.warn('WebM file picker unavailable, falling back to in-memory download:', err);
+        }
+      }
+    }
+
     const streamV = (tmpCanvas as any).captureStream ? (tmpCanvas as any).captureStream(fps) : null;
     if (!streamV) {
       if (webmWritable) {
@@ -1850,25 +2432,30 @@ const App: React.FC = () => {
     if (source) source.start(0, inPointMs / 1000);
 
     const recordStart = performance.now();
-    const drawFrame = () => {
+    const drawFrame = async () => {
       const elapsed = performance.now() - recordStart;
       const currentFrameIdx = Math.min(Math.floor(elapsed / stepMs), totalFrames);
       const t = Math.min(inPointMs + currentFrameIdx * stepMs, outPointMs);
-      renderFrameToCanvas(tmpCanvas, t, { includeLabels: exportIncludeLabels, includeGrid: exportIncludeGrid });
+      await renderFrameToCanvas(tmpCanvas, t, {
+        includeLabels: exportIncludeLabels,
+        includeGrid: exportIncludeGrid,
+        ledRenderer,
+      });
       setExportProgress(0.7 + Math.min(0.3, (currentFrameIdx / totalFrames) * 0.3));
 
       if (elapsed < totalMs + stepMs) {
-        requestAnimationFrame(drawFrame);
+        requestAnimationFrame(() => { void drawFrame(); });
       } else {
         recorder.stop();
         if (source) { try { source.stop(); } catch { } }
       }
     };
-    requestAnimationFrame(drawFrame);
+    requestAnimationFrame(() => { void drawFrame(); });
 
     let blob: Blob;
     try {
-      blob = await new Promise<Blob>((resolve, reject) => {
+      blob = await withTimeout(new Promise<Blob>((resolve, reject) => {
+        recorder.onerror = (event) => reject((event as any).error || new Error('MediaRecorder 导出失败'));
         recorder.onstop = () => {
           webmWriteChain
             .then(async () => {
@@ -1886,29 +2473,459 @@ const App: React.FC = () => {
               reject(err);
             });
         };
-      });
+      }), Math.max(totalMs + 15000, 30000), '2D 实时录制');
     } catch (err) {
+      stream.getTracks().forEach((track) => track.stop());
+      offline.dispose();
       setIsExporting(false);
       alert('实时录制导出失败：' + (err instanceof Error ? err.message : String(err)));
       return;
     }
 
+    stream.getTracks().forEach((track) => track.stop());
     setIsExporting(false);
     setExportProgress(1);
 
     if (!webmWritable) {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${downloadBaseName}.webm`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      if (desktopExportPath) {
+        await writeBlobToElectronPath(desktopExportPath, blob);
+      } else {
+        downloadBlob(blob, `${downloadBaseName}.webm`);
+      }
     }
   };
 
+  const handleExportVideo3D = async () => {
+    if (inPointMs == null || outPointMs == null || outPointMs <= inPointMs) return;
+
+    const width = exportResolution === '4k' ? 3840 : exportResolution === '2k' ? 2560 : 1920;
+    const height = exportResolution === '4k' ? 2160 : exportResolution === '2k' ? 1440 : 1080;
+    const fps = 30;
+    const totalMs = outPointMs - inPointMs;
+    const totalFrames = Math.ceil(totalMs / 1000 * fps);
+    const stepMs = 1000 / fps;
+    const downloadBaseName = `choreomaster-3d-${exportCameraAngle}-${Math.round(inPointMs)}-${Math.round(outPointMs)}`;
+    const hasWebCodecs = typeof VideoEncoder !== 'undefined';
+    const showSaveFilePicker = (window as any).showSaveFilePicker as
+      | ((options?: any) => Promise<any>)
+      | undefined;
+    let mp4Writable: any = null;
+    let webmWritable: any = null;
+    let desktopExportPath: string | null = null;
+
+    if (window.electronAPI?.isElectron) {
+      desktopExportPath = await requestElectronExportPath(downloadBaseName, hasWebCodecs ? 'mp4' : 'webm');
+      if (!desktopExportPath) return;
+    } else if (showSaveFilePicker) {
+      try {
+        const handle = await showSaveFilePicker({
+          suggestedName: `${downloadBaseName}.${hasWebCodecs ? 'mp4' : 'webm'}`,
+          types: [{
+            description: hasWebCodecs ? 'MP4 video' : 'WebM video',
+            accept: hasWebCodecs
+              ? { 'video/mp4': ['.mp4'] }
+              : { 'video/webm': ['.webm'] },
+          }],
+        });
+        if (hasWebCodecs) {
+          mp4Writable = await handle.createWritable();
+        } else {
+          webmWritable = await handle.createWritable();
+        }
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        console.warn('Streaming file picker unavailable, falling back to in-memory download:', err);
+      }
+    }
+
+    setIsExporting(true);
+    setExportProgress(0);
+
+    // Pre-load resources
+    setExportProgress(0.03);
+    await Promise.all([
+      preloadPropTextures(performers),
+      preloadLEDVideo(stageConfig, mediaCache),
+    ]);
+    setExportProgress(0.08);
+
+    // Create offline 3D scene
+    const offline = createOfflineScene(
+      width, height, stageConfig, performers, exportCameraAngle, gridScale, mediaCache, exportIncludeGrid, exportIncludeLabels,
+    );
+
+    // Pre-capture LED video frames for fast export (seeks once, then uses cache)
+    try {
+      await withTimeout(offline.prerenderLEDVideo(inPointMs, outPointMs, fps), 10000, '3D LED 预处理');
+    } catch (err) {
+      console.warn('3D LED pre-render timed out, continuing without cache:', err);
+    }
+    setExportProgress(0.12);
+
+    // Helper: compute hidden groups at a given time
+    const getHiddenGroups = (timeMs: number): string[] => {
+      const sortedFrames = [...frames].sort((a, b) => a.startTime - b.startTime);
+      const frame = sortedFrames.find(f => timeMs >= f.startTime && timeMs < f.startTime + f.duration)
+        || [...sortedFrames].reverse().find(f => f.startTime + f.duration <= timeMs);
+      return frame?.hiddenGroupIds || [];
+    };
+
+    // Canvas for capturing WebGL output
+    const tmpCanvas = document.createElement('canvas');
+    tmpCanvas.width = width;
+    tmpCanvas.height = height;
+
+    const waitForEncoderQueueBelow = async (encoder: VideoEncoder | AudioEncoder, maxQueueSize: number) => {
+      while (encoder.encodeQueueSize > maxQueueSize) {
+        await new Promise<void>(resolve => {
+          let settled = false;
+          const cleanup = () => {
+            if (settled) return;
+            settled = true;
+            encoder.removeEventListener('dequeue', onDequeue);
+            clearTimeout(timeoutId);
+            resolve();
+          };
+          const onDequeue = () => cleanup();
+          const timeoutId = window.setTimeout(cleanup, 50);
+          encoder.addEventListener('dequeue', onDequeue, { once: true });
+        });
+      }
+    };
+
+    const createFrameFromCanvas = async (timestamp: number, duration: number) => {
+      try {
+        return new VideoFrame(tmpCanvas, { timestamp, duration });
+      } catch {
+        const bitmap = await createImageBitmap(tmpCanvas);
+        try {
+          return new VideoFrame(bitmap, { timestamp, duration });
+        } finally {
+          bitmap.close();
+        }
+      }
+    };
+
+    if (hasWebCodecs) {
+      // --- WebCodecs + mp4-muxer (fast, offline) ---
+      try {
+        const { Muxer, ArrayBufferTarget, FileSystemWritableFileStreamTarget } = await import('mp4-muxer');
+
+        const hasAudio = audioBuffer != null && typeof AudioEncoder !== 'undefined';
+        const sampleRate = audioBuffer?.sampleRate ?? 44100;
+        const numChannels = audioBuffer?.numberOfChannels ?? 1;
+        const arrayBufferTarget = !mp4Writable ? new ArrayBufferTarget() : null;
+        const target = mp4Writable
+          ? new FileSystemWritableFileStreamTarget(mp4Writable, { chunkSize: 16 * 1024 * 1024 })
+          : arrayBufferTarget;
+        const muxer = new Muxer({
+          target,
+          video: { codec: 'avc', width, height },
+          audio: hasAudio ? {
+            codec: 'aac',
+            numberOfChannels: numChannels,
+            sampleRate,
+          } : undefined,
+          fastStart: false,
+          firstTimestampBehavior: 'offset',
+        });
+
+        // --- Step 1: Render + Encode video ---
+        const videoEncoder = new VideoEncoder({
+          output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+          error: (e) => console.error('VideoEncoder error:', e),
+        });
+        videoEncoder.configure({
+          codec: exportResolution === '4k' ? 'avc1.640033' : exportResolution === '2k' ? 'avc1.640032' : 'avc1.640028',
+          width,
+          height,
+          bitrate: exportResolution === '4k' ? 20_000_000 : exportResolution === '2k' ? 10_000_000 : 5_000_000,
+          bitrateMode: 'constant',
+          framerate: fps,
+        });
+
+        for (let i = 0; i <= totalFrames; i++) {
+          const t = inPointMs + i * stepMs;
+          const clampedT = Math.min(t, outPointMs);
+          const positions = computePositionsAtTime(clampedT);
+          const hiddenGroupIds = getHiddenGroups(clampedT);
+
+          // Update scene and render (await LED video seek if present)
+          offline.updateAtTime(clampedT, positions, hiddenGroupIds);
+          offline.renderer.render(offline.scene, offline.camera);
+
+          // Copy WebGL canvas to tmpCanvas for VideoFrame
+          const ctx = tmpCanvas.getContext('2d')!;
+          ctx.clearRect(0, 0, width, height);
+          ctx.drawImage(offline.renderer.domElement, 0, 0);
+
+          const frame = await createFrameFromCanvas((i * 1_000_000) / fps, 1_000_000 / fps);
+          videoEncoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
+          frame.close();
+          await waitForEncoderQueueBelow(videoEncoder, 8);
+          setExportProgress((i / (totalFrames + 1)) * 0.7);
+          if (i % 30 === 0) await new Promise(r => setTimeout(r, 0));
+        }
+
+        await withTimeout(videoEncoder.flush(), 15000, '3D 视频编码');
+        videoEncoder.close();
+
+        // --- Step 2: Encode audio (after video is fully flushed) ---
+        if (hasAudio) {
+          const audioEncoder = new AudioEncoder({
+            output: (chunk, meta) => muxer.addAudioChunk(chunk, meta),
+            error: (e) => console.error('AudioEncoder error:', e),
+          });
+          audioEncoder.configure({
+            codec: 'mp4a.40.2',
+            numberOfChannels: numChannels,
+            sampleRate,
+            bitrate: 128_000,
+          });
+
+          const audioInSamples = Math.floor(inPointMs / 1000 * sampleRate);
+          const audioOutSamples = Math.floor(outPointMs / 1000 * sampleRate);
+          const aacFrameSize = 1024;
+          const totalAudioChunks = Math.ceil((audioOutSamples - audioInSamples) / aacFrameSize);
+
+          const channelData: Float32Array[] = [];
+          for (let ch = 0; ch < numChannels; ch++) {
+            channelData.push(audioBuffer!.getChannelData(ch));
+          }
+
+          for (let base = 0; base < totalAudioChunks; base++) {
+            const sampleStart = audioInSamples + base * aacFrameSize;
+            if (sampleStart >= audioOutSamples) break;
+
+            const data = new Float32Array(numChannels * aacFrameSize);
+            for (let ch = 0; ch < numChannels; ch++) {
+              const src = channelData[ch];
+              const off = ch * aacFrameSize;
+              for (let s = 0; s < aacFrameSize; s++) {
+                data[off + s] = (sampleStart + s < src.length) ? src[sampleStart + s] : 0;
+              }
+            }
+
+            const audioData = new AudioData({
+              format: 'f32-planar',
+              sampleRate,
+              numberOfFrames: aacFrameSize,
+              numberOfChannels: numChannels,
+              timestamp: (base * aacFrameSize * 1_000_000) / sampleRate,
+              data,
+            });
+            audioEncoder.encode(audioData);
+            audioData.close();
+            await waitForEncoderQueueBelow(audioEncoder, 32);
+
+            if (base % 100 === 0) {
+              setExportProgress(0.85 + (base / totalAudioChunks) * 0.1);
+              await new Promise(r => setTimeout(r, 0));
+            }
+          }
+
+          setExportProgress(0.95);
+          await withTimeout(audioEncoder.flush(), 15000, '3D 音频编码');
+          audioEncoder.close();
+        }
+
+        muxer.finalize();
+        if (mp4Writable) {
+          await mp4Writable.close();
+        } else if (arrayBufferTarget) {
+          const bytes = new Uint8Array(arrayBufferTarget.buffer);
+          if (desktopExportPath) {
+            await window.electronAPI.writeBinaryFile(desktopExportPath, bytes);
+          } else {
+            downloadBlob(new Blob([bytes], { type: 'video/mp4' }), `${downloadBaseName}.mp4`);
+          }
+        } else {
+          throw new Error('MP4 export target was not initialized.');
+        }
+
+        offline.dispose();
+        setIsExporting(false);
+        setExportProgress(1);
+        return;
+      } catch (err) {
+        if (mp4Writable) {
+          try { await mp4Writable.abort?.(); } catch { }
+          mp4Writable = null;
+        }
+        console.error('WebCodecs 3D export failed, falling back to MediaRecorder:', err);
+        alert('高速导出失败，已回退到实时录制模式。\n错误: ' + (err instanceof Error ? err.message : String(err)));
+      }
+    }
+
+    // --- Fallback: MediaRecorder (real-time rendering) ---
+    if (hasWebCodecs) {
+      if (window.electronAPI?.isElectron) {
+        desktopExportPath = await requestElectronExportPath(downloadBaseName, 'webm');
+        if (!desktopExportPath) {
+          offline.dispose();
+          setIsExporting(false);
+          return;
+        }
+      } else if (showSaveFilePicker && !webmWritable) {
+        try {
+          const handle = await showSaveFilePicker({
+            suggestedName: `${downloadBaseName}.webm`,
+            types: [{
+              description: 'WebM video',
+              accept: { 'video/webm': ['.webm'] },
+            }],
+          });
+          webmWritable = await handle.createWritable();
+        } catch (err) {
+          if (err instanceof DOMException && err.name === 'AbortError') {
+            offline.dispose();
+            setIsExporting(false);
+            return;
+          }
+          console.warn('WebM file picker unavailable, falling back to in-memory download:', err);
+        }
+      }
+    }
+
+    const streamV = (offline.renderer.domElement as any).captureStream
+      ? (offline.renderer.domElement as any).captureStream(fps)
+      : null;
+    if (!streamV) {
+      if (webmWritable) {
+        try { await webmWritable.abort?.(); } catch { }
+      }
+      offline.dispose();
+      setIsExporting(false);
+      return;
+    }
+
+    const audioCtx = audioContextRef.current;
+    let stream: MediaStream = streamV;
+    let source: AudioBufferSourceNode | null = null;
+    if (audioCtx && audioBuffer) {
+      if (audioCtx.state === 'suspended') {
+        try { await audioCtx.resume(); } catch { }
+      }
+      const dest = audioCtx.createMediaStreamDestination();
+      source = audioCtx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(dest);
+      source.connect(audioCtx.destination);
+      stream = new MediaStream([...streamV.getVideoTracks(), ...dest.stream.getAudioTracks()]);
+    }
+
+    const mimeCandidates = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+    const mime = mimeCandidates.find(m => MediaRecorder.isTypeSupported(m)) || 'video/webm';
+    const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 5000000 });
+    const chunks: Blob[] = [];
+    let webmWriteChain = Promise.resolve();
+    recorder.ondataavailable = (e: any) => {
+      if (!e.data || e.data.size <= 0) return;
+      if (webmWritable) {
+        webmWriteChain = webmWriteChain.then(() => webmWritable.write(e.data));
+      } else {
+        chunks.push(e.data);
+      }
+    };
+
+    recorder.start(100);
+    if (source) source.start(0, inPointMs / 1000);
+
+    const recordStart = performance.now();
+    const drawFrame = async () => {
+      const elapsed = performance.now() - recordStart;
+      const currentFrameIdx = Math.min(Math.floor(elapsed / stepMs), totalFrames);
+      const t = Math.min(inPointMs + currentFrameIdx * stepMs, outPointMs);
+      const positions = computePositionsAtTime(t);
+      const hiddenGroupIds = getHiddenGroups(t);
+
+      offline.updateAtTime(t, positions, hiddenGroupIds);
+      offline.renderer.render(offline.scene, offline.camera);
+
+      setExportProgress(0.7 + Math.min(0.3, (currentFrameIdx / totalFrames) * 0.3));
+
+      if (elapsed < totalMs + stepMs) {
+        requestAnimationFrame(drawFrame);
+      } else {
+        recorder.stop();
+        if (source) { try { source.stop(); } catch { } }
+        offline.dispose();
+      }
+    };
+    requestAnimationFrame(drawFrame);
+
+    let blob: Blob;
+    try {
+      blob = await withTimeout(new Promise<Blob>((resolve, reject) => {
+        recorder.onerror = (event) => reject((event as any).error || new Error('MediaRecorder 导出失败'));
+        recorder.onstop = () => {
+          webmWriteChain
+            .then(async () => {
+              if (webmWritable) {
+                await webmWritable.close();
+                resolve(new Blob([], { type: mime }));
+              } else {
+                resolve(new Blob(chunks, { type: mime }));
+              }
+            })
+            .catch(async err => {
+              if (webmWritable) {
+                try { await webmWritable.abort?.(); } catch { }
+              }
+              reject(err);
+            });
+        };
+      }), Math.max(totalMs + 15000, 30000), '3D 实时录制');
+    } catch (err) {
+      stream.getTracks().forEach((track) => track.stop());
+      ledRenderer?.dispose();
+      setIsExporting(false);
+      alert('实时录制导出失败：' + (err instanceof Error ? err.message : String(err)));
+      return;
+    }
+
+    stream.getTracks().forEach((track) => track.stop());
+    setIsExporting(false);
+    setExportProgress(1);
+    ledRenderer?.dispose();
+
+    if (!webmWritable) {
+      if (desktopExportPath) {
+        await writeBlobToElectronPath(desktopExportPath, blob);
+      } else {
+        downloadBlob(blob, `${downloadBaseName}.webm`);
+      }
+    }
+  };
+
+  const handleOpenExportModal = () => {
+    const projectDuration = Math.max(
+      totalDuration,
+      audioBuffer ? audioBuffer.duration * 1000 : 0,
+      1000,
+    );
+    if (inPointMs == null) setInPointMs(0);
+    if (outPointMs == null || outPointMs <= (inPointMs ?? 0)) setOutPointMs(projectDuration);
+    setShowExportModal(true);
+  };
+
+  const handleConfirmExport = async () => {
+    if (inPointMs == null || outPointMs == null || outPointMs <= inPointMs) {
+      alert('请设置有效的导出入点和出点，出点必须晚于入点。');
+      return;
+    }
+    if (!export2D && !export3D) {
+      alert('请至少选择一种输出：2D 视频或 3D 视频。');
+      return;
+    }
+
+    setShowExportModal(false);
+    if (export2D) await handleExportVideo2D();
+    if (export3D) await handleExportVideo3D();
+  };
+
   const handleSelectFrame = (id: string) => {
+    setSelectedPerformerIds([]);
     setCurrentFrameId(id);
     const f = frames.find(fr => fr.id === id);
     if (f) {
@@ -1935,35 +2952,75 @@ const App: React.FC = () => {
     });
   };
 
+  const cycleTimelineHeight = () => {
+    if (timelineCollapsed) {
+      setTimelineCollapsed(false);
+      setTimelineHeight(previousTimelineHeightRef.current);
+      return;
+    }
+    const presets = isCompactLayout ? [132, 200, 320] : [152, 220, 300];
+    const next = presets.find((height) => height > timelineHeight + 12) ?? presets[0];
+    setTimelineHeight(next);
+  };
+
+  const toggleTimelineVisibility = () => {
+    setTimelineCollapsed((collapsed) => {
+      if (collapsed) {
+        setTimelineHeight(previousTimelineHeightRef.current);
+        return false;
+      }
+      previousTimelineHeightRef.current = timelineHeight;
+      return true;
+    });
+  };
+
   // Always use currentPositions() to ensure scrubbing shows real-time interpolation
   const displayedPositions = currentPositions();
 
   // Determine total duration for Timeline rendering
-  const totalDuration = frames.length > 0
-    ? frames[frames.length - 1].startTime + frames[frames.length - 1].duration
-    : 0;
+  const totalDuration = frames.reduce(
+    (maximum, frame) => Math.max(maximum, frame.startTime + frame.duration),
+    0,
+  );
 
   return (
-    <div className={`h-screen w-screen flex flex-col ${theme === 'dark' ? 'bg-slate-950 text-slate-200' : 'bg-gray-50 text-gray-900'} overflow-hidden`}>
+    <div className={`min-h-[100dvh] h-[100dvh] w-screen flex flex-col safe-top safe-bottom ${theme === 'dark' ? 'bg-slate-950 text-slate-200' : 'bg-gray-50 text-gray-900'} overflow-hidden`}>
       {/* Help Modal */}
       <HelpModal isOpen={showHelp} onClose={() => setShowHelp(false)} />
 
       {/* Top Bar */}
-      <div className={`h-12 flex items-center justify-between px-4 border-b ${theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-gray-200'}`}>
-        <div className="flex items-center gap-2">
-          <h1 className={`text-lg font-bold ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>CosFormation</h1>
-        </div>
+      <div className={`min-h-12 flex items-center justify-between px-3 sm:px-4 border-b ${theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-gray-200'}`}>
         <div className="flex items-center gap-2">
           <button
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            className={`compact-only touch-target -ml-2 items-center justify-center rounded-lg ${theme === 'dark' ? 'text-slate-300 hover:bg-slate-800' : 'text-gray-700 hover:bg-gray-100'}`}
+            aria-label={sidebarCollapsed ? '打开侧栏' : '关闭侧栏'}
+          >
+            {sidebarCollapsed ? <Menu size={22} /> : <X size={22} />}
+          </button>
+          <h1 className={`text-base sm:text-lg font-bold ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>CosFormation</h1>
+        </div>
+        <div className="flex items-center gap-2">
+          {installPrompt && (
+            <button
+              onClick={handleInstallPwa}
+              className="touch-target flex items-center justify-center gap-1.5 rounded-lg px-2 text-xs text-blue-300 hover:bg-slate-800 hover:text-blue-200"
+              title="安装 ChoreoMaster"
+            >
+              <Download size={18} />
+              <span className="desktop-only">安装</span>
+            </button>
+          )}
+          <button
             onClick={() => setShowHelp(true)}
-            className={`p-2 rounded-lg transition-colors ${theme === 'dark' ? 'hover:bg-slate-800 text-slate-400 hover:text-blue-400' : 'hover:bg-gray-100 text-gray-600 hover:text-blue-600'}`}
+            className={`touch-target flex items-center justify-center rounded-lg transition-colors ${theme === 'dark' ? 'hover:bg-slate-800 text-slate-400 hover:text-blue-400' : 'hover:bg-gray-100 text-gray-600 hover:text-blue-600'}`}
             title="帮助 (F1)"
           >
             <HelpCircle size={20} />
           </button>
           <button
             onClick={() => setViewMode(viewMode === '2d' ? '3d' : '2d')}
-            className={`p-2 rounded-lg transition-colors ${viewMode === '3d'
+            className={`touch-target flex items-center justify-center rounded-lg transition-colors ${viewMode === '3d'
               ? 'bg-purple-600 text-white hover:bg-purple-500'
               : theme === 'dark'
                 ? 'hover:bg-slate-800 text-slate-400 hover:text-purple-400'
@@ -1975,7 +3032,7 @@ const App: React.FC = () => {
           </button>
           <button
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            className={`p-2 rounded-lg transition-colors ${theme === 'dark' ? 'hover:bg-slate-800 text-slate-400 hover:text-green-400' : 'hover:bg-gray-100 text-gray-600 hover:text-green-600'}`}
+            className={`desktop-only touch-target flex items-center justify-center rounded-lg transition-colors ${theme === 'dark' ? 'hover:bg-slate-800 text-slate-400 hover:text-green-400' : 'hover:bg-gray-100 text-gray-600 hover:text-green-600'}`}
             title={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
           >
             <Maximize2 size={20} />
@@ -1984,7 +3041,7 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden relative">
         {!sidebarCollapsed && (
           <Sidebar
             performers={performers}
@@ -2001,6 +3058,9 @@ const App: React.FC = () => {
             onImportMusic={handleImportMusic}
             onExport={handleExportProject}
             onImportProject={handleImportProject}
+            onImportProjectPackage={handleImportProjectPackage}
+            onImportLegacyProject={handleImportLegacyProject}
+            onExportProjectPackage={handleExportProjectPackage}
             selectedPerformerIds={selectedPerformerIds}
             onSelectionChange={setSelectedPerformerIds}
             musicName={musicName}
@@ -2037,16 +3097,18 @@ const App: React.FC = () => {
             onLoadTemplate={handleLoadTemplate}
             onSaveProject={handleSaveProject}
             projectHasChanges={projectHasChanges}
+            isCompactLayout={isCompactLayout}
           />)}
-        {!sidebarCollapsed && (
+        {!sidebarCollapsed && !isCompactLayout && (
           <div
-            onMouseDown={(e) => {
+            onPointerDown={(e) => {
               e.preventDefault();
               const startX = e.clientX;
               const startW = sidebarWidth;
+              e.currentTarget.setPointerCapture(e.pointerId);
               document.body.style.cursor = 'ew-resize';
               document.body.style.userSelect = 'none';
-              const onMove = (ev: MouseEvent) => {
+              const onMove = (ev: PointerEvent) => {
                 const dx = ev.clientX - startX;
                 const next = Math.max(240, Math.min(480, startW + dx));
                 setSidebarWidth(next);
@@ -2054,11 +3116,11 @@ const App: React.FC = () => {
               const onUp = () => {
                 document.body.style.cursor = '';
                 document.body.style.userSelect = '';
-                window.removeEventListener('mousemove', onMove);
-                window.removeEventListener('mouseup', onUp);
+                window.removeEventListener('pointermove', onMove);
+                window.removeEventListener('pointerup', onUp);
               };
-              window.addEventListener('mousemove', onMove);
-              window.addEventListener('mouseup', onUp);
+              window.addEventListener('pointermove', onMove);
+              window.addEventListener('pointerup', onUp);
             }}
             className={`${theme === 'dark' ? 'bg-slate-800 hover:bg-blue-600' : 'bg-gray-300 hover:bg-blue-500'} w-1.5 cursor-ew-resize transition-colors flex-shrink-0 group relative`}
             title="拖动调整侧边栏宽度"
@@ -2072,8 +3134,9 @@ const App: React.FC = () => {
           </div>
         )}
 
-        <div className={`flex-1 flex flex-col relative ${theme === 'dark' ? 'bg-black' : 'bg-gray-100'}`}>
-          <div className="absolute top-4 left-4 z-10 pointer-events-none">
+        <div className={`min-w-0 flex-1 flex flex-col relative ${theme === 'dark' ? 'bg-black' : 'bg-gray-100'}`}>
+          <div className="min-h-0 flex-1 flex flex-col relative">
+          <div className="stage-status absolute top-4 left-4 z-10 pointer-events-none">
             <div className={`backdrop-blur px-4 py-2 rounded-lg border text-sm shadow-xl ${theme === 'dark' ? 'bg-slate-900/90 border-slate-700 text-slate-400' : 'bg-white/90 border-gray-300 text-gray-700'}`}>
               正在编辑队形：<span className="text-blue-400 font-bold ml-1">{frames.find(f => f.id === currentFrameId)?.name || '过渡/GAP'}</span>
               <div className={`text-[10px] mt-1 ${theme === 'dark' ? 'text-slate-500' : 'text-gray-500'}`}>{selectedPerformerIds.length} 人已选中</div>
@@ -2089,13 +3152,14 @@ const App: React.FC = () => {
               selectedPerformerIds={selectedPerformerIds}
               onSelectionChange={setSelectedPerformerIds}
               onPositionChange={handlePositionChange}
+              onDragStart={handleStageDragStart}
+              onDragEnd={handleStageDragEnd}
               onUpdatePerformer={handleUpdatePerformer}
               readonly={isPlaying}
               showLabels={showLabels}
               gridScale={gridScale}
               onZoom={handleGridZoom}
-              aspectRatio={stageAspectRatio}
-              maxWidthPx={stageMaxWidth}
+              stageConfig={stageConfig}
             />
           ) : (
             <Stage3D
@@ -2105,6 +3169,8 @@ const App: React.FC = () => {
               onSelect={setSelectedPerformerIds}
               hiddenGroupIds={activeHiddenGroupIds}
               onPositionChange={handlePositionChange}
+              onDragStart={handleStageDragStart}
+              onDragEnd={handleStageDragEnd}
               onUpdatePerformer={handleUpdatePerformer}
               onRemovePerformer={handleRemovePerformer}
               stageConfig={stageConfig}
@@ -2117,44 +3183,84 @@ const App: React.FC = () => {
           )}
 
           <div
-            onMouseDown={(e) => {
+            onPointerDown={(e) => {
+              e.preventDefault();
+              if (timelineCollapsed) {
+                setTimelineCollapsed(false);
+                setTimelineHeight(previousTimelineHeightRef.current);
+                return;
+              }
               const startY = e.clientY;
               const startH = timelineHeight;
-              const onMove = (ev: MouseEvent) => {
+              let moved = false;
+              e.currentTarget.setPointerCapture(e.pointerId);
+              const onMove = (ev: PointerEvent) => {
                 const dy = ev.clientY - startY;
-                const next = Math.max(100, Math.min(300, startH - dy));
+                if (Math.abs(dy) > 4) moved = true;
+                const minimum = isCompactLayout ? 132 : 152;
+                const maximum = Math.min(
+                  isCompactLayout ? 360 : 300,
+                  Math.round(window.innerHeight * 0.58),
+                );
+                const next = Math.max(minimum, Math.min(maximum, startH - dy));
                 setTimelineHeight(next);
               };
               const onUp = () => {
-                window.removeEventListener('mousemove', onMove);
-                window.removeEventListener('mouseup', onUp);
+                window.removeEventListener('pointermove', onMove);
+                window.removeEventListener('pointerup', onUp);
+                window.removeEventListener('pointercancel', onUp);
+                if (!moved) cycleTimelineHeight();
               };
-              window.addEventListener('mousemove', onMove);
-              window.addEventListener('mouseup', onUp);
+              window.addEventListener('pointermove', onMove);
+              window.addEventListener('pointerup', onUp);
+              window.addEventListener('pointercancel', onUp);
             }}
-            className={`h-2 cursor-ns-resize ${theme === 'dark' ? 'bg-slate-800 hover:bg-slate-700' : 'bg-gray-300 hover:bg-gray-400'}`}
-          />
+            className={`timeline-resizer relative z-30 h-7 min-h-7 cursor-ns-resize touch-none flex items-center justify-center transition-colors ${theme === 'dark' ? 'bg-slate-800 hover:bg-slate-700' : 'bg-gray-300 hover:bg-gray-400'}`}
+            role="slider"
+            aria-label="调整时间轴高度"
+            aria-valuemin={isCompactLayout ? 132 : 152}
+            aria-valuemax={isCompactLayout ? 360 : 300}
+            aria-valuenow={timelineCollapsed ? 0 : Math.round(timelineHeight)}
+            title="上下拖动调整时间轴高度，轻点切换高度"
+          >
+            <div className={`timeline-resizer-control flex h-6 min-w-32 items-center justify-center gap-1 rounded-full border pl-3 pr-1 text-[10px] shadow ${theme === 'dark' ? 'border-slate-600 bg-slate-900 text-slate-300' : 'border-gray-300 bg-white text-gray-600'}`}>
+              <GripHorizontal className="pointer-events-none" size={16} />
+              <span className="pointer-events-none">{timelineCollapsed ? '时间轴已隐藏' : `时间轴 ${Math.round(timelineHeight)}px`}</span>
+              <button
+                type="button"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={toggleTimelineVisibility}
+                className={`ml-1 flex h-5 w-7 items-center justify-center rounded-full transition-colors ${theme === 'dark' ? 'hover:bg-slate-700' : 'hover:bg-gray-100'}`}
+                aria-label={timelineCollapsed ? '展开时间轴' : '隐藏时间轴'}
+                title={timelineCollapsed ? '展开时间轴' : '隐藏时间轴'}
+              >
+                {timelineCollapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              </button>
+            </div>
+          </div>
 
           {/* Floating Stage Toolbar */}
-          <div className={`absolute bottom-4 right-4 z-20 backdrop-blur p-2 rounded-lg border shadow-xl animate-in fade-in slide-in-from-bottom-4 ${theme === 'dark' ? 'bg-slate-900/90 border-slate-700' : 'bg-white/90 border-gray-300'}`}>
+          <div className={`stage-toolbar absolute bottom-3 right-3 z-20 backdrop-blur p-1.5 lg:p-2 rounded-lg border shadow-xl animate-in fade-in slide-in-from-bottom-4 mobile-compact-scroll ${theme === 'dark' ? 'bg-slate-900/90 border-slate-700' : 'bg-white/90 border-gray-300'}`}>
             {stageToolbarCollapsed ? (
               <button
                 onClick={() => setStageToolbarCollapsed(false)}
-                className={`${theme === 'dark' ? 'text-slate-300 hover:text-white' : 'text-gray-600 hover:text-gray-900'} p-1 rounded`}
-                title="展开工具栏"
+                className={`${theme === 'dark' ? 'text-slate-300 hover:bg-slate-700 hover:text-white' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'} flex h-9 w-9 items-center justify-center rounded-full transition-colors`}
+                title="打开舞台设置"
+                aria-label="打开舞台设置"
               >
-                <ChevronUp size={16} />
+                <SlidersHorizontal size={17} />
               </button>
             ) : (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 min-w-max">
                 <button
                   onClick={() => setStageToolbarCollapsed(true)}
-                  className={`${theme === 'dark' ? 'text-slate-300 hover:text-white' : 'text-gray-600 hover:text-gray-900'} p-1 rounded`}
-                  title="收起工具栏"
+                  className={`${theme === 'dark' ? 'bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-900'} flex h-8 w-8 items-center justify-center rounded-full transition-colors`}
+                  title="收起舞台设置"
+                  aria-label="收起舞台设置"
                 >
-                  <ChevronDown size={16} />
+                  <SlidersHorizontal size={16} />
                 </button>
-                <div className={`w-px h-6 mx-1 ${theme === 'dark' ? 'bg-slate-700' : 'bg-gray-300'}`}></div>
+                <div className={`desktop-only w-px h-6 mx-1 ${theme === 'dark' ? 'bg-slate-700' : 'bg-gray-300'}`}></div>
                 <button
                   onClick={() => setShowLabels(!showLabels)}
                   className={`p-2 rounded transition-colors ${showLabels ? 'text-blue-400' : theme === 'dark' ? 'text-slate-500 hover:bg-slate-800' : 'text-gray-500 hover:bg-gray-100'}`}
@@ -2168,94 +3274,168 @@ const App: React.FC = () => {
                   <span className={`text-xs font-mono w-8 text-center ${theme === 'dark' ? 'text-slate-400' : 'text-gray-600'}`}>{gridScale.toFixed(1)}x</span>
                   <button onClick={() => handleGridZoom(0.5)} className={theme === 'dark' ? 'text-slate-500 hover:text-white' : 'text-gray-500 hover:text-gray-900'}><PlusCircle size={16} /></button>
                 </div>
-                <div className={`w-px h-6 mx-1 ${theme === 'dark' ? 'bg-slate-700' : 'bg-gray-300'}`}></div>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => setStageAspectRatio(16 / 9)}
-                    className={`px-2 py-1 text-xs rounded transition-colors ${stageAspectRatio === 16 / 9 ? 'bg-blue-600 text-white' : theme === 'dark' ? 'bg-slate-800 text-slate-400 hover:bg-slate-700' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}
-                    title="16:9"
-                  >
-                    16:9
-                  </button>
-                  <button
-                    onClick={() => setStageAspectRatio(4 / 3)}
-                    className={`px-2 py-1 text-xs rounded transition-colors ${stageAspectRatio === 4 / 3 ? 'bg-blue-600 text-white' : theme === 'dark' ? 'bg-slate-800 text-slate-400 hover:bg-slate-700' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}
-                    title="4:3"
-                  >
-                    4:3
-                  </button>
-                </div>
-                <div className={`w-px h-6 mx-1 ${theme === 'dark' ? 'bg-slate-700' : 'bg-gray-300'}`}></div>
-                <div className="flex items-center gap-2">
-                  <span className={`text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-gray-600'}`}>比例</span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={ratioW}
-                    onChange={(e) => { const v = Math.max(1, parseInt(e.target.value || '1')); setRatioW(v); setStageAspectRatio(v / Math.max(1, ratioH)); }}
-                    className={`w-12 px-2 py-1 text-xs rounded border ${theme === 'dark' ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-white border-gray-300 text-gray-800'}`}
-                    title="宽"
-                  />
-                  <span className={`text-xs ${theme === 'dark' ? 'text-slate-500' : 'text-gray-500'}`}>:</span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={ratioH}
-                    onChange={(e) => { const v = Math.max(1, parseInt(e.target.value || '1')); setRatioH(v); setStageAspectRatio(Math.max(1, ratioW) / v); }}
-                    className={`w-12 px-2 py-1 text-xs rounded border ${theme === 'dark' ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-white border-gray-300 text-gray-800'}`}
-                    title="高"
-                  />
-                </div>
-                <div className={`w-px h-6 mx-1 ${theme === 'dark' ? 'bg-slate-700' : 'bg-gray-300'}`}></div>
-                <div className="flex items-center gap-2">
-                  <span className={`text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-gray-600'}`}>宽度</span>
-                  <input
-                    type="range"
-                    min={600}
-                    max={2000}
-                    step={50}
-                    value={stageMaxWidth}
-                    onChange={(e) => setStageMaxWidth(parseInt(e.target.value))}
-                    className="w-32"
-                  />
-                  <span className={`text-xs font-mono ${theme === 'dark' ? 'text-slate-400' : 'text-gray-600'}`}>{stageMaxWidth}px</span>
-                </div>
               </div>
             )}
           </div>
+          </div>
+
+          {!timelineCollapsed && <Timeline
+            frames={frames}
+            duration={Math.max(
+              totalDuration + 10000,
+              audioBuffer ? audioBuffer.duration * 1000 : 0,
+              30000,
+            )}
+            currentTime={currentTime}
+            audioBuffer={audioBuffer}
+            isPlaying={isPlaying}
+            onPlayPause={handlePlayPause}
+            onSeek={handleSeek}
+            onFrameUpdate={setFrames}
+            onAddFrame={handleAddFrame}
+            onSelectFrame={handleSelectFrame}
+            selectedFrameId={selectedPerformerIds.length > 0 ? null : currentFrameId}
+            heightPx={timelineHeight}
+            onRenameFrame={handleRenameFrame}
+            inPointMs={inPointMs}
+            outPointMs={outPointMs}
+            onExportVideo={handleOpenExportModal}
+            isExporting={isExporting}
+            exportProgress={exportProgress}
+          />}
         </div>
       </div>
 
-      <Timeline
-        frames={frames}
-        duration={Math.max(totalDuration + 10000, 30000)}
-        currentTime={currentTime}
-        audioBuffer={audioBuffer}
-        isPlaying={isPlaying}
-        onPlayPause={handlePlayPause}
-        onSeek={handleSeek}
-        onFrameUpdate={setFrames}
-        onAddFrame={handleAddFrame}
-        onSelectFrame={handleSelectFrame}
-        selectedFrameId={currentFrameId}
-        heightPx={timelineHeight}
-        onRenameFrame={handleRenameFrame}
-        inPointMs={inPointMs}
-        outPointMs={outPointMs}
-        onSetInPoint={handleSetInPoint}
-        onSetOutPoint={handleSetOutPoint}
-        onExportVideo={handleExportVideo}
-        isExporting={isExporting}
-        exportProgress={exportProgress}
-        exportIncludeLabels={exportIncludeLabels}
-        exportIncludeGrid={exportIncludeGrid}
-        onToggleExportIncludeLabels={() => setExportIncludeLabels(v => !v)}
-        onToggleExportIncludeGrid={() => setExportIncludeGrid(v => !v)}
-        exportWidthPx={exportResolution === '4k' ? 3840 : exportResolution === '2k' ? 2560 : 1920}
-        exportHeightPx={exportResolution === '4k' ? 2160 : exportResolution === '2k' ? 1440 : 1080}
-        exportResolution={exportResolution}
-        onSetExportResolution={setExportResolution}
-      />
+      {projectMessages.length > 0 && (
+        <div className="fixed right-4 top-4 z-[60000] w-[min(420px,calc(100vw-2rem))] rounded-lg border border-blue-500/40 bg-slate-950/95 p-4 shadow-2xl">
+          <div className="flex items-start justify-between gap-3">
+            <div className="space-y-1 text-sm text-slate-200">
+              {projectMessages.map((message, index) => <div key={`${message}-${index}`}>{message}</div>)}
+            </div>
+            <button
+              type="button"
+              onClick={() => setProjectMessages([])}
+              className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-white"
+              aria-label="关闭项目提示"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showExportModal && (
+        <div className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-xl rounded-xl border border-slate-700 bg-slate-900 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-700 px-5 py-4">
+              <div>
+                <h2 className="text-base font-semibold text-white">导出视频</h2>
+                <p className="mt-1 text-xs text-slate-400">设置时间范围和输出格式，可同时生成 2D 与 3D 视频。</p>
+              </div>
+              <button
+                onClick={() => setShowExportModal(false)}
+                className="rounded p-2 text-slate-400 hover:bg-slate-800 hover:text-white"
+                aria-label="关闭导出设置"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-5 p-5">
+              <div>
+                <label className="mb-2 block text-xs font-medium text-slate-300">导出时间范围</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-lg border border-slate-700 bg-slate-950/60 p-3">
+                    <span className="mb-2 block text-[11px] text-slate-500">入点（秒）</span>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.1}
+                        value={((inPointMs ?? 0) / 1000).toFixed(1)}
+                        onChange={(e) => setInPointMs(Math.max(0, Number(e.target.value) * 1000))}
+                        className="min-w-0 flex-1 rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white"
+                      />
+                      <button onClick={() => setInPointMs(currentTime)} className="rounded border border-slate-700 px-2 text-[11px] text-slate-300 hover:bg-slate-800">当前</button>
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-slate-700 bg-slate-950/60 p-3">
+                    <span className="mb-2 block text-[11px] text-slate-500">出点（秒）</span>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.1}
+                        value={((outPointMs ?? 0) / 1000).toFixed(1)}
+                        onChange={(e) => setOutPointMs(Math.max(0, Number(e.target.value) * 1000))}
+                        className="min-w-0 flex-1 rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white"
+                      />
+                      <button onClick={() => setOutPointMs(currentTime)} className="rounded border border-slate-700 px-2 text-[11px] text-slate-300 hover:bg-slate-800">当前</button>
+                    </div>
+                  </div>
+                </div>
+                {inPointMs != null && outPointMs != null && outPointMs <= inPointMs && (
+                  <p className="mt-2 text-xs text-red-400">出点必须晚于入点。</p>
+                )}
+              </div>
+
+              <div>
+                <label className="mb-2 block text-xs font-medium text-slate-300">输出类型</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 ${export2D ? 'border-blue-500 bg-blue-500/10' : 'border-slate-700 bg-slate-950/60'}`}>
+                    <input type="checkbox" checked={export2D} onChange={(e) => setExport2D(e.target.checked)} />
+                    <span className="text-sm text-slate-200">2D 视频</span>
+                  </label>
+                  <label className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 ${export3D ? 'border-blue-500 bg-blue-500/10' : 'border-slate-700 bg-slate-950/60'}`}>
+                    <input type="checkbox" checked={export3D} onChange={(e) => setExport3D(e.target.checked)} />
+                    <span className="text-sm text-slate-200">3D 视频</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <label className="flex items-center justify-between rounded-lg border border-slate-700 bg-slate-950/60 p-3 text-sm text-slate-300">
+                  显示姓名
+                  <input type="checkbox" checked={exportIncludeLabels} onChange={(e) => setExportIncludeLabels(e.target.checked)} />
+                </label>
+                <label className="flex items-center justify-between rounded-lg border border-slate-700 bg-slate-950/60 p-3 text-sm text-slate-300">
+                  显示网格
+                  <input type="checkbox" checked={exportIncludeGrid} onChange={(e) => setExportIncludeGrid(e.target.checked)} />
+                </label>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <label className="text-xs text-slate-400">
+                  <span className="mb-2 block">分辨率</span>
+                  <select value={exportResolution} onChange={(e) => setExportResolution(e.target.value as '1080p' | '2k' | '4k')} className="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white">
+                    <option value="1080p">1080p（1920×1080）</option>
+                    <option value="2k">2K（2560×1440）</option>
+                    <option value="4k">4K（3840×2160）</option>
+                  </select>
+                </label>
+                <label className={`text-xs text-slate-400 ${export3D ? '' : 'opacity-50'}`}>
+                  <span className="mb-2 block">3D 机位</span>
+                  <select disabled={!export3D} value={exportCameraAngle} onChange={(e) => setExportCameraAngle(e.target.value as CameraAngle)} className="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white disabled:cursor-not-allowed">
+                    <option value="judge">评委视角</option>
+                    <option value="overhead">45°俯视</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 border-t border-slate-700 px-5 py-4">
+              <button onClick={() => setShowExportModal(false)} className="rounded border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800">取消</button>
+              <button
+                onClick={handleConfirmExport}
+                disabled={!export2D && !export3D}
+                className="rounded bg-green-600 px-5 py-2 text-sm font-medium text-white hover:bg-green-500 disabled:cursor-not-allowed disabled:bg-slate-700"
+              >
+                开始导出
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

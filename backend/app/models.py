@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class Position(BaseModel):
-    x: float = Field(ge=0, le=100)
+    x: float
     y: float = Field(ge=0, le=100)
     z: float | None = None
 
@@ -52,8 +52,10 @@ class Frame(BaseModel):
 
 
 class StageConfig(BaseModel):
-    width: float = 20
-    depth: float = 11.25
+    width: float = Field(default=20, gt=0)
+    depth: float = Field(default=11.25, gt=0)
+    wing_width: float = Field(default=4, ge=0, alias="wingWidth")
+    led_width: float | None = Field(default=None, gt=0, alias="ledWidth")
     led_height: float | None = Field(default=None, alias="ledHeight")
 
     model_config = ConfigDict(populate_by_name=True)

@@ -12,7 +12,12 @@ dist
 dist-ssr
 dist-electron
 release
+build/.pyinstaller-agent/
+build/agent-backend/
 *.local
+.env
+.env.*
+!.env.example
 __pycache__/
 .pytest_cache/
 *.py[cod]

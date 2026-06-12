@@ -10,6 +10,8 @@ module.exports = {
     'dist-electron/main.js',
     'dist-electron/preload.js',
     'dist-electron/ipc-handlers.js',
+    'dist-electron/project-contract.js',
+    'dist-electron/project-service.js',
     'dist/**/*',
     'package.json',
   ],
@@ -19,15 +21,16 @@ module.exports = {
       to: 'icon.png',
     },
   ],
+  extraResources: [],
   win: {
     target: [
       {
-        target: 'dir',
+        target: 'nsis',
         arch: ['x64'],
       },
     ],
     icon: 'build/icon.ico',
-    artifactName: '${productName}-${version}-portable.${ext}',
+    artifactName: '${productName}-Setup-${version}-${arch}.${ext}',
     signAndEditExecutable: false,
   },
   nsis: {

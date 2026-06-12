@@ -2,16 +2,17 @@ import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
-import { Performer, Position } from '../types';
-import { mapTo3D, degToRad } from '../utils/coordinates';
+import { Performer, Position, StageConfig } from '../types';
+import { mapTo3D, mapTo2D, degToRad, getTotalStageWidth } from '../utils/coordinates';
 import { useDragContext } from './Scene3D';
 
 interface Performer3DProps {
   performer: Performer;
   position: Position;
+  platformLift?: number;
   isSelected: boolean;
   onSelect: (id: string) => void;
-  stageConfig: { width: number; depth: number };
+  stageConfig: StageConfig;
   onDragStart?: () => void;
   onDragEnd?: () => void;
   onPositionChange?: (pos: Position) => void;
@@ -20,6 +21,7 @@ interface Performer3DProps {
 const Performer3D: React.FC<Performer3DProps> = ({
   performer,
   position,
+  platformLift = 0,
   isSelected,
   onSelect,
   stageConfig,
@@ -47,7 +49,10 @@ const Performer3D: React.FC<Performer3DProps> = ({
 
   // Initialize position on mount or when position changes significantly
   useEffect(() => {
-    const [targetX, targetY, targetZ] = mapTo3D(position, stageConfig);
+    const [targetX, targetY, targetZ] = mapTo3D({
+      ...position,
+      z: (position.z || 0) + platformLift,
+    }, stageConfig);
     // Only jump if this is a large change (not smooth animation)
     const current = currentPositionRef.current;
     const dist = current.distanceTo(new THREE.Vector3(targetX, targetY, targetZ));
@@ -57,9 +62,12 @@ const Performer3D: React.FC<Performer3DProps> = ({
         meshRef.current.position.set(targetX, targetY, targetZ);
       }
     }
-  }, [performer.id, stageConfig]);
+  }, [performer.id, position, platformLift, stageConfig]);
 
-  const [targetX, targetY, targetZ] = mapTo3D(position, stageConfig);
+  const [targetX, targetY, targetZ] = mapTo3D({
+    ...position,
+    z: (position.z || 0) + platformLift,
+  }, stageConfig);
 
   useFrame(() => {
     if (meshRef.current) {
@@ -82,15 +90,12 @@ const Performer3D: React.FC<Performer3DProps> = ({
       raycaster.ray.intersectPlane(dragPlaneRef.current, intersectionPoint);
       if (intersectionPoint) {
         const clampedPoint = intersectionPoint.sub(dragOffsetRef.current);
-        // Clamp to stage bounds
-        clampedPoint.x = Math.max(-stageConfig.width / 2, Math.min(stageConfig.width / 2, clampedPoint.x));
+        // Clamp to the full floor, including both wings.
+        const totalWidth = getTotalStageWidth(stageConfig);
+        clampedPoint.x = Math.max(-totalWidth / 2, Math.min(totalWidth / 2, clampedPoint.x));
         clampedPoint.z = Math.max(-stageConfig.depth / 2, Math.min(stageConfig.depth / 2, clampedPoint.z));
 
-        const newPos = {
-          x: ((clampedPoint.x / (stageConfig.width / 2)) * 50) + 50,
-          y: ((clampedPoint.z / (stageConfig.depth / 2)) * 50) + 50,
-          z: position.z || 0
-        };
+        const newPos = mapTo2D(clampedPoint.x, position.z || 0, clampedPoint.z, stageConfig);
         onPositionChange(newPos);
       }
     }
@@ -140,7 +145,6 @@ const Performer3D: React.FC<Performer3DProps> = ({
 
     const deltaY = e.pointer.y - dragStartPointerYRef.current;
     // Use camera distance to scale the movement appropriately
-    const { camera } = useThree();
     const scaleFactor = Math.abs(camera.position.z || 20) / 500;
     const heightChange = -deltaY * scaleFactor; // Negative because dragging up (negative y) should increase height
     const newHeight = Math.max(0, Math.min(10, dragStartHeightRef.current + heightChange));

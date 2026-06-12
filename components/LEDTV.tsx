@@ -20,7 +20,7 @@ const LEDTV: React.FC<LEDTVProps> = ({ config, mediaCache = {}, currentTime = 0,
   const [imageTexture, setImageTexture] = useState<THREE.Texture | null>(null);
 
   const height = config.ledHeight || 6;
-  const width = config.width;
+  const width = config.ledWidth ?? config.width;
   const depth = config.depth;
   const content = config.ledContent;
 
@@ -30,6 +30,18 @@ const LEDTV: React.FC<LEDTVProps> = ({ config, mediaCache = {}, currentTime = 0,
 
   useEffect(() => {
     isPlayingRef.current = isPlaying;
+    const video = videoRef.current;
+    if (!video || video.readyState < HTMLMediaElement.HAVE_METADATA) return;
+
+    if (isPlaying) {
+      const desired = getTimelineVideoTime(video, desiredTimeRef.current, video.loop);
+      if (Math.abs(video.currentTime - desired) > 0.15) {
+        try { video.currentTime = desired; } catch { }
+      }
+      void video.play().catch(() => {});
+    } else {
+      video.pause();
+    }
   }, [isPlaying]);
 
   // Configure texture to stretch to fill the LED screen
@@ -50,12 +62,12 @@ const LEDTV: React.FC<LEDTVProps> = ({ config, mediaCache = {}, currentTime = 0,
   useEffect(() => {
     if (content?.type === 'video' && content.value && mediaCache[content.value]) {
       const video = document.createElement('video');
+      video.crossOrigin = 'anonymous';
       video.src = mediaCache[content.value];
       video.loop = content.loop ?? true;
       video.muted = true;
       video.playsInline = true;
       video.preload = 'auto';
-      video.crossOrigin = 'anonymous';
 
       const texture = new THREE.VideoTexture(video);
       configureTexture(texture);
@@ -72,7 +84,12 @@ const LEDTV: React.FC<LEDTVProps> = ({ config, mediaCache = {}, currentTime = 0,
         if (Number.isFinite(desired)) {
           try { video.currentTime = desired; } catch { }
         }
-        if (!isPlayingRef.current) video.pause();
+        if (isPlayingRef.current) {
+          void video.play().catch(() => {});
+        } else {
+          video.pause();
+        }
+        attachVideoTexture();
         texture.needsUpdate = true;
       };
       const refreshTexture = () => {
@@ -114,7 +131,7 @@ const LEDTV: React.FC<LEDTVProps> = ({ config, mediaCache = {}, currentTime = 0,
       return;
     }
 
-    let texture: THREE.CanvasTexture | null = null;
+    let texture: THREE.Texture | null = null;
     const image = new Image();
     image.onload = () => {
       texture = new THREE.CanvasTexture(image);
@@ -160,7 +177,7 @@ const LEDTV: React.FC<LEDTVProps> = ({ config, mediaCache = {}, currentTime = 0,
       return;
     }
 
-    if (drift > 0.08) {
+    if (drift > 0.5) {
       try { video.currentTime = desired; } catch { }
       if (videoTextureRef.current) videoTextureRef.current.needsUpdate = true;
     }

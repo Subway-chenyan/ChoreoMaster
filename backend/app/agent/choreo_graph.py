@@ -213,12 +213,16 @@ def generate_plan(state: ChoreoState) -> dict[str, Any]:
 def validate_plan(state: ChoreoState) -> dict[str, Any]:
     plan = state["plan"]
     warnings = list(plan.warnings)
+    stage_config = state["request"].project.stage_config
+    wing_percent = (stage_config.wing_width / stage_config.width) * 100
+    min_x = -wing_percent
+    max_x = 100 + wing_percent
     for frame in plan.frames_to_create:
         for performer_id, pos in frame.positions.items():
-            if not 0 <= pos.x <= 100 or not 0 <= pos.y <= 100:
+            if not min_x <= pos.x <= max_x or not 0 <= pos.y <= 100:
                 warnings.append(f"{frame.name} 中 {performer_id} 坐标越界，已限制到舞台范围。")
                 frame.positions[performer_id] = Position(
-                    x=_clamp(pos.x),
+                    x=_clamp(pos.x, min_x, max_x),
                     y=_clamp(pos.y),
                     z=pos.z,
                 )

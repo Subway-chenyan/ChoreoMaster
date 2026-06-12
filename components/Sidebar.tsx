@@ -1,12 +1,15 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { Performer, Frame, PerformerShape, PerformerGroup, PerformerType, AIConfig, AIChoreoPlan } from '../types';
+import { createPortal } from 'react-dom';
+import { Performer, Frame, PerformerShape, PerformerGroup, PerformerType, PropCategory, AIConfig, AIChoreoPlan } from '../types';
 import { Plus, Users, Trash2, Download, Grid, Music, Sparkles, Wand2, Film, Copy, Search, Settings, Scaling, Upload, FilePlus, Circle, Square, Triangle, UserCheck, UserX, Eye, EyeOff, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreVertical, Palette, Edit2, Box, Library, Save } from 'lucide-react';
 import { PRESET_SHAPES, DEFAULT_COLORS } from '../constants';
-import { createChoreoPlan } from '../services/choreoAgentService';
 import { StageConfig } from '../types';
 import { ProjectBrowser } from './ProjectBrowser';
 import { PropEditorModal } from './PropEditorModal';
+import { ChoreoAgentModal } from './ChoreoAgentModal';
+import { SelectField, StepperNumberField } from './FormControls';
+import { validateAgentAccess } from '../services/choreoAgentService';
 
 interface SidebarProps {
     performers: Performer[];
@@ -20,9 +23,12 @@ interface SidebarProps {
     onDuplicateSelected: () => void;
     onApplyPreset: (coords: { x: number, y: number }[]) => void;
     onApplyAIPlan: (plan: AIChoreoPlan) => void;
-    onImportMusic: (e: React.ChangeEvent<HTMLInputElement>) => void;
+    onImportMusic: (e?: React.ChangeEvent<HTMLInputElement>) => void;
     onExport: () => void;
-    onImportProject: (e: React.ChangeEvent<HTMLInputElement>) => void;
+    onImportProject: (e?: React.ChangeEvent<HTMLInputElement>) => void;
+    onImportProjectPackage?: () => void;
+    onImportLegacyProject?: () => void;
+    onExportProjectPackage?: () => void;
     selectedPerformerIds: string[];
     onSelectionChange: (ids: string[]) => void;
     musicName: string | null;
@@ -34,6 +40,7 @@ interface SidebarProps {
     onResetProject: () => void;
     onRenameFrame: (id: string, name?: string) => void;
     widthPx?: number;
+    isCompactLayout?: boolean;
     // Group Management Props
     onAddGroup: (name: string, color: string, type?: 'performer' | 'prop') => string;
     onRemoveGroup: (groupId: string) => void;
@@ -48,7 +55,7 @@ interface SidebarProps {
     // 新增 3D 相关 props
     stageConfig?: StageConfig;
     onStageConfigChange: (updates: Partial<StageConfig>) => void;
-    onLEDContentUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+    onLEDContentUpload: (e?: React.ChangeEvent<HTMLInputElement>) => void;
     onClearLEDContent: () => void;
     aiConfig: AIConfig;
     onAiConfigChange: (config: AIConfig) => void;
@@ -162,6 +169,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     onImportMusic,
     onExport,
     onImportProject,
+    onImportProjectPackage,
+    onImportLegacyProject,
+    onExportProjectPackage,
     selectedPerformerIds,
     onSelectionChange,
     musicName,
@@ -173,6 +183,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     onResetProject,
     onRenameFrame,
     widthPx = 320,
+    isCompactLayout = false,
     // Group Management Props
     onAddGroup,
     onRemoveGroup,
@@ -213,17 +224,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const [newPropWidth, setNewPropWidth] = useState<number>(0.5); // Default 0.5m (宽)
     const [newPropDepth, setNewPropDepth] = useState<number>(0.5); // Default 0.5m (长)
     const [newPropHeight, setNewPropHeight] = useState<number>(0.5); // Default 0.5m (高)
+    const [newPropCategory, setNewPropCategory] = useState<PropCategory>('prop');
 
     // Preset State
     const [presetScale, setPresetScale] = useState(0.8); // Default 80% size to be safe
 
     const [searchQuery, setSearchQuery] = useState('');
-    const [aiPrompt, setAiPrompt] = useState('');
-    const [isGenerating, setIsGenerating] = useState(false);
-    const [aiPlan, setAiPlan] = useState<AIChoreoPlan | null>(null);
-    const [aiError, setAiError] = useState<string | null>(null);
+    const [choreoAgentOpen, setChoreoAgentOpen] = useState(false);
+    const [agentAccessError, setAgentAccessError] = useState<string | null>(null);
+    const [isValidatingAgentAccess, setIsValidatingAgentAccess] = useState(false);
 
     // Group State
+    const [showAddForm, setShowAddForm] = useState(false);
     const [showNewGroupForm, setShowNewGroupForm] = useState(false);
     const [newGroupName, setNewGroupName] = useState('');
     const [newGroupColor, setNewGroupColor] = useState(DEFAULT_COLORS[0]);
@@ -250,6 +262,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
     // Ref for context menu click outside detection
     const contextMenuRef = useRef<HTMLDivElement>(null);
+    const useSingleColumnPropFields = isCompactLayout || widthPx < 360;
 
     const filteredPerformers = useMemo(() => {
         let list = performers;
@@ -302,6 +315,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         if (newPerformerName.trim()) {
             onAddPerformer(newPerformerName, newPerformerColor, newPerformerShape);
             setNewPerformerName('');
+            setShowAddForm(false);
             const nextColorIndex = (DEFAULT_COLORS.indexOf(newPerformerColor) + 1) % DEFAULT_COLORS.length;
             setNewPerformerColor(DEFAULT_COLORS[nextColorIndex]);
         }
@@ -314,11 +328,30 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 width: newPropWidth,
                 depth: newPropDepth,
                 height: newPropHeight,
-                rotation: 0
+                rotation: 0,
+                propCategory: newPropCategory,
             });
             setNewPerformerName('');
+            setShowAddForm(false);
             const nextColorIndex = (DEFAULT_COLORS.indexOf(newPerformerColor) + 1) % DEFAULT_COLORS.length;
             setNewPerformerColor(DEFAULT_COLORS[nextColorIndex]);
+        }
+    };
+
+    const handleOpenChoreoAgent = async () => {
+        if (!aiConfig.memberToken.trim()) {
+            setAgentAccessError('请输入管理员发放的 Agent 访问 Key。');
+            return;
+        }
+        setIsValidatingAgentAccess(true);
+        setAgentAccessError(null);
+        try {
+            await validateAgentAccess(aiConfig);
+            setChoreoAgentOpen(true);
+        } catch (error) {
+            setAgentAccessError(error instanceof Error ? error.message : 'Agent 访问 Key 校验失败。');
+        } finally {
+            setIsValidatingAgentAccess(false);
         }
     };
 
@@ -332,41 +365,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         } else {
             onSelectionChange([id]);
         }
-    };
-
-    const handleAiGenerate = async () => {
-        if (!aiPrompt.trim()) return;
-        setIsGenerating(true);
-        setAiError(null);
-        setAiPlan(null);
-        try {
-            const plan = await createChoreoPlan({
-                prompt: aiPrompt,
-                taskType: 'auto',
-                project: {
-                    performers,
-                    performerGroups,
-                    frames,
-                    stageConfig: stageConfig || { width: 20, depth: 20 / (16 / 9) },
-                },
-                selectedPerformerIds,
-                currentFrameId,
-                applyMode: 'preview',
-            }, aiConfig);
-            setAiPlan(plan);
-        } catch (e) {
-            console.error(e);
-            setAiError(e instanceof Error ? e.message : 'AI generation failed.');
-        } finally {
-            setIsGenerating(false);
-        }
-    };
-
-    const handleApplyGeneratedPlan = () => {
-        if (!aiPlan) return;
-        onApplyAIPlan(aiPlan);
-        setAiPlan(null);
-        setAiPrompt('');
     };
 
     // define filtered groups based on active tab
@@ -398,10 +396,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const handleContextMenu = (e: React.MouseEvent, performerId: string | null, groupId: string | null = null) => {
         e.preventDefault();
         e.stopPropagation();
+        const menuWidth = 208;
+        const menuHeight = 320;
+        const viewportPadding = 8;
         setContextMenuState({
             show: true,
-            x: e.clientX,
-            y: e.clientY,
+            x: Math.max(viewportPadding, Math.min(e.clientX, window.innerWidth - menuWidth - viewportPadding)),
+            y: Math.max(viewportPadding, Math.min(e.clientY, window.innerHeight - menuHeight - viewportPadding)),
             performerId,
             groupId,
         });
@@ -522,7 +523,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         }}
                         className={`flex-1 text-sm font-medium bg-transparent p-0 truncate ${selectedPerformerIds.includes(p.id) ? 'text-white' : 'text-slate-300'}`}
                     >
-                        {p.name}
+                        <div className="flex items-center gap-2 min-w-0">
+                            <span className="truncate">{p.name}</span>
+                            {p.type === 'prop' && (
+                                <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium border ${
+                                    p.propCategory === 'platform'
+                                        ? 'border-amber-500/60 bg-amber-500/10 text-amber-300'
+                                        : 'border-slate-600 bg-slate-800 text-slate-400'
+                                }`}>
+                                    {p.propCategory === 'platform' ? '高台' : '道具'}
+                                </span>
+                            )}
+                        </div>
                     </div>
                 )}
 
@@ -549,30 +561,34 @@ export const Sidebar: React.FC<SidebarProps> = ({
     };
 
     return (
-        <div style={{ width: widthPx, minWidth: widthPx, maxWidth: widthPx }} className="bg-slate-900 border-r border-slate-800 flex flex-col shadow-xl z-20 flex-shrink-0">
+        <div style={isCompactLayout ? undefined : { width: widthPx, minWidth: widthPx, maxWidth: widthPx }} className="app-sidebar min-h-0 overflow-hidden bg-slate-900 border-r border-slate-800 flex flex-col shadow-xl z-20 flex-shrink-0">
             {/* Top Tabs */}
             <div className="flex items-center bg-slate-950 border-b border-slate-800 px-1 pt-1">
-                <button onClick={() => setActiveTab('library')} className={`flex-1 py-3 flex justify-center ${activeTab === 'library' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="项目库">
+                <button onClick={() => setActiveTab('library')} className={`flex-1 min-h-12 py-3 flex justify-center ${activeTab === 'library' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="项目库">
                     <Library size={18} />
                 </button>
-                <button onClick={() => setActiveTab('project')} className={`flex-1 py-3 flex justify-center ${activeTab === 'project' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="项目设置">
+                <button onClick={() => setActiveTab('project')} className={`flex-1 min-h-12 py-3 flex justify-center ${activeTab === 'project' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="项目设置">
                     <Settings size={18} />
                 </button>
-                <button onClick={() => setActiveTab('formations')} className={`flex-1 py-3 flex justify-center ${activeTab === 'formations' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="队形列表">
+                <button onClick={() => setActiveTab('formations')} className={`flex-1 min-h-12 py-3 flex justify-center ${activeTab === 'formations' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="队形列表">
                     <Film size={18} />
                 </button>
-                <button onClick={() => setActiveTab('performers')} className={`flex-1 py-3 flex justify-center ${activeTab === 'performers' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="演员管理">
+                <button onClick={() => setActiveTab('performers')} className={`flex-1 min-h-12 py-3 flex justify-center ${activeTab === 'performers' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="演员管理">
                     <Users size={18} />
                 </button>
-                <button onClick={() => setActiveTab('props')} className={`flex-1 py-3 flex justify-center ${activeTab === 'props' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="道具管理">
+                <button onClick={() => setActiveTab('props')} className={`flex-1 min-h-12 py-3 flex justify-center ${activeTab === 'props' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="道具管理">
                     <Box size={18} />
                 </button>
-                <button onClick={() => setActiveTab('presets')} className={`flex-1 py-3 flex justify-center ${activeTab === 'presets' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="AI预设">
+                <button onClick={() => setActiveTab('presets')} className={`flex-1 min-h-12 py-3 flex justify-center ${activeTab === 'presets' ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`} title="AI预设">
                     <Grid size={18} />
                 </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar bg-slate-900 p-4">
+            <div className={`flex-1 min-h-0 overflow-x-hidden custom-scrollbar bg-slate-900 ${
+                activeTab === 'performers' || activeTab === 'props'
+                    ? 'overflow-hidden'
+                    : 'overflow-y-auto p-4'
+            }`}>
 
                 {/* LIBRARY TAB */}
                 {activeTab === 'library' && (
@@ -584,21 +600,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             onCreateFromTemplate={onCreateFromTemplate}
                             onLoadTemplate={onLoadTemplate}
                             onNewProject={onResetProject}
+                            onImportPackage={onImportProjectPackage}
+                            onImportLegacy={onImportLegacyProject}
+                            onExportPackage={onExportProjectPackage}
                         />
                         
                         {/* Project Import/Export Section */}
-                        <div className="mt-4 pt-4 border-t border-slate-800">
+                        {!window.electronAPI?.isElectron && <div className="mt-4 pt-4 border-t border-slate-800">
                             <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">导入 / 导出</h3>
                             <div className="space-y-2">
-                                <label className="w-full flex items-center gap-3 px-3 py-2 bg-slate-800 hover:bg-slate-700 rounded text-slate-300 transition-colors text-xs cursor-pointer">
+                                <label className="project-transfer-control w-full h-10 box-border flex items-center justify-start gap-3 px-3 bg-slate-800 hover:bg-slate-700 rounded text-slate-300 transition-colors cursor-pointer">
                                     <Upload size={14} /> 导入项目 (JSON)
                                     <input type="file" accept=".json" className="hidden" onChange={onImportProject} />
                                 </label>
-                                <button onClick={onExport} className="w-full flex items-center gap-3 px-3 py-2 bg-slate-800 hover:bg-slate-700 rounded text-slate-300 transition-colors text-xs">
+                                <button type="button" onClick={onExport} className="project-transfer-control w-full h-10 box-border appearance-none border-0 flex items-center justify-start gap-3 px-3 bg-slate-800 hover:bg-slate-700 rounded text-slate-300 transition-colors">
                                     <Download size={14} /> 导出项目 (JSON)
                                 </button>
                             </div>
-                        </div>
+                        </div>}
 
                         {/* Storage Settings - Only in Electron */}
                         {window.electronAPI?.isElectron && (
@@ -648,17 +667,94 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             )}
                             <label className="block w-full text-center px-3 py-2 bg-slate-700 hover:bg-slate-600 border border-slate-600 rounded text-xs cursor-pointer transition-colors text-white">
                                 导入音频文件
-                                <input type="file" accept="audio/*" className="hidden" onChange={onImportMusic} />
+                                <input
+                                    type="file"
+                                    accept="audio/*"
+                                    className="hidden"
+                                    onClick={(event) => {
+                                        if (window.electronAPI?.isElectron) {
+                                            event.preventDefault();
+                                            onImportMusic();
+                                        }
+                                    }}
+                                    onChange={onImportMusic}
+                                />
                             </label>
                         </div>
 
-                        {/* 3D 舞台设置 */}
+                        {/* 舞台设置 */}
                         <div className="bg-slate-800 p-4 rounded-lg border border-slate-700">
                             <div className="flex items-center gap-2 mb-3">
-                                <span className="text-xs font-bold text-slate-400 uppercase">3D 舞台设置</span>
+                                <span className="text-xs font-bold text-slate-400 uppercase">舞台尺寸与显示</span>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3 mb-3">
+                                <div className="space-y-2">
+                                    <label className="text-xs text-slate-400">舞台宽度</label>
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="number"
+                                            step={0.5}
+                                            min={1}
+                                            max={100}
+                                            value={stageConfig?.width ?? 20}
+                                            onChange={(e) => onStageConfigChange({ width: Math.max(1, Number(e.target.value)) })}
+                                            className="min-w-0 flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                                        />
+                                        <span className="text-xs text-slate-500">米</span>
+                                    </div>
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-xs text-slate-400">舞台深度</label>
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="number"
+                                            step={0.5}
+                                            min={1}
+                                            max={100}
+                                            value={stageConfig?.depth ?? 11.25}
+                                            onChange={(e) => onStageConfigChange({ depth: Math.max(1, Number(e.target.value)) })}
+                                            className="min-w-0 flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                                        />
+                                        <span className="text-xs text-slate-500">米</span>
+                                    </div>
+                                </div>
                             </div>
 
                             {/* LED 高度 */}
+                            <div className="space-y-2 mb-3">
+                                <label className="text-xs text-slate-400">左右备场区宽度（每侧）</label>
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        type="number"
+                                        step={0.5}
+                                        min={0}
+                                        max={20}
+                                        value={stageConfig?.wingWidth ?? 4}
+                                        onChange={(e) => onStageConfigChange({ wingWidth: Math.max(0, Number(e.target.value)) })}
+                                        className="flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                                    />
+                                    <span className="text-xs text-slate-500">米</span>
+                                </div>
+                                <p className="text-[10px] leading-4 text-slate-500">备场区参与演员、道具、轨迹和视频导出。</p>
+                            </div>
+
+                            <div className="space-y-2 mb-3">
+                                <label className="text-xs text-slate-400">LED 屏幕宽度</label>
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        type="number"
+                                        step={0.5}
+                                        min={1}
+                                        max={60}
+                                        value={stageConfig?.ledWidth ?? stageConfig?.width ?? 20}
+                                        onChange={(e) => onStageConfigChange({ ledWidth: Math.max(1, Number(e.target.value)) })}
+                                        className="flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                                    />
+                                    <span className="text-xs text-slate-500">米</span>
+                                </div>
+                            </div>
+
                             <div className="space-y-2 mb-3">
                                 <label className="text-xs text-slate-400">LED 屏幕高度</label>
                                 <div className="flex items-center gap-2">
@@ -685,6 +781,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                             type="file"
                                             accept="image/*,video/*"
                                             className="hidden"
+                                            onClick={(event) => {
+                                                if (window.electronAPI?.isElectron) {
+                                                    event.preventDefault();
+                                                    onLEDContentUpload();
+                                                }
+                                            }}
                                             onChange={onLEDContentUpload}
                                         />
                                     </label>
@@ -720,7 +822,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                         setEditingFrameId(f.id);
                                         setEditingFrameName(f.name);
                                     }}
-                                    className={`group relative flex gap-3 p-2 rounded-lg border transition-all cursor-pointer ${f.id === currentFrameId ? 'bg-slate-800 border-blue-500 shadow-md' : 'bg-slate-900 border-slate-800 hover:bg-slate-800'}`}
+                                    className={`group relative flex gap-3 p-2 rounded-lg border transition-all cursor-pointer ${f.id === currentFrameId && selectedPerformerIds.length === 0 ? 'bg-slate-800 border-blue-500 shadow-md' : 'bg-slate-900 border-slate-800 hover:bg-slate-800'}`}
                                 >
                                     {/* Thumbnail */}
                                     <div className="w-16 h-12 shrink-0">
@@ -729,7 +831,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
                                     {/* Info */}
                                     <div className="flex-1 min-w-0 flex flex-col justify-center">
-                                        <div className={`text-sm font-medium truncate ${f.id === currentFrameId ? 'text-blue-400' : 'text-slate-300'}`}>
+                                        <div className={`text-sm font-medium truncate ${f.id === currentFrameId && selectedPerformerIds.length === 0 ? 'text-blue-400' : 'text-slate-300'}`}>
                                             {editingFrameId === f.id ? (
                                                 <input
                                                     autoFocus
@@ -749,7 +851,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                                             setEditingFrameId(null);
                                                         }
                                                     }}
-                                                    className={`w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs ${f.id === currentFrameId ? 'text-blue-400' : 'text-slate-300'}`}
+                                                    className={`w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs ${f.id === currentFrameId && selectedPerformerIds.length === 0 ? 'text-blue-400' : 'text-slate-300'}`}
                                                 />
                                             ) : (
                                                 f.name
@@ -778,8 +880,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
                 {/* PERFORMERS & PROPS TAB */}
                 {(activeTab === 'performers' || activeTab === 'props') && (
-                    <div className="h-full flex flex-col">
-                        <div className="flex items-center justify-between mb-4">
+                    <div className="h-full min-h-0 flex flex-col p-4 pb-3">
+                        <div className="flex items-center justify-between mb-3">
                             <h2 className="text-sm font-bold text-slate-400 uppercase">{activeTab === 'props' ? '道具列表' : '演员列表'}</h2>
                             <span className="text-xs text-slate-500">{filteredPerformers.length} {activeTab === 'props' ? '个' : '人'}</span>
                         </div>
@@ -796,35 +898,87 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             />
                         </div>
 
+                        <div className="grid grid-cols-2 gap-2 mb-3">
+                            <button
+                                onClick={() => {
+                                    setShowAddForm((visible) => !visible);
+                                    setShowNewGroupForm(false);
+                                }}
+                                className={`flex items-center justify-center gap-2 px-3 py-2 rounded border text-xs transition-colors ${
+                                    showAddForm
+                                        ? 'bg-blue-600/20 border-blue-500 text-blue-200'
+                                        : 'bg-slate-800/50 hover:bg-slate-700/60 border-slate-700 text-slate-300'
+                                }`}
+                            >
+                                <Plus size={14} />
+                                {showAddForm ? '收起添加' : activeTab === 'props' ? '添加道具' : '添加演员'}
+                                <ChevronDown size={13} className={`transition-transform ${showAddForm ? 'rotate-180' : ''}`} />
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setShowNewGroupForm((visible) => !visible);
+                                    setShowAddForm(false);
+                                }}
+                                className={`flex items-center justify-center gap-2 px-3 py-2 rounded border text-xs transition-colors ${
+                                    showNewGroupForm
+                                        ? 'bg-emerald-600/20 border-emerald-500 text-emerald-200'
+                                        : 'bg-slate-800/50 hover:bg-slate-700/60 border-slate-700 text-slate-300'
+                                }`}
+                            >
+                                <FolderPlus size={14} />
+                                {showNewGroupForm ? '收起分组' : '创建分组'}
+                            </button>
+                        </div>
+
                         {/* Add New Performer / Prop */}
-                        {activeTab === 'props' ? (
+                        {showAddForm && (activeTab === 'props' ? (
                             <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700 mb-3">
-                                <div className="flex flex-col gap-2">
+                                <div className="flex flex-col gap-3">
                                     <input
                                         type="text"
                                         placeholder="道具名称"
-                                        className="w-full bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                                        className="w-full rounded-xl border border-slate-600 bg-slate-950/70 px-3 py-2.5 text-sm text-white outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                                         value={newPerformerName}
                                         onChange={(e) => setNewPerformerName(e.target.value)}
                                         onKeyDown={(e) => e.key === 'Enter' && handleAddProp()}
                                     />
-                                    <div className="flex gap-2 items-center">
-                                        <div className="flex items-center gap-1 bg-slate-900 px-2 py-1 rounded border border-slate-600 flex-1">
-                                            <span className="text-[10px] text-slate-400">长</span>
-                                            <input type="number" step="0.1" value={newPropWidth} onChange={(e) => setNewPropWidth(parseFloat(e.target.value))} className="w-full bg-transparent text-xs text-white focus:outline-none text-center" />
+                                    <div className={`grid gap-2 ${useSingleColumnPropFields ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                                        <StepperNumberField label="长度" value={newPropWidth} min={0.1} step={0.1} onChange={setNewPropWidth} />
+                                        <StepperNumberField label="宽度" value={newPropDepth} min={0.1} step={0.1} onChange={setNewPropDepth} />
+                                        <StepperNumberField label="高度" value={newPropHeight} min={0.1} step={0.1} onChange={setNewPropHeight} />
+                                        <div className="rounded-xl border border-slate-700 bg-slate-900/80 p-3 shadow-sm shadow-slate-950/20">
+                                            <label className="mb-2 block text-[11px] font-medium tracking-wide text-slate-400">
+                                                颜色
+                                            </label>
+                                            <div className="flex items-center justify-center rounded-lg border border-slate-600 bg-slate-950/70 px-3 py-3">
+                                                <input
+                                                    type="color"
+                                                    value={newPerformerColor}
+                                                    onChange={(e) => setNewPerformerColor(e.target.value)}
+                                                    className="h-14 w-20 cursor-pointer rounded-lg border border-slate-500 bg-transparent p-1"
+                                                    title="道具颜色"
+                                                />
+                                            </div>
                                         </div>
-                                        <div className="flex items-center gap-1 bg-slate-900 px-2 py-1 rounded border border-slate-600 flex-1">
-                                            <span className="text-[10px] text-slate-400">宽</span>
-                                            <input type="number" step="0.1" value={newPropDepth} onChange={(e) => setNewPropDepth(parseFloat(e.target.value))} className="w-full bg-transparent text-xs text-white focus:outline-none text-center" />
-                                        </div>
-                                        <div className="flex items-center gap-1 bg-slate-900 px-2 py-1 rounded border border-slate-600 flex-1">
-                                            <span className="text-[10px] text-slate-400">高</span>
-                                            <input type="number" step="0.1" value={newPropHeight} onChange={(e) => setNewPropHeight(parseFloat(e.target.value))} className="w-full bg-transparent text-xs text-white focus:outline-none text-center" />
-                                        </div>
-                                        <div className="w-px h-6 bg-slate-700 mx-1"></div>
-                                        <input type="color" value={newPerformerColor} onChange={(e) => setNewPerformerColor(e.target.value)} className="w-8 h-8 rounded cursor-pointer bg-slate-900 p-0.5 border border-slate-600" title="道具颜色" />
                                     </div>
-                                    <button onClick={handleAddProp} className="w-full bg-blue-600 hover:bg-blue-500 py-1.5 rounded text-white flex items-center justify-center gap-1 text-xs font-bold transition-all active:scale-95 shadow-lg shadow-blue-900/20">
+                                    <div className="grid grid-cols-1 gap-2">
+                                        <SelectField<PropCategory>
+                                            label="类型"
+                                            value={newPropCategory}
+                                            onChange={setNewPropCategory}
+                                            options={[
+                                                { value: 'prop', label: '道具' },
+                                                { value: 'platform', label: '高台' },
+                                            ]}
+                                            helperText={
+                                                newPropCategory === 'platform'
+                                                    ? `演员与高台占地碰撞时，将按当前道具高度 ${newPropHeight.toFixed(1)}m 抬升`
+                                                    : '普通道具不抬升演员高度'
+                                            }
+                                            helperTone={newPropCategory === 'platform' ? 'accent' : 'default'}
+                                        />
+                                    </div>
+                                    <button onClick={handleAddProp} className="w-full rounded-xl bg-blue-600 py-2.5 text-white flex items-center justify-center gap-2 text-sm font-semibold transition-all hover:bg-blue-500 active:scale-[0.99] shadow-lg shadow-blue-900/20">
                                         <Plus size={14} /> 添加道具
                                     </button>
                                 </div>
@@ -862,12 +1016,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                     </div>
                                 </div>
                             </div>
-                        )}
+                        ))}
 
                         {/* Add New Group Button */}
-                        <div className="mb-3">
+                        <div className={showNewGroupForm ? 'mb-3' : ''}>
                             {!showNewGroupForm ? (
-                                <button onClick={() => setShowNewGroupForm(true)} className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-slate-800/50 hover:bg-slate-700/50 border border-slate-700 hover:border-slate-600 rounded text-slate-300 hover:text-white transition-colors text-xs">
+                                <button onClick={() => setShowNewGroupForm(true)} className="hidden">
                                     <FolderPlus size={14} /> 创建分组
                                 </button>
                             ) : (
@@ -905,7 +1059,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         )}
 
                         {/* Performers List with Groups */}
-                        <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+                        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain custom-scrollbar space-y-2 pr-1 pb-2">
                             {/* Groups */}
                             {filteredGroups.map(group => {
                                 const groupPerformers = performersByGroup.grouped[group.id] || [];
@@ -1004,11 +1158,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 )}
 
                 {/* Context Menu */}
-                {contextMenuState.show && (
+                {contextMenuState.show && createPortal(
                     <div
                         ref={contextMenuRef}
-                        style={{ position: 'fixed', left: contextMenuState.x, top: contextMenuState.y, zIndex: 50000 }}
-                        className="bg-slate-800 border border-slate-700 rounded-lg shadow-2xl py-1 min-w-[160px] animate-in fade-in zoom-in-95 duration-100"
+                        style={{ position: 'fixed', left: contextMenuState.x, top: contextMenuState.y, zIndex: 100000 }}
+                        className="max-h-[min(70vh,420px)] overflow-y-auto bg-slate-800 border border-slate-700 rounded-lg shadow-2xl py-1 min-w-[176px] animate-in fade-in zoom-in-95 duration-100"
                     >
                         {contextMenuState.performerId && (
                             <>
@@ -1127,7 +1281,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 </button>
                             </>
                         )}
-                    </div>
+                    </div>,
+                    document.body
                 )}
 
                 {/* PRESETS TAB */}
@@ -1143,83 +1298,45 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             </div>
                             <div className="space-y-3">
                                 <div className="space-y-1">
-                                    <label className="text-[10px] text-slate-500 uppercase">Backend URL</label>
-                                    <input
-                                        type="text"
-                                        className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
-                                        placeholder="http://localhost:8000"
-                                        value={aiConfig.backendUrl}
-                                        onChange={(e) => onAiConfigChange({ ...aiConfig, backendUrl: e.target.value })}
-                                    />
-                                </div>
-                                <div className="space-y-1">
-                                    <label className="text-[10px] text-slate-500 uppercase">Member Token</label>
+                                    <label className="text-[10px] text-slate-500 uppercase">Agent 访问 Key</label>
                                     <input
                                         type="password"
                                         className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
-                                        placeholder="会员凭证"
+                                        placeholder="请输入管理员发放的 Key"
                                         value={aiConfig.memberToken}
-                                        onChange={(e) => onAiConfigChange({ ...aiConfig, memberToken: e.target.value })}
+                                        onChange={(e) => {
+                                            setAgentAccessError(null);
+                                            onAiConfigChange({ ...aiConfig, memberToken: e.target.value });
+                                        }}
                                     />
+                                    <p className="text-[10px] leading-4 text-slate-600">访问地址由应用统一管理，无需手动配置。</p>
                                 </div>
                             </div>
                         </div>
 
-                        {/* AI Box */}
-                        <div className="bg-gradient-to-r from-slate-800 to-slate-900 p-4 rounded-lg border border-slate-700/50">
-                            <div className="flex items-center gap-2 mb-2 text-purple-400">
-                                <Sparkles size={14} />
-                                <span className="text-xs font-bold uppercase">AI 编舞</span>
-                            </div>
-                            <textarea
-                                className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-xs text-white mb-2 focus:outline-none focus:border-purple-500 resize-none h-16"
-                                placeholder="例如：“飞行楔形队形”"
-                                value={aiPrompt}
-                                onChange={(e) => setAiPrompt(e.target.value)}
-                            />
-                            <button
-                                onClick={handleAiGenerate}
-                                disabled={isGenerating}
-                                className="w-full py-1.5 bg-purple-600 hover:bg-purple-500 rounded text-xs font-bold text-white flex items-center justify-center gap-2"
-                            >
-                                <Wand2 size={12} /> {isGenerating ? '思考中...' : '生成计划'}
-                            </button>
-                            {aiError && (
-                                <div className="mt-2 text-[11px] text-red-300 bg-red-950/40 border border-red-900 rounded p-2">
-                                    {aiError}
+                        {/* Multimodal Agent */}
+                        <div className="rounded-lg border border-cyan-500/20 bg-slate-900 p-4">
+                            <div className="mb-3 flex items-start gap-3">
+                                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-cyan-500/10 text-cyan-400">
+                                    <Sparkles size={15} />
                                 </div>
-                            )}
-                            {aiPlan && (
-                                <div className="mt-3 bg-slate-950/70 border border-purple-500/30 rounded p-3 space-y-2">
-                                    <div className="text-xs text-slate-200 leading-relaxed">{aiPlan.summary}</div>
-                                    <div className="grid grid-cols-3 gap-2 text-[10px] text-slate-400">
-                                        <div className="bg-slate-900 rounded px-2 py-1">Groups: {aiPlan.groupsToCreate.length}</div>
-                                        <div className="bg-slate-900 rounded px-2 py-1">Items: {aiPlan.entitiesToCreate.length}</div>
-                                        <div className="bg-slate-900 rounded px-2 py-1">Frames: {aiPlan.framesToCreate.length}</div>
-                                    </div>
-                                    {aiPlan.warnings.length > 0 && (
-                                        <div className="space-y-1">
-                                            {aiPlan.warnings.map((warning, index) => (
-                                                <div key={index} className="text-[10px] text-amber-300 bg-amber-950/30 border border-amber-900/60 rounded px-2 py-1">
-                                                    {warning}
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                    <div className="flex gap-2">
-                                        <button
-                                            onClick={handleApplyGeneratedPlan}
-                                            className="flex-1 py-1.5 bg-green-600 hover:bg-green-500 rounded text-xs font-bold text-white"
-                                        >
-                                            应用
-                                        </button>
-                                        <button
-                                            onClick={() => setAiPlan(null)}
-                                            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-xs text-slate-300"
-                                        >
-                                            取消
-                                        </button>
-                                    </div>
+                                <div>
+                                    <div className="text-xs font-bold text-slate-200">智能队形编排 Agent</div>
+                                    <p className="mt-1 text-[11px] leading-5 text-slate-500">
+                                        结合音乐、队形草图和你的创作要求，分阶段完成队形设计。
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={handleOpenChoreoAgent}
+                                disabled={isValidatingAgentAccess}
+                                className="flex w-full items-center justify-center gap-2 rounded-md bg-cyan-500 py-2 text-xs font-bold text-slate-950 transition-colors hover:bg-cyan-400 disabled:cursor-wait disabled:opacity-60"
+                            >
+                                <Wand2 size={13} /> {isValidatingAgentAccess ? '正在校验 Key...' : '打开编舞 Agent'}
+                            </button>
+                            {agentAccessError && (
+                                <div className="mt-2 rounded border border-red-900/60 bg-red-950/30 px-2.5 py-2 text-[11px] leading-5 text-red-300">
+                                    {agentAccessError}
                                 </div>
                             )}
                         </div>
@@ -1281,6 +1398,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         ))}
                     </div>
                 )}
+                <ChoreoAgentModal
+                    isOpen={choreoAgentOpen}
+                    aiConfig={aiConfig}
+                    onClose={() => setChoreoAgentOpen(false)}
+                    onApplyPlan={onApplyAIPlan}
+                />
             </div>
 
             {/* Custom Color Picker Modal */}
