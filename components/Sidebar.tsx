@@ -23,9 +23,12 @@ interface SidebarProps {
     onDuplicateSelected: () => void;
     onApplyPreset: (coords: { x: number, y: number }[]) => void;
     onApplyAIPlan: (plan: AIChoreoPlan) => void;
-    onImportMusic: (e: React.ChangeEvent<HTMLInputElement>) => void;
+    onImportMusic: (e?: React.ChangeEvent<HTMLInputElement>) => void;
     onExport: () => void;
-    onImportProject: (e: React.ChangeEvent<HTMLInputElement>) => void;
+    onImportProject: (e?: React.ChangeEvent<HTMLInputElement>) => void;
+    onImportProjectPackage?: () => void;
+    onImportLegacyProject?: () => void;
+    onExportProjectPackage?: () => void;
     selectedPerformerIds: string[];
     onSelectionChange: (ids: string[]) => void;
     musicName: string | null;
@@ -52,7 +55,7 @@ interface SidebarProps {
     // 新增 3D 相关 props
     stageConfig?: StageConfig;
     onStageConfigChange: (updates: Partial<StageConfig>) => void;
-    onLEDContentUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+    onLEDContentUpload: (e?: React.ChangeEvent<HTMLInputElement>) => void;
     onClearLEDContent: () => void;
     aiConfig: AIConfig;
     onAiConfigChange: (config: AIConfig) => void;
@@ -166,6 +169,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     onImportMusic,
     onExport,
     onImportProject,
+    onImportProjectPackage,
+    onImportLegacyProject,
+    onExportProjectPackage,
     selectedPerformerIds,
     onSelectionChange,
     musicName,
@@ -594,10 +600,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             onCreateFromTemplate={onCreateFromTemplate}
                             onLoadTemplate={onLoadTemplate}
                             onNewProject={onResetProject}
+                            onImportPackage={onImportProjectPackage}
+                            onImportLegacy={onImportLegacyProject}
+                            onExportPackage={onExportProjectPackage}
                         />
                         
                         {/* Project Import/Export Section */}
-                        <div className="mt-4 pt-4 border-t border-slate-800">
+                        {!window.electronAPI?.isElectron && <div className="mt-4 pt-4 border-t border-slate-800">
                             <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">导入 / 导出</h3>
                             <div className="space-y-2">
                                 <label className="project-transfer-control w-full h-10 box-border flex items-center justify-start gap-3 px-3 bg-slate-800 hover:bg-slate-700 rounded text-slate-300 transition-colors cursor-pointer">
@@ -608,7 +617,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                     <Download size={14} /> 导出项目 (JSON)
                                 </button>
                             </div>
-                        </div>
+                        </div>}
 
                         {/* Storage Settings - Only in Electron */}
                         {window.electronAPI?.isElectron && (
@@ -658,7 +667,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             )}
                             <label className="block w-full text-center px-3 py-2 bg-slate-700 hover:bg-slate-600 border border-slate-600 rounded text-xs cursor-pointer transition-colors text-white">
                                 导入音频文件
-                                <input type="file" accept="audio/*" className="hidden" onChange={onImportMusic} />
+                                <input
+                                    type="file"
+                                    accept="audio/*"
+                                    className="hidden"
+                                    onClick={(event) => {
+                                        if (window.electronAPI?.isElectron) {
+                                            event.preventDefault();
+                                            onImportMusic();
+                                        }
+                                    }}
+                                    onChange={onImportMusic}
+                                />
                             </label>
                         </div>
 
@@ -761,6 +781,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                             type="file"
                                             accept="image/*,video/*"
                                             className="hidden"
+                                            onClick={(event) => {
+                                                if (window.electronAPI?.isElectron) {
+                                                    event.preventDefault();
+                                                    onLEDContentUpload();
+                                                }
+                                            }}
                                             onChange={onLEDContentUpload}
                                         />
                                     </label>
@@ -936,7 +962,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                         </div>
                                     </div>
                                     <div className="grid grid-cols-1 gap-2">
-                                        <SelectField
+                                        <SelectField<PropCategory>
                                             label="类型"
                                             value={newPropCategory}
                                             onChange={setNewPropCategory}

@@ -120,6 +120,7 @@ export const PropEditorModal: React.FC<PropEditorModalProps> = ({
   const currentWidth = geometryType === 'box' ? boxWidth : extWidth;
   const currentDepth = geometryType === 'box' ? boxDepth : extDepth;
   const currentHeight = geometryType === 'box' ? boxHeight : extHeight;
+  const useSingleColumnFields = true;
 
   // ── Handle shape size changes from ShapeEditor2D ──────────────────────────
 
@@ -184,8 +185,7 @@ export const PropEditorModal: React.FC<PropEditorModalProps> = ({
   return createPortal(
     <div className="fixed inset-0 z-[2147483000] flex items-center justify-center bg-black/60 backdrop-blur-sm">
       <div
-        className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl flex flex-col overflow-hidden"
-        style={{ width: 900, height: 620 }}
+        className="flex h-[min(860px,calc(100dvh-24px))] w-[min(1180px,calc(100vw-24px))] flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-2xl"
       >
         {/* ── Header ─────────────────────────────────────────────────────── */}
         <div className="flex items-center justify-between px-5 py-3 border-b border-slate-700 bg-slate-800/50">
@@ -202,9 +202,9 @@ export const PropEditorModal: React.FC<PropEditorModalProps> = ({
         </div>
 
         {/* ── Body ───────────────────────────────────────────────────────── */}
-        <div className="flex flex-1 min-h-0">
+        <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
           {/* Left panel */}
-          <div className="w-80 flex-shrink-0 flex flex-col border-r border-slate-700 overflow-hidden">
+          <div className="flex min-h-0 w-full flex-shrink-0 flex-col overflow-hidden border-b border-slate-700 lg:w-[380px] lg:border-b-0 lg:border-r xl:w-[420px]">
             {/* Scrollable content area */}
             <div className="flex-1 overflow-y-auto">
 
@@ -246,7 +246,7 @@ export const PropEditorModal: React.FC<PropEditorModalProps> = ({
                   属性
                 </label>
                 <div className="mb-3">
-                  <SelectField
+                  <SelectField<PropCategory>
                     label="类型"
                     value={propCategory}
                     onChange={setPropCategory}
@@ -262,7 +262,7 @@ export const PropEditorModal: React.FC<PropEditorModalProps> = ({
                     helperTone={propCategory === 'platform' ? 'accent' : 'default'}
                   />
                 </div>
-                <div className="grid grid-cols-1 gap-2 mb-2 sm:grid-cols-2 xl:grid-cols-3">
+                <div className={`mb-2 grid gap-2 ${useSingleColumnFields ? 'grid-cols-1' : 'grid-cols-2'}`}>
                   <StepperNumberField
                     label="长度"
                     value={geometryType === 'box' ? boxWidth : extWidth}
@@ -357,7 +357,7 @@ export const PropEditorModal: React.FC<PropEditorModalProps> = ({
           </div>
 
           {/* Right panel -- PropPreview3D */}
-          <div className="flex-1 min-w-0">
+          <div className="min-h-[260px] flex-1 min-w-0">
             <PropPreview3D
               performer={{
                 name,

@@ -1,78 +1,36 @@
 
-export interface Position {
-  x: number; // Main-stage percentage; wings may extend below 0 or above 100
-  y: number; // Percentage 0-100
-  z?: number; // Optional height in meters (0 = ground)
-}
+export type {
+  BoxTextures,
+  ExtrudedTextures,
+  FaceTexture,
+  Frame,
+  LEDContent,
+  Performer,
+  PerformerGroup,
+  PerformerShape,
+  PerformerType,
+  Position,
+  ProjectAssetKind,
+  ProjectAssetResult,
+  ProjectDocument,
+  ProjectImportResult,
+  ProjectLoadResult,
+  ProjectWarning,
+  PropCategory,
+  PropGeometryType,
+  StageConfig,
+} from './electron/project-contract';
 
-export type PerformerShape = 'circle' | 'square' | 'triangle';
-
-export type PerformerType = 'performer' | 'prop';
-
-export type PropGeometryType = 'box' | 'extruded';
-
-export type PropCategory = 'prop' | 'platform';
-
-export interface FaceTexture {
-  dataUrl: string;
-  fileName?: string;
-}
-
-export interface BoxTextures {
-  front?: FaceTexture;
-  back?: FaceTexture;
-  left?: FaceTexture;
-  right?: FaceTexture;
-  top?: FaceTexture;
-  bottom?: FaceTexture;
-}
-
-export interface ExtrudedTextures {
-  side?: FaceTexture;
-  top?: FaceTexture;
-  bottom?: FaceTexture;
-}
-
-export interface Performer {
-  id: string;
-  name: string;
-  color: string;
-  label: string;
-  shape: PerformerShape;
-  groupId?: string; // Optional group membership
-  type?: PerformerType;
-  width?: number; // Width in meters
-  height?: number; // Height in meters
-  depth?: number; // Depth in meters (for 3D props)
-  rotation?: number; // Rotation in degrees
-  propGeometryType?: PropGeometryType;
-  boxTextures?: BoxTextures;
-  extrudedTextures?: ExtrudedTextures;
-  extrudeHeight?: number;
-  polygonPoints?: { x: number; y: number }[];
-  textureDataUrl?: string;
-  propShape?: 'rectangle' | 'ellipse' | 'triangle' | 'diamond' | 'hexagon' | 'custom';
-  propCategory?: PropCategory;
-  boundToId?: string;
-}
-
-export interface PerformerGroup {
-  id: string;
-  name: string;
-  color: string; // Group theme color
-  collapsed: boolean; // Whether the group is collapsed in UI
-  type?: 'performer' | 'prop'; // Group type
-}
-
-export interface Frame {
-  id: string;
-  name: string;
-  startTime: number; // Absolute start time in ms
-  duration: number; // How long the formation is held (ms)
-  positions: Record<string, Position>; // Map performer ID to position
-  notes?: string;
-  hiddenGroupIds?: string[]; // IDs of groups that are hidden in this frame
-}
+import type {
+  Frame,
+  Performer,
+  PerformerGroup,
+  PerformerShape,
+  Position,
+  PropCategory,
+  PropGeometryType,
+  StageConfig,
+} from './electron/project-contract';
 
 export interface Project {
   name: string;
@@ -93,21 +51,6 @@ export interface SelectionBox {
 export enum ToolMode {
   SELECT = 'SELECT',
   ADD_PERFORMER = 'ADD_PERFORMER',
-}
-
-export interface StageConfig {
-  width: number; // Stage width in meters (default 20)
-  depth: number; // Stage depth in meters
-  wingWidth?: number; // Width of each offstage wing in meters
-  ledWidth?: number; // LED wall width in meters
-  ledHeight?: number; // LED wall height in meters
-  ledContent?: LEDContent;
-}
-
-export interface LEDContent {
-  type: 'none' | 'color' | 'image' | 'video';
-  value?: string; // Color hex or filename reference
-  loop?: boolean; // For video looping
 }
 
 export interface Entity {

@@ -10,7 +10,8 @@ module.exports = {
     'dist-electron/main.js',
     'dist-electron/preload.js',
     'dist-electron/ipc-handlers.js',
-    'dist-electron/agent-backend.js',
+    'dist-electron/project-contract.js',
+    'dist-electron/project-service.js',
     'dist/**/*',
     'package.json',
   ],
@@ -20,16 +21,7 @@ module.exports = {
       to: 'icon.png',
     },
   ],
-  extraResources: [
-    {
-      from: 'build/agent-backend/choreomaster-agent',
-      to: 'agent-backend',
-    },
-    {
-      from: 'node_modules/ffmpeg-static/ffmpeg.exe',
-      to: 'ffmpeg/ffmpeg.exe',
-    },
-  ],
+  extraResources: [],
   win: {
     target: [
       {

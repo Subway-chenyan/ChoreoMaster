@@ -14,14 +14,13 @@ interface AppSettings {
   maxRecentProjects: number;
 }
 
-interface AgentBackendRuntime {
-  state: 'starting' | 'ready' | 'stopped' | 'error';
-  baseUrl: string;
-  accessToken: string;
-  configPath: string;
-  logPath: string;
-  error?: string;
-}
+import type {
+  ProjectAssetKind,
+  ProjectAssetResult,
+  ProjectDocument,
+  ProjectImportResult,
+  ProjectLoadResult,
+} from './electron/project-contract';
 
 declare global {
   interface Window {
@@ -43,8 +42,12 @@ declare global {
         setStoragePath: (newPath: string) => Promise<AppSettings>;
         list: () => Promise<ProjectMeta[]>;
         create: (name: string) => Promise<{ id: string; path: string }>;
-        load: (projectId: string) => Promise<{ data: any; projectPath: string }>;
-        save: (projectId: string, projectData: any) => Promise<void>;
+        load: (projectId: string) => Promise<ProjectLoadResult>;
+        save: (projectId: string, projectData: ProjectDocument) => Promise<ProjectLoadResult>;
+        ingestAsset: (projectId: string, sourcePath: string, kind: ProjectAssetKind) => Promise<ProjectAssetResult>;
+        exportPackage: (projectId: string) => Promise<string | null>;
+        importPackage: () => Promise<ProjectImportResult | null>;
+        importLegacy: () => Promise<ProjectImportResult | null>;
         delete: (projectId: string) => Promise<void>;
         copyMedia: (projectId: string, sourcePath: string, mediaType: 'audio' | 'media') => Promise<string>;
         getMediaPath: (projectId: string, fileName: string, mediaType: 'audio' | 'media') => Promise<string>;
@@ -54,13 +57,6 @@ declare global {
         duplicate: (projectId: string) => Promise<{ id: string; path: string }>;
       };
 
-      agent: {
-        getRuntime: () => Promise<AgentBackendRuntime>;
-        restart: () => Promise<AgentBackendRuntime>;
-        openConfig: () => Promise<void>;
-        openLogs: () => Promise<void>;
-      };
-      
       // System information
       isElectron: boolean;
       platform: string;

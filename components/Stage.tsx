@@ -60,6 +60,13 @@ interface DragState {
   initialPositions: Record<string, Position>;
 }
 
+interface PanState {
+  startX: number;
+  startY: number;
+  initialOffsetX: number;
+  initialOffsetY: number;
+}
+
 function getPolygonClipPath(points: { x: number; y: number }[] | undefined): string | undefined {
   if (!points || points.length < 3) return undefined;
   return `polygon(${points.map(p =>
@@ -89,7 +96,10 @@ export const Stage: React.FC<StageProps> = ({
   const stageRef = useRef<HTMLDivElement>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
+  const [panState, setPanState] = useState<PanState | null>(null);
   const [availableSize, setAvailableSize] = useState({ width: 0, height: 0 });
+  const [viewportScale, setViewportScale] = useState(1);
+  const [viewportOffset, setViewportOffset] = useState({ x: 0, y: 0 });
   const stageXBounds = useMemo(() => getStageXBounds(stageConfig), [stageConfig]);
   const wingWidth = getWingWidth(stageConfig);
   const totalStageWidth = getTotalStageWidth(stageConfig);
@@ -175,6 +185,18 @@ export const Stage: React.FC<StageProps> = ({
   };
 
   const handlePointerDown = (e: React.PointerEvent) => {
+    if (e.button === 2 && e.ctrlKey) {
+      e.preventDefault();
+      e.currentTarget.setPointerCapture(e.pointerId);
+      setPanState({
+        startX: e.clientX,
+        startY: e.clientY,
+        initialOffsetX: viewportOffset.x,
+        initialOffsetY: viewportOffset.y,
+      });
+      return;
+    }
+
     if (readonly) return;
     e.currentTarget.setPointerCapture(e.pointerId);
 
@@ -195,6 +217,14 @@ export const Stage: React.FC<StageProps> = ({
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
+    if (panState) {
+      setViewportOffset({
+        x: panState.initialOffsetX + (e.clientX - panState.startX),
+        y: panState.initialOffsetY + (e.clientY - panState.startY),
+      });
+      return;
+    }
+
     if (readonly) return;
 
     if (resizeState && stageRef.current && onUpdatePerformer) {
@@ -274,6 +304,11 @@ export const Stage: React.FC<StageProps> = ({
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
+    if (panState) {
+      setPanState(null);
+      return;
+    }
+
     if (readonly) return;
     const draggedIds = dragState ? Object.keys(dragState.initialPositions) : [];
     setResizeState(null);
@@ -319,6 +354,15 @@ export const Stage: React.FC<StageProps> = ({
   };
 
   const handlePerformerPointerDown = (e: React.PointerEvent, id: string) => {
+    if (e.button === 2 && e.ctrlKey) {
+      return;
+    }
+
+    if (e.button !== 0) {
+      e.preventDefault();
+      return;
+    }
+
     e.stopPropagation();
     if (readonly) return;
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -371,6 +415,32 @@ export const Stage: React.FC<StageProps> = ({
     if (e.ctrlKey && onZoom) {
       e.preventDefault();
       onZoom(e.deltaY > 0 ? -0.1 : 0.1);
+      return;
+    }
+
+    e.preventDefault();
+    const stage = stageRef.current;
+    if (!stage) return;
+    const currentScale = viewportScale;
+    const scaleFactor = e.deltaY > 0 ? 0.92 : 1.08;
+    const nextScale = Math.max(0.6, Math.min(3, currentScale * scaleFactor));
+    if (Math.abs(nextScale - currentScale) < 0.0001) return;
+
+    const rect = stage.getBoundingClientRect();
+    const focalX = e.clientX - (rect.left + rect.width / 2);
+    const focalY = e.clientY - (rect.top + rect.height / 2);
+    const ratio = nextScale / currentScale;
+
+    setViewportScale(nextScale);
+    setViewportOffset((prev) => ({
+      x: prev.x + focalX * (1 - ratio),
+      y: prev.y + focalY * (1 - ratio),
+    }));
+  };
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    if (e.ctrlKey || panState) {
+      e.preventDefault();
     }
   };
 
@@ -420,13 +490,17 @@ export const Stage: React.FC<StageProps> = ({
           width: fittedSize.width > 0 ? `${fittedSize.width}px` : '100%',
           height: fittedSize.height > 0 ? `${fittedSize.height}px` : 'auto',
           aspectRatio: `${visualAspectRatio}`,
-          cursor: mode === ToolMode.SELECT ? 'default' : 'crosshair'
+          cursor: panState ? 'grabbing' : mode === ToolMode.SELECT ? 'default' : 'crosshair',
+          transform: `translate(${viewportOffset.x}px, ${viewportOffset.y}px) scale(${viewportScale})`,
+          transformOrigin: 'center center',
+          transition: panState ? 'none' : 'transform 75ms ease-out',
         }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
         onWheel={handleWheel}
+        onContextMenu={handleContextMenu}
       >
         <div
           className="absolute inset-y-0 left-0 bg-slate-950/55 border-r-2 border-dashed border-amber-400/70 pointer-events-none"

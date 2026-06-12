@@ -419,6 +419,148 @@ const App: React.FC = () => {
     positions: JSON.parse(JSON.stringify(overrides?.positions ?? source.positions))
   }), []);
 
+  const writeBlobToElectronPath = useCallback(async (filePath: string, blob: Blob) => {
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    await window.electronAPI.writeBinaryFile(filePath, bytes);
+  }, []);
+
+  const requestElectronExportPath = useCallback(async (
+    baseName: string,
+    extension: 'mp4' | 'webm'
+  ): Promise<string | null> => {
+    if (!window.electronAPI?.isElectron) return null;
+    return window.electronAPI.saveFile(`${baseName}.${extension}`, [
+      { name: extension === 'mp4' ? 'MP4 Video' : 'WebM Video', extensions: [extension] },
+      { name: 'All Files', extensions: ['*'] },
+    ]);
+  }, []);
+
+  const downloadBlob = useCallback((blob: Blob, fileName: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }, []);
+
+  const withTimeout = useCallback(async <T,>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> => {
+    return new Promise<T>((resolve, reject) => {
+      const timer = window.setTimeout(() => reject(new Error(`${label} 超时`)), timeoutMs);
+      promise.then(
+        (value) => {
+          window.clearTimeout(timer);
+          resolve(value);
+        },
+        (error) => {
+          window.clearTimeout(timer);
+          reject(error);
+        }
+      );
+    });
+  }, []);
+
+  const getExportVideoTime = useCallback((video: HTMLVideoElement, timelineTimeSec: number, shouldLoop: boolean) => {
+    const duration = video.duration;
+    if (!Number.isFinite(duration) || duration <= 0) return Math.max(0, timelineTimeSec);
+    if (shouldLoop) return timelineTimeSec % duration;
+    return Math.min(Math.max(0, timelineTimeSec), Math.max(0, duration - 0.001));
+  }, []);
+
+  const create2DExportLedRenderer = useCallback(async () => {
+    const ledContent = stageConfig.ledContent;
+    if (!ledContent || ledContent.type === 'none' || !ledContent.value) {
+      return null;
+    }
+
+    if (ledContent.type === 'color') {
+      return {
+        draw: async (ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number) => {
+          ctx.fillStyle = ledContent.value!;
+          ctx.fillRect(x, y, width, height);
+        },
+        dispose: () => {},
+      };
+    }
+
+    const assetUrl = mediaCache[ledContent.value];
+    if (!assetUrl) return null;
+
+    if (ledContent.type === 'image') {
+      const image = new Image();
+      await new Promise<void>((resolve, reject) => {
+        image.onload = () => resolve();
+        image.onerror = reject;
+        image.src = assetUrl;
+      });
+      return {
+        draw: async (ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number) => {
+          ctx.drawImage(image, x, y, width, height);
+        },
+        dispose: () => {},
+      };
+    }
+
+    if (ledContent.type === 'video') {
+      const video = document.createElement('video');
+      video.crossOrigin = 'anonymous';
+      video.src = assetUrl;
+      video.loop = ledContent.loop ?? true;
+      video.muted = true;
+      video.playsInline = true;
+      video.preload = 'auto';
+
+      await new Promise<void>((resolve) => {
+        const onReady = () => {
+          video.removeEventListener('loadedmetadata', onReady);
+          video.removeEventListener('loadeddata', onReady);
+          resolve();
+        };
+        video.addEventListener('loadedmetadata', onReady, { once: true });
+        video.addEventListener('loadeddata', onReady, { once: true });
+        window.setTimeout(resolve, 3000);
+        video.load();
+      });
+
+      return {
+        draw: async (ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, timeMs: number) => {
+          if (video.readyState < HTMLMediaElement.HAVE_METADATA) return;
+          const desired = getExportVideoTime(video, timeMs / 1000, video.loop);
+          if (Math.abs(video.currentTime - desired) > 0.03) {
+            await new Promise<void>((resolve) => {
+              const onSeeked = () => {
+                video.removeEventListener('seeked', onSeeked);
+                resolve();
+              };
+              video.addEventListener('seeked', onSeeked, { once: true });
+              window.setTimeout(() => {
+                video.removeEventListener('seeked', onSeeked);
+                resolve();
+              }, 250);
+              try {
+                video.currentTime = desired;
+              } catch {
+                resolve();
+              }
+            });
+          }
+          if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+            ctx.drawImage(video, x, y, width, height);
+          }
+        },
+        dispose: () => {
+          video.pause();
+          video.removeAttribute('src');
+          video.load();
+        },
+      };
+    }
+
+    return null;
+  }, [getExportVideoTime, mediaCache, stageConfig.ledContent]);
+
   // --- Actions ---
 
   const handleAddPerformer = (name: string, color: string, shape: PerformerShape, extra?: Partial<Performer>) => {
@@ -1797,7 +1939,11 @@ const App: React.FC = () => {
     }
   };
 
-  const renderFrameToCanvas = (canvas: HTMLCanvasElement, timeMs: number, opts?: { includeLabels?: boolean; includeGrid?: boolean; bgColor?: string; }) => {
+  const renderFrameToCanvas = async (
+    canvas: HTMLCanvasElement,
+    timeMs: number,
+    opts?: { includeLabels?: boolean; includeGrid?: boolean; bgColor?: string; ledRenderer?: { draw: (ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, timeMs: number) => Promise<void> | void } | null; }
+  ) => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     const includeLabels = opts?.includeLabels ?? true;
@@ -1818,11 +1964,16 @@ const App: React.FC = () => {
     }
     const renderX = (w - renderW) / 2;
     const renderY = (h - renderH) / 2;
+    const leftMainEdge = renderX + stageXToViewPercent(0, stageConfig) / 100 * renderW;
+    const rightMainEdge = renderX + stageXToViewPercent(100, stageConfig) / 100 * renderW;
 
     ctx.fillStyle = '#0f172a';
     ctx.fillRect(0, 0, w, h);
     ctx.fillStyle = bgColor;
     ctx.fillRect(renderX, renderY, renderW, renderH);
+    if (opts?.ledRenderer) {
+      await opts.ledRenderer.draw(ctx, leftMainEdge, renderY, rightMainEdge - leftMainEdge, renderH, timeMs);
+    }
     ctx.strokeStyle = '#334155';
     ctx.lineWidth = scale;
     ctx.strokeRect(renderX + 0.5, renderY + 0.5, renderW - 1, renderH - 1);
@@ -1849,8 +2000,6 @@ const App: React.FC = () => {
 
     const positions = computePositionsAtTime(timeMs);
     const platformOccupancy = buildPlatformOccupancy(performers, positions, stageConfig);
-    const leftMainEdge = renderX + stageXToViewPercent(0, stageConfig) / 100 * renderW;
-    const rightMainEdge = renderX + stageXToViewPercent(100, stageConfig) / 100 * renderW;
 
     ctx.fillStyle = 'rgba(2,6,23,0.55)';
     ctx.fillRect(renderX, renderY, leftMainEdge - renderX, renderH);
@@ -1995,14 +2144,19 @@ const App: React.FC = () => {
     const totalFrames = Math.ceil(totalMs / 1000 * fps);
     const stepMs = 1000 / fps;
     const downloadBaseName = `choreomaster-export-${Math.round(inPointMs)}-${Math.round(outPointMs)}`;
+    const isDesktopElectron = Boolean(window.electronAPI?.isElectron);
     const hasWebCodecs = typeof VideoEncoder !== 'undefined';
     const showSaveFilePicker = (window as any).showSaveFilePicker as
       | ((options?: any) => Promise<any>)
       | undefined;
     let mp4Writable: any = null;
     let webmWritable: any = null;
+    let desktopExportPath: string | null = null;
 
-    if (showSaveFilePicker) {
+    if (window.electronAPI?.isElectron) {
+      desktopExportPath = await requestElectronExportPath(downloadBaseName, hasWebCodecs ? 'mp4' : 'webm');
+      if (!desktopExportPath) return;
+    } else if (showSaveFilePicker) {
       try {
         const handle = await showSaveFilePicker({
           suggestedName: `${downloadBaseName}.${hasWebCodecs ? 'mp4' : 'webm'}`,
@@ -2025,22 +2179,10 @@ const App: React.FC = () => {
     }
 
     setIsExporting(true);
-    setExportProgress(0);
+    setExportProgress(0.02);
 
-    // Pre-load prop textures
-    const texturePromises = performers
-      .filter(p => p.type === 'prop')
-      .map(async (p) => {
-        const texUrl = p.boxTextures?.front?.dataUrl || p.textureDataUrl;
-        if (!texUrl) return;
-        const img = new Image();
-        await new Promise<void>((resolve, reject) => {
-          img.onload = () => { (texUrl as any).loaded = img; resolve(); };
-          img.onerror = reject;
-          img.src = texUrl;
-        });
-      });
-    await Promise.all(texturePromises);
+    // Desktop 2D export intentionally ignores prop textures / LED media to keep the path stable.
+    const ledRenderer = isDesktopElectron ? null : await create2DExportLedRenderer();
 
     // Shared canvas for rendering (reused across both paths to avoid holding all frames in memory)
     const tmpCanvas = document.createElement('canvas');
@@ -2081,27 +2223,15 @@ const App: React.FC = () => {
     if (hasWebCodecs) {
       // --- WebCodecs + mp4-muxer (fast, offline) ---
       try {
-        const { Muxer, StreamTarget, FileSystemWritableFileStreamTarget } = await import('mp4-muxer');
+        const { Muxer, ArrayBufferTarget, FileSystemWritableFileStreamTarget } = await import('mp4-muxer');
 
         const hasAudio = audioBuffer != null && typeof AudioEncoder !== 'undefined';
         const sampleRate = audioBuffer?.sampleRate ?? 44100;
         const numChannels = audioBuffer?.numberOfChannels ?? 1;
-        const mp4Chunks: Uint8Array[] = [];
-        let mp4BytesWritten = 0;
-
+        const arrayBufferTarget = !mp4Writable ? new ArrayBufferTarget() : null;
         const target = mp4Writable
           ? new FileSystemWritableFileStreamTarget(mp4Writable, { chunkSize: 16 * 1024 * 1024 })
-          : new StreamTarget({
-            onData: (data: Uint8Array, position: number) => {
-              if (position !== mp4BytesWritten) {
-                throw new Error('MP4 stream wrote non-sequential data; cannot build download blob safely.');
-              }
-              mp4Chunks.push(data);
-              mp4BytesWritten += data.byteLength;
-            },
-            chunked: true,
-            chunkSize: 16 * 1024 * 1024,
-          });
+          : arrayBufferTarget;
         const muxer = new Muxer({
           target,
           video: { codec: 'avc', width, height },
@@ -2130,7 +2260,11 @@ const App: React.FC = () => {
 
         for (let i = 0; i <= totalFrames; i++) {
           const t = inPointMs + i * stepMs;
-          renderFrameToCanvas(tmpCanvas, Math.min(t, outPointMs), { includeLabels: exportIncludeLabels, includeGrid: exportIncludeGrid });
+          await renderFrameToCanvas(tmpCanvas, Math.min(t, outPointMs), {
+            includeLabels: exportIncludeLabels,
+            includeGrid: exportIncludeGrid,
+            ledRenderer,
+          });
           const frame = await createFrameFromCanvas((i * 1_000_000) / fps, 1_000_000 / fps);
           videoEncoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
           frame.close();
@@ -2139,7 +2273,7 @@ const App: React.FC = () => {
           if (i % 30 === 0) await new Promise(r => setTimeout(r, 0));
         }
 
-        await videoEncoder.flush();
+        await withTimeout(videoEncoder.flush(), 15000, '2D 视频编码');
         videoEncoder.close();
 
         // --- Step 2: Encode audio (after video is fully flushed) ---
@@ -2197,39 +2331,65 @@ const App: React.FC = () => {
           }
 
           setExportProgress(0.95);
-          await audioEncoder.flush();
+          await withTimeout(audioEncoder.flush(), 15000, '2D 音频编码');
           audioEncoder.close();
         }
 
         muxer.finalize();
         if (mp4Writable) {
           await mp4Writable.close();
+        } else if (arrayBufferTarget) {
+          const bytes = new Uint8Array(arrayBufferTarget.buffer);
+          if (desktopExportPath) {
+            await window.electronAPI.writeBinaryFile(desktopExportPath, bytes);
+          } else {
+            downloadBlob(new Blob([bytes], { type: 'video/mp4' }), `${downloadBaseName}.mp4`);
+          }
         } else {
-          const blob = new Blob(mp4Chunks, { type: 'video/mp4' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `${downloadBaseName}.mp4`;
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          URL.revokeObjectURL(url);
+          throw new Error('MP4 export target was not initialized.');
         }
 
         setIsExporting(false);
         setExportProgress(1);
+        ledRenderer?.dispose();
         return;
       } catch (err) {
         if (mp4Writable) {
           try { await mp4Writable.abort?.(); } catch { }
           mp4Writable = null;
         }
+        ledRenderer?.dispose();
         console.error('WebCodecs export failed, falling back to MediaRecorder:', err);
         alert('高速导出失败，已回退到实时录制模式。\n错误: ' + (err instanceof Error ? err.message : String(err)));
       }
     }
 
     // --- Fallback: MediaRecorder (real-time playback, render on-the-fly) ---
+    if (hasWebCodecs) {
+      if (window.electronAPI?.isElectron) {
+        desktopExportPath = await requestElectronExportPath(downloadBaseName, 'webm');
+        if (!desktopExportPath) {
+          setIsExporting(false);
+          return;
+        }
+      } else if (showSaveFilePicker && !webmWritable) {
+        try {
+          const handle = await showSaveFilePicker({
+            suggestedName: `${downloadBaseName}.webm`,
+            types: [{
+              description: 'WebM video',
+              accept: { 'video/webm': ['.webm'] },
+            }],
+          });
+          webmWritable = await handle.createWritable();
+        } catch (err) {
+          setIsExporting(false);
+          if (err instanceof DOMException && err.name === 'AbortError') return;
+          console.warn('WebM file picker unavailable, falling back to in-memory download:', err);
+        }
+      }
+    }
+
     const streamV = (tmpCanvas as any).captureStream ? (tmpCanvas as any).captureStream(fps) : null;
     if (!streamV) {
       if (webmWritable) {
@@ -2272,25 +2432,30 @@ const App: React.FC = () => {
     if (source) source.start(0, inPointMs / 1000);
 
     const recordStart = performance.now();
-    const drawFrame = () => {
+    const drawFrame = async () => {
       const elapsed = performance.now() - recordStart;
       const currentFrameIdx = Math.min(Math.floor(elapsed / stepMs), totalFrames);
       const t = Math.min(inPointMs + currentFrameIdx * stepMs, outPointMs);
-      renderFrameToCanvas(tmpCanvas, t, { includeLabels: exportIncludeLabels, includeGrid: exportIncludeGrid });
+      await renderFrameToCanvas(tmpCanvas, t, {
+        includeLabels: exportIncludeLabels,
+        includeGrid: exportIncludeGrid,
+        ledRenderer,
+      });
       setExportProgress(0.7 + Math.min(0.3, (currentFrameIdx / totalFrames) * 0.3));
 
       if (elapsed < totalMs + stepMs) {
-        requestAnimationFrame(drawFrame);
+        requestAnimationFrame(() => { void drawFrame(); });
       } else {
         recorder.stop();
         if (source) { try { source.stop(); } catch { } }
       }
     };
-    requestAnimationFrame(drawFrame);
+    requestAnimationFrame(() => { void drawFrame(); });
 
     let blob: Blob;
     try {
-      blob = await new Promise<Blob>((resolve, reject) => {
+      blob = await withTimeout(new Promise<Blob>((resolve, reject) => {
+        recorder.onerror = (event) => reject((event as any).error || new Error('MediaRecorder 导出失败'));
         recorder.onstop = () => {
           webmWriteChain
             .then(async () => {
@@ -2308,25 +2473,25 @@ const App: React.FC = () => {
               reject(err);
             });
         };
-      });
+      }), Math.max(totalMs + 15000, 30000), '2D 实时录制');
     } catch (err) {
+      stream.getTracks().forEach((track) => track.stop());
+      offline.dispose();
       setIsExporting(false);
       alert('实时录制导出失败：' + (err instanceof Error ? err.message : String(err)));
       return;
     }
 
+    stream.getTracks().forEach((track) => track.stop());
     setIsExporting(false);
     setExportProgress(1);
 
     if (!webmWritable) {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${downloadBaseName}.webm`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      if (desktopExportPath) {
+        await writeBlobToElectronPath(desktopExportPath, blob);
+      } else {
+        downloadBlob(blob, `${downloadBaseName}.webm`);
+      }
     }
   };
 
@@ -2346,8 +2511,12 @@ const App: React.FC = () => {
       | undefined;
     let mp4Writable: any = null;
     let webmWritable: any = null;
+    let desktopExportPath: string | null = null;
 
-    if (showSaveFilePicker) {
+    if (window.electronAPI?.isElectron) {
+      desktopExportPath = await requestElectronExportPath(downloadBaseName, hasWebCodecs ? 'mp4' : 'webm');
+      if (!desktopExportPath) return;
+    } else if (showSaveFilePicker) {
       try {
         const handle = await showSaveFilePicker({
           suggestedName: `${downloadBaseName}.${hasWebCodecs ? 'mp4' : 'webm'}`,
@@ -2373,10 +2542,12 @@ const App: React.FC = () => {
     setExportProgress(0);
 
     // Pre-load resources
+    setExportProgress(0.03);
     await Promise.all([
       preloadPropTextures(performers),
       preloadLEDVideo(stageConfig, mediaCache),
     ]);
+    setExportProgress(0.08);
 
     // Create offline 3D scene
     const offline = createOfflineScene(
@@ -2384,7 +2555,12 @@ const App: React.FC = () => {
     );
 
     // Pre-capture LED video frames for fast export (seeks once, then uses cache)
-    await offline.prerenderLEDVideo(inPointMs, outPointMs, fps);
+    try {
+      await withTimeout(offline.prerenderLEDVideo(inPointMs, outPointMs, fps), 10000, '3D LED 预处理');
+    } catch (err) {
+      console.warn('3D LED pre-render timed out, continuing without cache:', err);
+    }
+    setExportProgress(0.12);
 
     // Helper: compute hidden groups at a given time
     const getHiddenGroups = (timeMs: number): string[] => {
@@ -2433,27 +2609,15 @@ const App: React.FC = () => {
     if (hasWebCodecs) {
       // --- WebCodecs + mp4-muxer (fast, offline) ---
       try {
-        const { Muxer, StreamTarget, FileSystemWritableFileStreamTarget } = await import('mp4-muxer');
+        const { Muxer, ArrayBufferTarget, FileSystemWritableFileStreamTarget } = await import('mp4-muxer');
 
         const hasAudio = audioBuffer != null && typeof AudioEncoder !== 'undefined';
         const sampleRate = audioBuffer?.sampleRate ?? 44100;
         const numChannels = audioBuffer?.numberOfChannels ?? 1;
-        const mp4Chunks: Uint8Array[] = [];
-        let mp4BytesWritten = 0;
-
+        const arrayBufferTarget = !mp4Writable ? new ArrayBufferTarget() : null;
         const target = mp4Writable
           ? new FileSystemWritableFileStreamTarget(mp4Writable, { chunkSize: 16 * 1024 * 1024 })
-          : new StreamTarget({
-            onData: (data: Uint8Array, position: number) => {
-              if (position !== mp4BytesWritten) {
-                throw new Error('MP4 stream wrote non-sequential data; cannot build download blob safely.');
-              }
-              mp4Chunks.push(data);
-              mp4BytesWritten += data.byteLength;
-            },
-            chunked: true,
-            chunkSize: 16 * 1024 * 1024,
-          });
+          : arrayBufferTarget;
         const muxer = new Muxer({
           target,
           video: { codec: 'avc', width, height },
@@ -2503,7 +2667,7 @@ const App: React.FC = () => {
           if (i % 30 === 0) await new Promise(r => setTimeout(r, 0));
         }
 
-        await videoEncoder.flush();
+        await withTimeout(videoEncoder.flush(), 15000, '3D 视频编码');
         videoEncoder.close();
 
         // --- Step 2: Encode audio (after video is fully flushed) ---
@@ -2561,23 +2725,22 @@ const App: React.FC = () => {
           }
 
           setExportProgress(0.95);
-          await audioEncoder.flush();
+          await withTimeout(audioEncoder.flush(), 15000, '3D 音频编码');
           audioEncoder.close();
         }
 
         muxer.finalize();
         if (mp4Writable) {
           await mp4Writable.close();
+        } else if (arrayBufferTarget) {
+          const bytes = new Uint8Array(arrayBufferTarget.buffer);
+          if (desktopExportPath) {
+            await window.electronAPI.writeBinaryFile(desktopExportPath, bytes);
+          } else {
+            downloadBlob(new Blob([bytes], { type: 'video/mp4' }), `${downloadBaseName}.mp4`);
+          }
         } else {
-          const blob = new Blob(mp4Chunks, { type: 'video/mp4' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `${downloadBaseName}.mp4`;
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          URL.revokeObjectURL(url);
+          throw new Error('MP4 export target was not initialized.');
         }
 
         offline.dispose();
@@ -2595,6 +2758,35 @@ const App: React.FC = () => {
     }
 
     // --- Fallback: MediaRecorder (real-time rendering) ---
+    if (hasWebCodecs) {
+      if (window.electronAPI?.isElectron) {
+        desktopExportPath = await requestElectronExportPath(downloadBaseName, 'webm');
+        if (!desktopExportPath) {
+          offline.dispose();
+          setIsExporting(false);
+          return;
+        }
+      } else if (showSaveFilePicker && !webmWritable) {
+        try {
+          const handle = await showSaveFilePicker({
+            suggestedName: `${downloadBaseName}.webm`,
+            types: [{
+              description: 'WebM video',
+              accept: { 'video/webm': ['.webm'] },
+            }],
+          });
+          webmWritable = await handle.createWritable();
+        } catch (err) {
+          if (err instanceof DOMException && err.name === 'AbortError') {
+            offline.dispose();
+            setIsExporting(false);
+            return;
+          }
+          console.warn('WebM file picker unavailable, falling back to in-memory download:', err);
+        }
+      }
+    }
+
     const streamV = (offline.renderer.domElement as any).captureStream
       ? (offline.renderer.domElement as any).captureStream(fps)
       : null;
@@ -2664,7 +2856,8 @@ const App: React.FC = () => {
 
     let blob: Blob;
     try {
-      blob = await new Promise<Blob>((resolve, reject) => {
+      blob = await withTimeout(new Promise<Blob>((resolve, reject) => {
+        recorder.onerror = (event) => reject((event as any).error || new Error('MediaRecorder 导出失败'));
         recorder.onstop = () => {
           webmWriteChain
             .then(async () => {
@@ -2682,25 +2875,26 @@ const App: React.FC = () => {
               reject(err);
             });
         };
-      });
+      }), Math.max(totalMs + 15000, 30000), '3D 实时录制');
     } catch (err) {
+      stream.getTracks().forEach((track) => track.stop());
+      ledRenderer?.dispose();
       setIsExporting(false);
       alert('实时录制导出失败：' + (err instanceof Error ? err.message : String(err)));
       return;
     }
 
+    stream.getTracks().forEach((track) => track.stop());
     setIsExporting(false);
     setExportProgress(1);
+    ledRenderer?.dispose();
 
     if (!webmWritable) {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${downloadBaseName}.webm`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      if (desktopExportPath) {
+        await writeBlobToElectronPath(desktopExportPath, blob);
+      } else {
+        downloadBlob(blob, `${downloadBaseName}.webm`);
+      }
     }
   };
 

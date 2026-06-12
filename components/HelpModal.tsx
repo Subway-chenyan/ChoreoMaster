@@ -88,6 +88,14 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
                                 <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Delete / Backspace</kbd>
                             </li>
                             <li className="flex justify-between">
+                                <span>缩放 2D 舞台</span>
+                                <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">滚轮</kbd>
+                            </li>
+                            <li className="flex justify-between">
+                                <span>平移 2D 舞台</span>
+                                <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Ctrl + 右键拖拽</kbd>
+                            </li>
+                            <li className="flex justify-between">
                                 <span>调整网格密度</span>
                                 <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Ctrl + 滚轮</kbd>
                             </li>

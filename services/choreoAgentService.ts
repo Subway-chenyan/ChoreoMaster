@@ -26,20 +26,10 @@ const readResponse = async <T>(response: Response): Promise<T> => {
 };
 
 export const validateAgentAccess = async (config: AIConfig): Promise<void> => {
-  try {
-    const response = await fetch(`${getBaseUrl(config)}/api/auth/validate`, {
-      headers: getHeaders(config),
-    });
-    await readResponse<{ valid: boolean }>(response);
-  } catch (error) {
-    if (window.electronAPI?.isElectron) {
-      const runtime = await window.electronAPI.agent.getRuntime();
-      if (runtime.state !== 'ready') {
-        throw new Error(runtime.error || '桌面端 Agent 服务尚未就绪。');
-      }
-    }
-    throw error;
-  }
+  const response = await fetch(`${getBaseUrl(config)}/api/auth/validate`, {
+    headers: getHeaders(config),
+  });
+  await readResponse<{ valid: boolean }>(response);
 };
 
 export const createChoreoPlan = async (

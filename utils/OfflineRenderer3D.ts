@@ -434,9 +434,12 @@ export function createOfflineScene(
     const shouldLoop = video.loop;
     const inSec = inPointMs / 1000;
     const outSec = outPointMs / 1000;
+    const exportDurationSec = Math.max(0.1, outSec - inSec);
+    const maxCachedFrames = Math.max(30, Math.min(180, Math.ceil(exportDurationSec * Math.min(fps, 10))));
+    const maxCaptureBudgetMs = 8000;
 
-    // Capture at ~2fps intervals (enough for smooth-looking background video)
-    ledFrameInterval = 0.5;
+    // Treat LED pre-capture as an optimization only; bound time and sample count to avoid export stalls.
+    ledFrameInterval = Math.max(0.1, exportDurationSec / maxCachedFrames);
     ledFrameCache = new Map();
 
     const captureTimes: number[] = [];
@@ -446,13 +449,19 @@ export function createOfflineScene(
     }
     // Deduplicate
     const uniqueTimes = [...new Set(captureTimes)].sort((a, b) => a - b);
+    const captureDeadline = performance.now() + maxCaptureBudgetMs;
+    let completed = true;
 
     for (const vt of uniqueTimes) {
+      if (performance.now() > captureDeadline) {
+        completed = false;
+        break;
+      }
       video.currentTime = vt;
       await new Promise<void>(resolve => {
         const onSeeked = () => { video.removeEventListener('seeked', onSeeked); resolve(); };
         video.addEventListener('seeked', onSeeked, { once: true });
-        setTimeout(() => { video.removeEventListener('seeked', onSeeked); resolve(); }, 2000);
+        setTimeout(() => { video.removeEventListener('seeked', onSeeked); resolve(); }, 400);
       });
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       const bitmap = await createImageBitmap(canvas);
@@ -460,7 +469,7 @@ export function createOfflineScene(
     }
 
     // Switch LED material from VideoTexture to CanvasTexture for frame-cache playback
-    if (ledFrameCacheCanvas && ledFrameCache.size > 0) {
+    if (completed && ledFrameCacheCanvas && ledFrameCache.size > 0) {
       const canvasTex = new THREE.CanvasTexture(ledFrameCacheCanvas);
       configureLEDTexture(canvasTex);
       (ledMesh.material as THREE.MeshBasicMaterial).map = canvasTex;
@@ -470,6 +479,10 @@ export function createOfflineScene(
         ledVideoTexture.dispose();
         ledVideoTexture = null;
       }
+    } else if (!completed && ledFrameCache) {
+      ledFrameCache.forEach(bitmap => bitmap.close());
+      ledFrameCache.clear();
+      ledFrameCache = null;
     }
   }
 

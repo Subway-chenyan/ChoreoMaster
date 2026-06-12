@@ -1,73 +1,75 @@
-# 桌面端多智能体集成
+# Agent 服务集成
 
-## 架构
+## 架构边界
 
-桌面端采用三进程结构：
+ChoreoMaster 的桌面端和 Web 端都把 Agent 视为独立 HTTP 服务：
 
-1. Electron 主进程负责窗口、项目文件和本地 Agent 服务生命周期。
-2. React 渲染进程负责编辑器与人机审批界面。
-3. Python Agent 进程运行 FastAPI、LangGraph、模型适配器和 SQLite 检查点。
+1. Electron 只负责窗口、项目文件和本地资源协议。
+2. React 编辑器通过 `services/choreoAgentService.ts` 调用 Agent API。
+3. Python/FastAPI 后端独立部署，负责 LangGraph、模型调用、会话检查点和多模态处理。
 
-React 不直接启动 Python，也不接触文件系统。Electron 启动 Agent 后端后，通过
-preload 暴露受控的运行时 URL、会话令牌、重启和日志入口。业务请求继续使用 HTTP，
-因此 Web 端和桌面端可以复用同一套 `choreoAgentService`。
+Electron 不再启动 Python 子进程，也不再包含 Agent 可执行文件、Python 依赖或 FFmpeg。这样桌面安装包和 Agent 服务可以独立发布与扩缩容。
 
-## 多智能体如何合入
+## 客户端配置
 
-多智能体编排保留在 `backend/app/agent`：
+桌面端和 Web 端使用相同配置：
 
-- 文本编排图负责意图识别、上下文构建、方案生成和结果校验。
-- 多模态编排图负责音频分析、草图分析、设计汇总、方案细化和人工审批。
-- LangGraph checkpoint 保存可恢复会话，React 轮询会话并渲染每个节点的进度。
-- Electron 只管理 Agent 服务，不把编排逻辑搬入主进程或渲染进程。
-
-后续新增灯光、服装、镜头等 Agent 节点时，不需要修改桌面进程协议；只需扩展后端图
-状态、API 响应类型和对应的 React 展示。
-
-## 开发运行
-
-```powershell
-npm run dev:electron
+```dotenv
+VITE_AI_BACKEND_URL=https://agent.example.com
+VITE_MEMBER_TOKEN=
 ```
 
-Electron 会自动读取仓库根目录 `.env`，选择空闲回环端口并启动 Uvicorn。渲染进程
-通过 IPC 获取实际地址，不依赖固定的 `8000` 端口。
+用户也可以在应用的 Agent 设置中填写服务地址和访问 Key。设置保存在当前客户端的 `localStorage`，不会写入项目包。
 
-## 构建 Windows 安装包
+生产环境建议：
 
-首次构建先安装 Python 构建依赖：
+- Agent 服务必须使用 HTTPS。
+- 通过 `AGENT_ACCESS_KEYS` 发放和轮换访问 Key。
+- 设置 `ALLOW_DEV_MEMBER_TOKEN=false`。
+- 在网关或服务端配置允许桌面端和 Web 端来源访问的 CORS 策略。
+
+## 后端运行
+
+本地开发：
 
 ```powershell
-python -m pip install -r backend/requirements-desktop.txt
+npm run dev:backend
 ```
 
-然后运行：
+或者直接运行 FastAPI：
+
+```powershell
+cd backend
+python -m pip install -r requirements.txt
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+`npm start` 仍可用于本地同时启动 Web 前端和后端，但这只是开发编排，不代表后端会进入 Electron 安装包。
+
+## Electron 构建
 
 ```powershell
 npm run build:electron
 ```
 
-构建链会依次：
+构建链只包含：
 
-1. 用 PyInstaller 生成 `build/agent-backend/choreomaster-agent`。
-2. 编译 Electron 主进程和 React 前端。
-3. 将 Agent 后端与 FFmpeg 放入 Electron `resources`。
-4. 在 `release` 目录生成 Windows x64 NSIS 安装包。
+1. Electron 主进程和 preload。
+2. React/Vite 前端。
+3. Electron Builder 安装包。
 
-## 运行时配置
+Windows 产物位于 `release/`，解包目录位于 `release/win-unpacked/`。其中不应出现 `resources/agent-backend` 或 `resources/ffmpeg`。
 
-首次启动安装版时会创建：
+## 服务接口
 
-```text
-%APPDATA%\choreomaster-desktop\agent.env
-```
+主要接口：
 
-默认文本编排使用本地规则模式。启用 Gemini 多模态 Agent 时，在该文件填写
-`GEMINI_API_KEY` 后重启应用或调用 Agent 重启接口。运行日志位于：
+- `GET /health`
+- `POST /api/auth/validate`
+- `POST /api/ai/choreo-plan`
+- `POST /api/choreo/sessions`
+- `POST /api/choreo/sessions/{id}/run`
+- `POST /api/choreo/sessions/{id}/resume`
+- `GET /api/choreo/sessions/{id}`
 
-```text
-%APPDATA%\choreomaster-desktop\logs\agent-backend.log
-```
-
-主进程每次启动生成随机本地访问令牌，仅绑定 `127.0.0.1`，并在桌面程序退出时回收
-Agent 子进程。模型 API Key 不进入前端构建产物。
+除健康检查外，业务接口使用 `Authorization: Bearer <member-token>`。
