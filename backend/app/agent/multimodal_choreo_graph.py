@@ -56,7 +56,7 @@ class MultimodalChoreoState(TypedDict, total=False):
 
 
 def _database_path() -> str:
-    default = Path(tempfile.gettempdir()) / "choreomaster-test-sessions.sqlite"
+    default = Path(tempfile.gettempdir()) / "cosstage-test-sessions.sqlite"
     path = Path(os.getenv("CHOREO_TEST_DB_PATH", str(default)))
     path.parent.mkdir(parents=True, exist_ok=True)
     return str(path)
@@ -516,7 +516,7 @@ def cleanup_assets(state: MultimodalChoreoState) -> dict[str, Any]:
     if temp_dir:
         shutil.rmtree(temp_dir, ignore_errors=True)
     request = TestSessionCreateRequest.model_validate(state["request"])
-    upload_root = Path(tempfile.gettempdir()) / "choreomaster-agent-uploads"
+    upload_root = Path(tempfile.gettempdir()) / "cosstage-agent-uploads"
     for raw_path in (request.audio_path, request.sketch_path):
         if not raw_path:
             continue

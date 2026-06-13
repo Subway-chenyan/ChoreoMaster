@@ -2,7 +2,7 @@
 
 ## Goal
 
-Add a polished in-app landing page that explains ChoreoMaster, presents its core
+Add a polished in-app landing page that explains CosStage, presents its core
 capabilities, and gives users a practical getting-started guide without leaving
 the current Electron/React application.
 

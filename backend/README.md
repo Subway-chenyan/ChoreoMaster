@@ -1,4 +1,4 @@
-# ChoreoMaster AI Backend
+# CosStage AI Backend
 
 Python + FastAPI + LangGraph backend for the intelligent formation module.
 

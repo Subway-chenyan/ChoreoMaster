@@ -20,7 +20,7 @@ import {
 const ONE_PIXEL_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
 async function withTempDir(run) {
-  const directory = await mkdtemp(path.join(tmpdir(), 'choreomaster-project-test-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'cosstage-project-test-'));
   try {
     await run(directory);
   } finally {

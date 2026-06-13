@@ -1,15 +1,15 @@
-# ChoreoMaster Windows Desktop - 实施完成报告
+# CosStage Windows Desktop - 实施完成报告
 
 ## 开发状态：✅ 完成
 
-Windows 桌面应用已成功构建，可以直接运行 `release/win-unpacked/ChoreoMaster.exe`。
+Windows 桌面应用已成功构建，可以直接运行 `release/win-unpacked/CosStage.exe`。
 
 ---
 
 ## 目录结构
 
 ```
-ChoreoMaster/
+CosStage/
 ├── electron/                      # Electron 主进程源码
 │   ├── main.ts                   # 主进程入口
 │   ├── preload.ts                # 预加载脚本 (IPC 桥接)
@@ -128,7 +128,7 @@ ChoreoMaster/
 ### ✅ 7. 构建配置
 
 **package.json**更新：
-- 修改项目名称为`choreomaster-desktop`
+- 修改项目名称为`cosstage-desktop`
 - 添加Electron依赖
 - 添加构建脚本：
   - `dev` - Web开发服务器（端口5173）
@@ -265,7 +265,7 @@ npm run dev:electron
 npm run build:electron
 
 # 运行应用
-./release/win-unpacked/ChoreoMaster.exe
+./release/win-unpacked/CosStage.exe
 ```
 
 ---
@@ -275,7 +275,7 @@ npm run build:electron
 | 项目 | 值 |
 |------|-----|
 | 应用大小 | ~861 MB (unpacked) |
-| 可执行文件 | ChoreoMaster.exe (182 MB) |
+| 可执行文件 | CosStage.exe (182 MB) |
 | 目标平台 | Windows 10/11 x64 |
 | 运行时 | Electron 34 (内置 Chromium + Node.js) |
 
@@ -290,4 +290,4 @@ npm run build:electron
 - **双模式支持**：Web 和桌面版本共存
 - **应用图标**：已使用 AI 生成专业图标
 
-**运行方式**：直接双击 `release/win-unpacked/ChoreoMaster.exe`
+**运行方式**：直接双击 `release/win-unpacked/CosStage.exe`

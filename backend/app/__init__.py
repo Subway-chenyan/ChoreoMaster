@@ -1,1 +1,1 @@
-"""ChoreoMaster AI backend."""
+"""CosStage AI backend."""

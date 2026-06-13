@@ -111,3 +111,17 @@ test('stage selection box converts client pixels into transformed local coordina
   assert.match(stage, /width: Math\.abs\(selectionBox\.endX - selectionBox\.startX\) \* scaleX/);
   assert.match(stage, /style=\{getSelectionBoxStyle\(\)\}/);
 });
+
+test('CosStage rebrand preserves upgrade and legacy compatibility identifiers', async () => {
+  const [pkg, builder, index, ipc] = await Promise.all([
+    read('package.json'),
+    read('electron-builder.config.cjs'),
+    read('index.tsx'),
+    read('electron/ipc-handlers.ts'),
+  ]);
+
+  assert.match(pkg, /"name": "cosstage-desktop"/);
+  assert.match(builder, /appId: 'com\.choreomaster\.app'/);
+  assert.match(index, /key\.startsWith\('choreomaster-'\) \|\| key\.startsWith\('cosstage-'\)/);
+  assert.match(ipc, /Legacy ChoreoMaster JSON/);
+});

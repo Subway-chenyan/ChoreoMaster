@@ -2,7 +2,7 @@
 
 ## Goal
 
-Improve desktop project management so a user can create, save, export, and restore a complete ChoreoMaster project, including formation data, audio, stage background image/video, prop textures, and future binary resources. The project must remain editable after restoration without asking the user to locate the original media files.
+Improve desktop project management so a user can create, save, export, and restore a complete CosStage project, including formation data, audio, stage background image/video, prop textures, and future binary resources. The project must remain editable after restoration without asking the user to locate the original media files.
 
 ## What I Already Know
 
@@ -31,7 +31,7 @@ Improve desktop project management so a user can create, save, export, and resto
 - Copy audio and LED background image/video into the active managed project when selected.
 - Externalize prop textures from manifest `data:` URLs into project-owned files while preserving compatibility with existing embedded textures.
 - Restore audio playback, waveform data, LED background media, and prop textures automatically when a managed project is loaded.
-- Export a complete portable project package with a ChoreoMaster-specific extension.
+- Export a complete portable project package with a CosStage-specific extension.
 - Import a portable package through Electron IPC and install it into managed project storage.
 - Always import a portable package as a new managed local project; never replace or overwrite the currently open project.
 - Continue importing legacy standalone JSON files through a migration path.

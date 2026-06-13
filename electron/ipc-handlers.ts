@@ -74,7 +74,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     const { filePath } = await dialog.showSaveDialog(mainWindow, {
       defaultPath: defaultName,
       filters: filters && filters.length > 0 ? filters : [
-        { name: 'ChoreoMaster Project', extensions: ['json'] },
+        { name: 'CosStage Project', extensions: ['json'] },
         { name: 'All Files', extensions: ['*'] },
       ],
     });
@@ -85,7 +85,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     const { filePaths } = await dialog.showOpenDialog(mainWindow, {
       properties: ['openFile'],
       filters: filters || [
-        { name: 'ChoreoMaster Project', extensions: ['json'] },
+        { name: 'CosStage Project', extensions: ['json'] },
         { name: 'All Files', extensions: ['*'] },
       ],
     });
@@ -270,11 +270,11 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     const settings = await loadSettings();
     const projectDir = path.join(settings.storagePath, 'projects', projectId);
     const content = JSON.parse(await fs.readFile(path.join(projectDir, 'project.json'), 'utf8')) as { name?: string };
-    const defaultName = `${content.name || 'choreomaster-project'}.choreo`;
+    const defaultName = `${content.name || 'CosStage-project'}.choreo`;
     const { filePath } = await dialog.showSaveDialog(mainWindow, {
       defaultPath: defaultName,
       filters: [
-        { name: 'ChoreoMaster Project Package', extensions: ['choreo'] },
+        { name: 'CosStage Project Package', extensions: ['choreo'] },
         { name: 'All Files', extensions: ['*'] },
       ],
     });
@@ -287,7 +287,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     const { filePaths } = await dialog.showOpenDialog(mainWindow, {
       properties: ['openFile'],
       filters: [
-        { name: 'ChoreoMaster Project Package', extensions: ['choreo'] },
+        { name: 'CosStage Project Package', extensions: ['choreo'] },
         { name: 'All Files', extensions: ['*'] },
       ],
     });

@@ -1,4 +1,4 @@
-# ChoreoMaster 操作指南（桌面端 / Web）
+# CosStage 操作指南（桌面端 / Web）
 
 本文档基于当前仓库真实 UI 与快捷键实现编写，覆盖桌面端（Electron）与网页端（Web/PWA）的常用流程与差异。
 

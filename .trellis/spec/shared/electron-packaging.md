@@ -16,6 +16,7 @@
 - `build/icon.ico` is the Windows executable, installer, and uninstaller icon.
 - `build/icon.png` is copied beside the packaged executable as `icon.png`.
 - `signAndEditExecutable` must not be `false`; Electron Builder must edit executable resources.
+- Keep the existing `appId` stable during a product-name rebrand so installed copies continue upgrading in place.
 
 ### 4. Validation & Error Matrix
 

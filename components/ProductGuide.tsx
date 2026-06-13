@@ -122,7 +122,7 @@ export const ProductGuide: React.FC<ProductGuideProps> = ({ onClose }) => {
             onClick={() => scrollToSection('overview')}
             className="mr-auto text-sm font-semibold tracking-tight"
           >
-            ChoreoMaster
+            CosStage
           </button>
           <nav className="product-guide__nav flex items-center gap-1 overflow-x-auto text-sm">
             <button type="button" onClick={() => scrollToSection('overview')} className={`whitespace-nowrap rounded-lg px-3 py-2 transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-200'}`}>
@@ -151,7 +151,7 @@ export const ProductGuide: React.FC<ProductGuideProps> = ({ onClose }) => {
                 <span className="block text-blue-500">都清晰可见。</span>
               </h1>
               <p className={`mt-7 max-w-xl text-base leading-8 sm:text-lg ${mutedClass}`}>
-                ChoreoMaster 将队形设计、时间编排、舞台预演与视频输出整合在同一个工作区，
+                CosStage 将队形设计、时间编排、舞台预演与视频输出整合在同一个工作区，
                 帮助编舞、导演与舞台团队更快达成共识。
               </p>
               <div className="mt-9 flex flex-wrap gap-3">

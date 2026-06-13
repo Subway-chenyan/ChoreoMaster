@@ -31,7 +31,7 @@ function isRecord(value: unknown): value is UnknownRecord {
 
 function sanitizeName(value: string): string {
   const safe = value.trim().replace(/[<>:"/\\|?*\u0000-\u001F]/g, '-').replace(/\s+/g, ' ');
-  return safe || 'ChoreoMaster Project';
+  return safe || 'CosStage Project';
 }
 
 function parseAudioMarkers(value: unknown): AudioMarker[] {

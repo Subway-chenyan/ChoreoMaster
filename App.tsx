@@ -1510,7 +1510,7 @@ const App: React.FC = () => {
     const projectData = {
       version: "1.2",
       createdAt: new Date().toISOString(),
-      name: "ChoreoMaster Project",
+      name: "CosStage Project",
       musicName,
       performers,
       performerGroups,
@@ -1522,7 +1522,7 @@ const App: React.FC = () => {
     // Check if running in Electron
     if (window.electronAPI?.isElectron) {
       try {
-        const defaultName = `choreomaster-project-${new Date().toISOString().slice(0, 10)}.json`;
+        const defaultName = `CosStage-project-${new Date().toISOString().slice(0, 10)}.json`;
         const filePath = await window.electronAPI.saveFile(defaultName);
         if (filePath) {
           await window.electronAPI.writeFile(filePath, JSON.stringify(projectData, null, 2));
@@ -1538,7 +1538,7 @@ const App: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `choreomaster-project-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `CosStage-project-${new Date().toISOString().slice(0, 10)}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -1589,7 +1589,7 @@ const App: React.FC = () => {
     if (window.electronAPI?.isElectron) {
       try {
         const filePath = await window.electronAPI.openFile([
-          { name: 'ChoreoMaster Project', extensions: ['json'] },
+          { name: 'CosStage Project', extensions: ['json'] },
           { name: 'JSON Files', extensions: ['json'] },
         ]);
 
@@ -2220,7 +2220,7 @@ const App: React.FC = () => {
     const totalMs = outPointMs - inPointMs;
     const totalFrames = Math.ceil(totalMs / 1000 * fps);
     const stepMs = 1000 / fps;
-    const downloadBaseName = `choreomaster-export-${Math.round(inPointMs)}-${Math.round(outPointMs)}`;
+    const downloadBaseName = `CosStage-export-${Math.round(inPointMs)}-${Math.round(outPointMs)}`;
     const isDesktopElectron = Boolean(window.electronAPI?.isElectron);
     const hasWebCodecs = typeof VideoEncoder !== 'undefined';
     const showSaveFilePicker = (window as any).showSaveFilePicker as
@@ -2581,7 +2581,7 @@ const App: React.FC = () => {
     const totalMs = outPointMs - inPointMs;
     const totalFrames = Math.ceil(totalMs / 1000 * fps);
     const stepMs = 1000 / fps;
-    const downloadBaseName = `choreomaster-3d-${exportCameraAngle}-${Math.round(inPointMs)}-${Math.round(outPointMs)}`;
+    const downloadBaseName = `CosStage-3d-${exportCameraAngle}-${Math.round(inPointMs)}-${Math.round(outPointMs)}`;
     const hasWebCodecs = typeof VideoEncoder !== 'undefined';
     const showSaveFilePicker = (window as any).showSaveFilePicker as
       | ((options?: any) => Promise<any>)
@@ -3092,7 +3092,7 @@ const App: React.FC = () => {
             <button
               onClick={handleInstallPwa}
               className="touch-target flex items-center justify-center gap-1.5 rounded-lg px-2 text-xs text-blue-300 hover:bg-slate-800 hover:text-blue-200"
-              title="安装 ChoreoMaster"
+              title="安装 CosStage"
             >
               <Download size={18} />
               <span className="desktop-only">安装</span>

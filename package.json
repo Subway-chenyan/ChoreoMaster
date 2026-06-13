@@ -1,7 +1,7 @@
 {
-  "name": "choreomaster-desktop",
-  "description": "ChoreoMaster desktop choreography editor",
-  "author": "ChoreoMaster",
+  "name": "cosstage-desktop",
+  "description": "CosStage desktop choreography editor",
+  "author": "CosStage",
   "private": true,
   "version": "1.0.0",
   "main": "dist-electron/main.js",

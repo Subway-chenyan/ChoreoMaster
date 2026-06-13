@@ -287,6 +287,6 @@ JSON Schema：{json.dumps(schema, ensure_ascii=False)}
 
 def create_session_temp_dir(session_id: str) -> str:
     root = Path(os.getenv("CHOREO_TEST_ASSET_DIR", tempfile.gettempdir()))
-    path = root / "choreomaster-multimodal" / session_id
+    path = root / "cosstage-multimodal" / session_id
     path.mkdir(parents=True, exist_ok=True)
     return str(path)

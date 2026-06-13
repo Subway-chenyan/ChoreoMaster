@@ -2,7 +2,7 @@
 
 ## 架构边界
 
-ChoreoMaster 的桌面端和 Web 端都把 Agent 视为独立 HTTP 服务：
+CosStage 的桌面端和 Web 端都把 Agent 视为独立 HTTP 服务：
 
 1. Electron 只负责窗口、项目文件和本地资源协议。
 2. React 编辑器通过 `services/choreoAgentService.ts` 调用 Agent API。

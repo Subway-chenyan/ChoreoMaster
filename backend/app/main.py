@@ -29,7 +29,7 @@ from app.multimodal_models import (
     TestSessionResumeRequest,
 )
 
-app = FastAPI(title="ChoreoMaster AI Backend")
+app = FastAPI(title="CosStage AI Backend")
 
 app.add_middleware(
     CORSMiddleware,
@@ -112,7 +112,7 @@ async def create_multimodal_session(
 
     upload_dir = (
         Path(tempfile.gettempdir())
-        / "choreomaster-agent-uploads"
+        / "cosstage-agent-uploads"
         / uuid.uuid4().hex
     )
     upload_dir.mkdir(parents=True, exist_ok=True)

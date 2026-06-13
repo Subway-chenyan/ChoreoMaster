@@ -118,12 +118,16 @@ function registerProjectAssetProtocol() {
     });
 }
 function createWindow() {
+    const windowIconPath = app.isPackaged
+        ? path.join(path.dirname(process.execPath), 'icon.png')
+        : path.join(__dirname, '..', 'build', 'icon.png');
     mainWindow = new BrowserWindow({
         width: 1920,
         height: 1080,
         minWidth: 1280,
         minHeight: 720,
         backgroundColor: '#0f172a',
+        icon: windowIconPath,
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
             contextIsolation: true,

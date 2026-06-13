@@ -1,4 +1,4 @@
-# ChoreoMaster 手机端 PWA 安装指南
+# CosStage 手机端 PWA 安装指南
 
 ## 什么是 PWA？
 
@@ -8,7 +8,7 @@ PWA（Progressive Web App）是一种可以像原生 App 一样安装到手机�
 
 ### Android（Chrome 浏览器）
 
-1. 用 Chrome 浏览器打开 ChoreoMaster 网站
+1. 用 Chrome 浏览器打开 CosStage 网站
 2. 点击浏览器右上角的 **⋮**（三点菜单）
 3. 选择 **"添加到主屏幕"** 或 **"安装应用"**
 4. 确认安装，应用图标会出现在主屏幕上
@@ -16,18 +16,18 @@ PWA（Progressive Web App）是一种可以像原生 App 一样安装到手机�
 
 ### iPhone / iPad（Safari 浏览器）
 
-1. 用 **Safari** 浏览器打开 ChoreoMaster 网站
+1. 用 **Safari** 浏览器打开 CosStage 网站
    > ⚠️ 必须使用 Safari，Chrome 等其他浏览器不支持 iOS 安装 PWA
 2. 点击底部的 **分享按钮**（方框+向上箭头图标）
 3. 向下滚动，找到 **"添加到主屏幕"**
 4. 可以修改显示名称，然后点击右上角 **"添加"**
-5. 回到主屏幕，点击 ChoreoMaster 图标即可使用
+5. 回到主屏幕，点击 CosStage 图标即可使用
 
 ### 应用内安装
 
 部分浏览器支持在页面内直接安装：
 
-- 打开 ChoreoMaster 后，如果浏览器支持，顶部栏会出现一个 **"安装"** 按钮（📥 下载图标）
+- 打开 CosStage 后，如果浏览器支持，顶部栏会出现一个 **"安装"** 按钮（📥 下载图标）
 - 点击该按钮即可快速安装
 
 ## 常见问题

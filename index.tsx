@@ -32,7 +32,7 @@ if ('serviceWorker' in navigator) {
     if ('caches' in window) {
       void caches.keys().then((keys) => {
         keys
-          .filter((key) => key.startsWith('choreomaster-'))
+          .filter((key) => key.startsWith('choreomaster-') || key.startsWith('cosstage-'))
           .forEach((key) => void caches.delete(key));
       });
     }
