@@ -163,6 +163,15 @@ export const ProductGuide: React.FC<ProductGuideProps> = ({ onClose }) => {
                   开始编排
                   <ArrowRight size={17} />
                 </button>
+                <a
+                  href="https://share.fnnas.net/s/db60a2f705454583b8"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`focus-ring inline-flex items-center gap-2 rounded-lg border px-5 py-3 text-sm font-semibold transition active:translate-y-px ${lineClass} ${isDark ? 'hover:bg-slate-900' : 'hover:bg-white'}`}
+                >
+                  <Download size={17} />
+                  下载桌面端
+                </a>
                 <button
                   type="button"
                   onClick={() => scrollToSection('guide')}
