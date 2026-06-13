@@ -164,7 +164,7 @@ export const ProductGuide: React.FC<ProductGuideProps> = ({ onClose }) => {
                   <ArrowRight size={17} />
                 </button>
                 <a
-                  href="https://share.fnnas.net/s/db60a2f705454583b8"
+                  href="https://share.fnnas.net/s/a512f63197ec451a8f"
                   target="_blank"
                   rel="noopener noreferrer"
                   className={`focus-ring inline-flex items-center gap-2 rounded-lg border px-5 py-3 text-sm font-semibold transition active:translate-y-px ${lineClass} ${isDark ? 'hover:bg-slate-900' : 'hover:bg-white'}`}
