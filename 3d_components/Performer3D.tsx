@@ -226,7 +226,12 @@ const Performer3D: React.FC<Performer3DProps> = ({
         </group>
       )}
 
-      <Html position={[0, performerHeight + 0.5, 0]} center distanceFactor={10}>
+      <Html
+        position={[0, performerHeight + 0.5, 0]}
+        center
+        distanceFactor={10}
+        zIndexRange={[40, 0]}
+      >
         <div className={`px-2 py-1 rounded text-xs font-bold whitespace-nowrap select-none ${isSelected ? 'bg-yellow-400 text-black' : 'bg-black/50 text-white'}`}>
           {performer.name}
         </div>

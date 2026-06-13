@@ -462,6 +462,29 @@ function Button({ isLoading, children, ...props }: ButtonProps) {
 
 ---
 
+## Three.js HTML Overlays
+
+`@react-three/drei` `<Html>` elements must set an explicit, low
+`zIndexRange`. Its default range is high enough to render labels above
+application dialogs and full-screen overlays.
+
+```tsx
+// Good: stays inside the stage's visual layer
+<Html position={[0, 2, 0]} center zIndexRange={[40, 0]}>
+  <div>Performer name</div>
+</Html>
+
+// Bad: the default z-index can cover app-level overlays
+<Html position={[0, 2, 0]} center>
+  <div>Performer name</div>
+</Html>
+```
+
+Keep application overlays above this local range and add a regression assertion
+when introducing new Drei HTML labels.
+
+---
+
 ## Quick Reference
 
 | Pattern                    | When to Use                 |
@@ -473,6 +496,7 @@ function Button({ isLoading, children, ...props }: ButtonProps) {
 | Toast notifications        | User feedback               |
 | Focus trap                 | Modals/dialogs              |
 | Skeleton loading           | Initial data fetch          |
+| Drei `Html` z-index range  | 3D labels below app overlays |
 
 ---
 

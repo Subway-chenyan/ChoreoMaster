@@ -251,7 +251,7 @@ const Prop3D: React.FC<Prop3DProps> = ({
       )}
 
       {isSelected && (
-        <Html position={[0, dims.height / 2 + 0.5, 0]} center>
+        <Html position={[0, dims.height / 2 + 0.5, 0]} center zIndexRange={[40, 0]}>
           <div className="bg-yellow-400 text-black px-2 py-0.5 rounded text-xs font-bold">{performer.name}</div>
         </Html>
       )}

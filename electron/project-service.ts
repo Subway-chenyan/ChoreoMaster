@@ -4,6 +4,7 @@ import { pipeline } from 'stream/promises';
 import * as archiver from 'archiver';
 import unzipper from 'unzipper';
 import type {
+  AudioMarker,
   FaceTexture,
   Performer,
   ProjectAssetKind,
@@ -31,6 +32,30 @@ function isRecord(value: unknown): value is UnknownRecord {
 function sanitizeName(value: string): string {
   const safe = value.trim().replace(/[<>:"/\\|?*\u0000-\u001F]/g, '-').replace(/\s+/g, ' ');
   return safe || 'ChoreoMaster Project';
+}
+
+function parseAudioMarkers(value: unknown): AudioMarker[] {
+  if (!Array.isArray(value)) return [];
+
+  return value.flatMap((item, index) => {
+    if (!isRecord(item) || typeof item.timeMs !== 'number' || !Number.isFinite(item.timeMs)) {
+      return [];
+    }
+    const label = typeof item.label === 'string' ? item.label.trim().slice(0, 80) : '';
+    const color = typeof item.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(item.color)
+      ? item.color
+      : '#3b82f6';
+    const timeMs = Math.max(0, Math.round(item.timeMs));
+    const id = typeof item.id === 'string' && item.id.trim()
+      ? item.id.trim().slice(0, 120)
+      : `marker-${index}-${timeMs}`;
+    return [{
+      id,
+      label: label || `标记 ${index + 1}`,
+      timeMs,
+      color,
+    }];
+  }).sort((a, b) => a.timeMs - b.timeMs);
 }
 
 function createProjectId(name: string): string {
@@ -84,6 +109,7 @@ function parseProjectDocument(value: unknown, fallbackName: string): ProjectDocu
       ? value.performerGroups as ProjectDocument['performerGroups']
       : [],
     frames: value.frames as ProjectDocument['frames'],
+    audioMarkers: parseAudioMarkers(value.audioMarkers),
     stageConfig,
   };
 }
@@ -277,6 +303,7 @@ export async function createManagedProject(
     performers: [],
     performerGroups: [],
     frames: [],
+    audioMarkers: [],
     stageConfig: {
       width: 20,
       depth: 11.25,
@@ -306,6 +333,7 @@ export async function saveManagedProject(
     createdAt: existing.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     performers,
+    audioMarkers: parseAudioMarkers(projectData.audioMarkers),
   };
   await fs.writeFile(projectPath, JSON.stringify(document, null, 2), 'utf8');
   return document;

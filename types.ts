@@ -1,5 +1,6 @@
 
 export type {
+  AudioMarker,
   BoxTextures,
   ExtrudedTextures,
   FaceTexture,

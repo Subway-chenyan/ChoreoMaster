@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
+  AudioMarker,
   Frame,
   Performer,
   Position,
@@ -16,12 +17,13 @@ import { Stage } from './components/Stage';
 import Stage3D from './components/Stage3D';
 import { Timeline } from './components/Timeline';
 import { HelpModal } from './components/HelpModal';
+import { ProductGuide } from './components/ProductGuide';
 import { useTheme } from './contexts/ThemeContext';
 import { DEFAULT_COLORS, STAGE_ASPECT_RATIO } from './constants';
 import { createOfflineScene, preloadPropTextures, preloadLEDVideo, type CameraAngle } from './utils/OfflineRenderer3D';
 import { getTotalStageWidth, getWingWidth, stageXToViewPercent, getStageXBounds } from './utils/coordinates';
 import { buildPlatformOccupancy, isPlatformProp } from './utils/platforms';
-import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, Maximize2, ChevronDown, ChevronUp, Menu, X, Download, GripHorizontal, SlidersHorizontal } from 'lucide-react';
+import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, Maximize2, ChevronDown, ChevronUp, Menu, X, Download, GripHorizontal, SlidersHorizontal, BookOpen } from 'lucide-react';
 import { StageConfig } from './types';
 
 const DEFAULT_FRAME: Frame = {
@@ -40,6 +42,27 @@ const createDefaultStageConfig = (): StageConfig => ({
   ledHeight: 6,
   ledContent: { type: 'none' },
 });
+
+const normalizeAudioMarkers = (value: unknown): AudioMarker[] => {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item, index) => {
+    if (typeof item !== 'object' || item === null) return [];
+    const candidate = item as Partial<AudioMarker>;
+    if (typeof candidate.timeMs !== 'number' || !Number.isFinite(candidate.timeMs)) return [];
+    return [{
+      id: typeof candidate.id === 'string' && candidate.id.trim()
+        ? candidate.id
+        : `marker-${index}-${Math.round(candidate.timeMs)}`,
+      label: typeof candidate.label === 'string' && candidate.label.trim()
+        ? candidate.label.trim().slice(0, 80)
+        : `标记 ${index + 1}`,
+      timeMs: Math.max(0, Math.round(candidate.timeMs)),
+      color: typeof candidate.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(candidate.color)
+        ? candidate.color
+        : '#3b82f6',
+    }];
+  }).sort((a, b) => a.timeMs - b.timeMs);
+};
 
 // Clipboard Item Structure
 interface ClipboardItem {
@@ -86,6 +109,7 @@ const App: React.FC = () => {
   const [audioBuffer, setAudioBuffer] = useState<AudioBuffer | null>(null);
   const [musicName, setMusicName] = useState<string | null>(null);
   const [musicAsset, setMusicAsset] = useState<string | null>(null);
+  const [audioMarkers, setAudioMarkers] = useState<AudioMarker[]>([]);
   const [inPointMs, setInPointMs] = useState<number | null>(null);
   const [outPointMs, setOutPointMs] = useState<number | null>(null);
   const [isExporting, setIsExporting] = useState(false);
@@ -102,6 +126,7 @@ const App: React.FC = () => {
   const [showLabels, setShowLabels] = useState(true);
   const [gridScale, setGridScale] = useState(1);
   const [showHelp, setShowHelp] = useState(false);
+  const [showProductGuide, setShowProductGuide] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.matchMedia('(max-width: 1100px)').matches);
   const [stageToolbarCollapsed, setStageToolbarCollapsed] = useState(() => window.matchMedia('(max-width: 1100px)').matches);
   const [sidebarWidth, setSidebarWidth] = useState<number>(320);
@@ -752,6 +777,7 @@ const App: React.FC = () => {
     setPerformers(data.performers);
     setPerformerGroups(data.performerGroups);
     setFrames(data.frames);
+    setAudioMarkers(data.audioMarkers || []);
     setMusicName(data.musicName || null);
     setMusicAsset(data.musicAsset || null);
     setStageConfig(data.stageConfig);
@@ -780,6 +806,7 @@ const App: React.FC = () => {
       performers: data.performers,
       performerGroups: data.performerGroups,
       frames: data.frames,
+      audioMarkers: data.audioMarkers || [],
       stageConfig: data.stageConfig,
       musicName: data.musicName || null,
       musicAsset: data.musicAsset || null,
@@ -794,11 +821,12 @@ const App: React.FC = () => {
       performers,
       performerGroups,
       frames,
+      audioMarkers,
       stageConfig,
       musicName,
       musicAsset,
     });
-  }, [performers, performerGroups, frames, stageConfig, musicName, musicAsset]);
+  }, [performers, performerGroups, frames, audioMarkers, stageConfig, musicName, musicAsset]);
 
   // Track changes to project
   useEffect(() => {
@@ -806,7 +834,7 @@ const App: React.FC = () => {
       const currentState = getProjectStateString();
       setProjectHasChanges(currentState !== lastSavedState);
     }
-  }, [performers, performerGroups, frames, stageConfig, musicName, musicAsset, currentProjectId, lastSavedState, getProjectStateString]);
+  }, [performers, performerGroups, frames, audioMarkers, stageConfig, musicName, musicAsset, currentProjectId, lastSavedState, getProjectStateString]);
 
   // Create a new project
   const handleCreateProject = async (name: string): Promise<string> => {
@@ -821,6 +849,7 @@ const App: React.FC = () => {
           performers,
           performerGroups,
           frames,
+          audioMarkers,
           stageConfig,
           musicName,
           musicAsset,
@@ -852,6 +881,7 @@ const App: React.FC = () => {
       setPerformers([]);
       setPerformerGroups([]);
       setFrames(newFrames);
+      setAudioMarkers([]);
       setCurrentFrameId(newFrameId);
       setStageConfig(newStageConfig);
       setMediaCache({});
@@ -867,6 +897,7 @@ const App: React.FC = () => {
         performers: [],
         performerGroups: [],
         frames: newFrames,
+        audioMarkers: [],
         stageConfig: newStageConfig,
         musicName: null,
         musicAsset: null,
@@ -892,6 +923,7 @@ const App: React.FC = () => {
           performers,
           performerGroups,
           frames,
+          audioMarkers,
           stageConfig,
           musicName,
           musicAsset,
@@ -915,6 +947,7 @@ const App: React.FC = () => {
         performers: templateData.performers || [],
         performerGroups: templateData.performerGroups || [],
         frames: templateData.frames || [],
+        audioMarkers: normalizeAudioMarkers(templateData.audioMarkers),
         stageConfig: templateData.stageConfig || stageConfig,
         musicName: null,
         musicAsset: null,
@@ -928,6 +961,7 @@ const App: React.FC = () => {
       setPerformers(saveData.performers);
       setPerformerGroups(saveData.performerGroups);
       setFrames(saveData.frames);
+      setAudioMarkers(saveData.audioMarkers || []);
       setStageConfig(saveData.stageConfig);
       setCurrentFrameId(saveData.frames[0]?.id || '');
       setMusicName(null);
@@ -941,6 +975,7 @@ const App: React.FC = () => {
         performers: saveData.performers,
         performerGroups: saveData.performerGroups,
         frames: saveData.frames,
+        audioMarkers: saveData.audioMarkers || [],
         stageConfig: saveData.stageConfig,
         musicName: null,
         musicAsset: null,
@@ -963,6 +998,7 @@ const App: React.FC = () => {
     setPerformers(performers);
     setPerformerGroups(groups);
     setFrames(frames);
+    setAudioMarkers(normalizeAudioMarkers(templateData.audioMarkers));
     setStageConfig(config);
     setCurrentFrameId(frames[0]?.id || '');
     setMusicName(null);
@@ -987,6 +1023,7 @@ const App: React.FC = () => {
           performers,
           performerGroups,
           frames,
+          audioMarkers,
           stageConfig,
           musicName,
           musicAsset,
@@ -1020,6 +1057,7 @@ const App: React.FC = () => {
         performers,
         performerGroups,
         frames,
+        audioMarkers,
         stageConfig,
         musicName,
         musicAsset,
@@ -1027,11 +1065,13 @@ const App: React.FC = () => {
       
       const saved = await window.electronAPI.project.save(currentProjectId, projectData);
       setPerformers(saved.data.performers);
+      setAudioMarkers(saved.data.audioMarkers || []);
       setMediaCache(saved.mediaUrls);
       setLastSavedState(JSON.stringify({
         performers: saved.data.performers,
         performerGroups: saved.data.performerGroups,
         frames: saved.data.frames,
+        audioMarkers: saved.data.audioMarkers || [],
         stageConfig: saved.data.stageConfig,
         musicName: saved.data.musicName || null,
         musicAsset: saved.data.musicAsset || null,
@@ -1468,6 +1508,7 @@ const App: React.FC = () => {
       performers,
       performerGroups,
       frames,
+      audioMarkers,
       stageConfig,
     };
 
@@ -1498,7 +1539,10 @@ const App: React.FC = () => {
   };
 
   const handleResetProject = () => {
-    const hasData = performers.length > 0 || frames.length > 1 || (frames[0] && Object.keys(frames[0].positions).length > 0);
+    const hasData = audioMarkers.length > 0
+      || performers.length > 0
+      || frames.length > 1
+      || (frames[0] && Object.keys(frames[0].positions).length > 0);
 
     if (hasData) {
       // Logic: Prompt to export. 
@@ -1524,6 +1568,7 @@ const App: React.FC = () => {
       duration: 2000,
       positions: {}
     }]);
+    setAudioMarkers([]);
     setCurrentFrameId(newFrameId);
     setMusicName(null);
     setAudioBuffer(null);
@@ -1552,6 +1597,7 @@ const App: React.FC = () => {
           setPerformers(json.performers);
           setPerformerGroups(json.performerGroups || []);
           setFrames(json.frames);
+          setAudioMarkers(normalizeAudioMarkers(json.audioMarkers));
           setMusicName(json.musicName || null);
 
           // 恢复舞台配置
@@ -1596,6 +1642,7 @@ const App: React.FC = () => {
         setPerformers(json.performers);
         setPerformerGroups(json.performerGroups || []);
         setFrames(json.frames);
+        setAudioMarkers(normalizeAudioMarkers(json.audioMarkers));
         setMusicName(json.musicName || null);
 
         // 恢复舞台配置
@@ -1722,8 +1769,9 @@ const App: React.FC = () => {
     );
     const visualTimelineEnd = Math.max(lastFrameEnd + 10000, 30000);
     const audioEnd = audioBuffer ? audioBuffer.duration * 1000 : 0;
-    return Math.max(visualTimelineEnd, audioEnd);
-  }, [frames, audioBuffer]);
+    const markerEnd = audioMarkers.reduce((maximum, marker) => Math.max(maximum, marker.timeMs + 10000), 0);
+    return Math.max(visualTimelineEnd, audioEnd, markerEnd);
+  }, [frames, audioBuffer, audioMarkers]);
 
   // Keyboard Shortcuts
   const handlePlayPause = useCallback(() => {
@@ -2987,6 +3035,7 @@ const App: React.FC = () => {
     <div className={`min-h-[100dvh] h-[100dvh] w-screen flex flex-col safe-top safe-bottom ${theme === 'dark' ? 'bg-slate-950 text-slate-200' : 'bg-gray-50 text-gray-900'} overflow-hidden`}>
       {/* Help Modal */}
       <HelpModal isOpen={showHelp} onClose={() => setShowHelp(false)} />
+      {showProductGuide && <ProductGuide onClose={() => setShowProductGuide(false)} />}
 
       {/* Top Bar */}
       <div className={`min-h-12 flex items-center justify-between px-3 sm:px-4 border-b ${theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-gray-200'}`}>
@@ -3001,6 +3050,15 @@ const App: React.FC = () => {
           <h1 className={`text-base sm:text-lg font-bold ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>CosFormation</h1>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowProductGuide(true)}
+            className={`touch-target flex items-center justify-center gap-2 rounded-lg px-2 text-xs font-medium transition-colors ${theme === 'dark' ? 'text-slate-300 hover:bg-slate-800 hover:text-blue-300' : 'text-gray-600 hover:bg-gray-100 hover:text-blue-600'}`}
+            title="产品介绍与使用说明"
+          >
+            <BookOpen size={19} />
+            <span className="desktop-only">产品指南</span>
+          </button>
           {installPrompt && (
             <button
               onClick={handleInstallPwa}
@@ -3284,6 +3342,7 @@ const App: React.FC = () => {
             duration={Math.max(
               totalDuration + 10000,
               audioBuffer ? audioBuffer.duration * 1000 : 0,
+              audioMarkers.reduce((maximum, marker) => Math.max(maximum, marker.timeMs + 10000), 0),
               30000,
             )}
             currentTime={currentTime}
@@ -3295,6 +3354,8 @@ const App: React.FC = () => {
             onAddFrame={handleAddFrame}
             onSelectFrame={handleSelectFrame}
             selectedFrameId={selectedPerformerIds.length > 0 ? null : currentFrameId}
+            audioMarkers={audioMarkers}
+            onAudioMarkersChange={setAudioMarkers}
             heightPx={timelineHeight}
             onRenameFrame={handleRenameFrame}
             inPointMs={inPointMs}

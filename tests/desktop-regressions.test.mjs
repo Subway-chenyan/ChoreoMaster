@@ -22,6 +22,16 @@ test('timeline height is the total panel height', async () => {
   assert.match(source, /ctx\.fillRect\(0, 0, (totalWidth|renderWidth), trackHeight\)/);
 });
 
+test('3D labels stay below application overlays', async () => {
+  const [performer, prop] = await Promise.all([
+    read('3d_components/Performer3D.tsx'),
+    read('3d_components/Prop3D.tsx'),
+  ]);
+
+  assert.match(performer, /zIndexRange=\{\[40, 0\]\}/);
+  assert.match(prop, /zIndexRange=\{\[40, 0\]\}/);
+});
+
 test('desktop export uses native binary save path and bounded recording waits', async () => {
   const [app, preload, ipc, offline] = await Promise.all([
     read('App.tsx'),

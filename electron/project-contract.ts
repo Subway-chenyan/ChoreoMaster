@@ -87,6 +87,13 @@ export interface StageConfig {
   ledContent?: LEDContent;
 }
 
+export interface AudioMarker {
+  id: string;
+  label: string;
+  timeMs: number;
+  color: string;
+}
+
 export interface ProjectDocument {
   version: string;
   name: string;
@@ -97,6 +104,7 @@ export interface ProjectDocument {
   performers: Performer[];
   performerGroups: PerformerGroup[];
   frames: Frame[];
+  audioMarkers?: AudioMarker[];
   stageConfig: StageConfig;
 }
 

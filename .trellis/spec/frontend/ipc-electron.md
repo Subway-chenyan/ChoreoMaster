@@ -562,6 +562,63 @@ useEffect(() => {
 
 **Language**: All documentation must be written in **English**.
 
+## Scenario: Persisted Timeline Metadata
+
+### 1. Scope / Trigger
+
+- Trigger: adding timeline metadata that must survive managed desktop project saves and browser JSON import/export.
+
+### 2. Signatures
+
+- Shared document field: `ProjectDocument.audioMarkers?: AudioMarker[]`
+- Marker shape: `AudioMarker { id: string; label: string; timeMs: number; color: string }`
+
+### 3. Contracts
+
+- Store timeline times as finite Unix-style millisecond numbers relative to project playback start.
+- Put persisted timeline metadata in `electron/project-contract.ts`; do not duplicate renderer and main-process interfaces.
+- Desktop managed projects write the field into `project.json`.
+- Renderer save, auto-save, dirty-state comparison, template load, reset, and browser JSON import/export must all include the field.
+- Missing fields in legacy projects normalize to an empty array.
+
+### 4. Validation & Error Matrix
+
+- Missing or non-array marker collection -> `[]`.
+- Marker with non-finite `timeMs` -> discard it.
+- Negative time -> clamp to `0`.
+- Empty label -> create a readable fallback label.
+- Invalid color -> use the product default marker color.
+
+### 5. Good/Base/Bad Cases
+
+- Good: a sorted marker array round-trips through `project.json` and restores in the timeline.
+- Base: an old project without `audioMarkers` loads with no markers.
+- Bad: renderer-only state is omitted from auto-save or manual JSON export.
+
+### 6. Tests Required
+
+- Project service test asserts normalization and exact JSON persistence.
+- Browser verification asserts add, edit, seek, delete, and responsive layout.
+- Full build verifies the shared type reaches renderer and Electron main process.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```typescript
+const [markers, setMarkers] = useState([]);
+// Save paths omit markers, so they disappear when the project is reopened.
+```
+
+#### Correct
+
+```typescript
+const projectData: ProjectDocument = {
+  ...baseProjectData,
+  audioMarkers,
+};
+```
+
 ## Scenario: Remote Agent Service Boundary
 
 ### 1. Scope / Trigger

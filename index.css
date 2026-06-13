@@ -53,6 +53,46 @@ button {
   -webkit-tap-highlight-color: transparent;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
+.focus-ring:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 3px;
+}
+
+.product-guide__reveal {
+  animation: product-guide-reveal 560ms ease-out both;
+}
+
+.product-guide__reveal--delay {
+  animation-delay: 120ms;
+}
+
+@keyframes product-guide-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .product-guide__reveal,
+  .product-guide__reveal--delay {
+    animation: none;
+  }
+}
+
 .project-transfer-control {
   font-family: inherit;
   font-size: 12px !important;
@@ -173,6 +213,10 @@ button {
 
   .stage-status > div {
     font-size: 11px;
+  }
+
+  .product-guide__nav {
+    max-width: 46vw;
   }
 }
 

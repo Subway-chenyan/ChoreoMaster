@@ -51,6 +51,7 @@ function projectDocument(name = '测试项目') {
       duration: 2000,
       positions: { 'prop-1': { x: 50, y: 50 } },
     }],
+    audioMarkers: [],
     stageConfig: {
       width: 20,
       depth: 11.25,
@@ -127,6 +128,29 @@ test('saves prop textures as assets and restores them through project URLs', asy
     const loaded = await loadManagedProject(storagePath, created.id);
     assert.match(loaded.data.performers[0].boxTextures.front.dataUrl, /^choreo-asset:\/\//);
     assert.deepEqual(loaded.warnings, []);
+  });
+});
+
+test('normalizes audio markers and persists them in project.json', async () => {
+  await withTempDir(async (storagePath) => {
+    const created = await createManagedProject(storagePath, 'Marker Project');
+    await saveManagedProject(storagePath, created.id, {
+      ...projectDocument('Marker Project'),
+      audioMarkers: [
+        { id: 'chorus', label: '  副歌  ', timeMs: 45000.4, color: '#f97316' },
+        { id: '', label: '', timeMs: -200, color: 'invalid' },
+        { id: 'broken', label: '忽略', timeMs: Number.NaN, color: '#ffffff' },
+      ],
+    });
+
+    const saved = JSON.parse(await readFile(path.join(created.path, 'project.json'), 'utf8'));
+    assert.deepEqual(saved.audioMarkers, [
+      { id: 'marker-1-0', label: '标记 2', timeMs: 0, color: '#3b82f6' },
+      { id: 'chorus', label: '副歌', timeMs: 45000, color: '#f97316' },
+    ]);
+
+    const loaded = await loadManagedProject(storagePath, created.id);
+    assert.deepEqual(loaded.data.audioMarkers, saved.audioMarkers);
   });
 });
 

@@ -1,7 +1,7 @@
 
 import React, { useEffect, useRef, useMemo, useState } from 'react';
-import { Frame } from '../types';
-import { Play, Pause, SkipBack, ZoomIn, ZoomOut, PlusCircle } from 'lucide-react';
+import { AudioMarker, Frame } from '../types';
+import { Flag, Pause, Play, PlusCircle, SkipBack, Trash2, X, ZoomIn, ZoomOut } from 'lucide-react';
 
 interface TimelineProps {
     frames: Frame[];
@@ -15,6 +15,8 @@ interface TimelineProps {
     onAddFrame: () => void;
     onSelectFrame: (frameId: string) => void;
     selectedFrameId: string | null;
+    audioMarkers: AudioMarker[];
+    onAudioMarkersChange: (markers: AudioMarker[]) => void;
     onRenameFrame?: (frameId: string) => void;
     heightPx?: number;
     inPointMs?: number | null;
@@ -36,6 +38,8 @@ export const Timeline: React.FC<TimelineProps> = ({
     onAddFrame,
     onSelectFrame,
     selectedFrameId,
+    audioMarkers,
+    onAudioMarkersChange,
     onRenameFrame,
     heightPx = 160,
     inPointMs,
@@ -50,6 +54,7 @@ export const Timeline: React.FC<TimelineProps> = ({
     const [isScrubbing, setIsScrubbing] = useState(false);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState<string>('');
+    const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null);
     const toolbarHeight = 48;
     const trackHeight = Math.max(84, heightPx - toolbarHeight);
     const clipHeight = Math.min(80, Math.max(52, trackHeight - 28));
@@ -179,6 +184,32 @@ export const Timeline: React.FC<TimelineProps> = ({
         return `${min}:${sec.toString().padStart(2, '0')}.${dec}`;
     };
 
+    const selectedMarker = audioMarkers.find((marker) => marker.id === selectedMarkerId) || null;
+
+    const updateMarker = (markerId: string, updates: Partial<AudioMarker>) => {
+        onAudioMarkersChange(audioMarkers
+            .map((marker) => marker.id === markerId ? { ...marker, ...updates } : marker)
+            .sort((a, b) => a.timeMs - b.timeMs));
+    };
+
+    const addMarker = () => {
+        const marker: AudioMarker = {
+            id: typeof crypto.randomUUID === 'function'
+                ? crypto.randomUUID()
+                : `marker-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            label: `标记 ${audioMarkers.length + 1}`,
+            timeMs: Math.max(0, Math.min(duration, Math.round(currentTime))),
+            color: '#3b82f6',
+        };
+        onAudioMarkersChange([...audioMarkers, marker].sort((a, b) => a.timeMs - b.timeMs));
+        setSelectedMarkerId(marker.id);
+    };
+
+    const deleteMarker = (markerId: string) => {
+        onAudioMarkersChange(audioMarkers.filter((marker) => marker.id !== markerId));
+        setSelectedMarkerId(null);
+    };
+
     const rulerIntervalSeconds = useMemo(() => {
         const minimumLabelSpacing = 56;
         const candidates = [1, 2, 5, 10, 15, 30, 60, 120, 300];
@@ -265,7 +296,7 @@ export const Timeline: React.FC<TimelineProps> = ({
 
     return (
         <div
-            className="flex-none bg-slate-950 border-t border-slate-800 flex flex-col select-none overflow-hidden"
+            className="relative flex-none bg-slate-950 border-t border-slate-800 flex flex-col select-none overflow-hidden"
             style={{ height: heightPx }}
             onPointerUp={onPointerUp}
             onPointerMove={onPointerMove}
@@ -292,6 +323,14 @@ export const Timeline: React.FC<TimelineProps> = ({
                         title="在当前时间添加队形"
                     >
                         <PlusCircle size={12} /> 添加
+                    </button>
+                    <button
+                        type="button"
+                        onClick={addMarker}
+                        className="coarse-touch-target flex items-center gap-1 rounded border border-blue-500/40 bg-blue-500/10 px-2 py-1 text-xs text-blue-300 hover:bg-blue-500/20"
+                        title="在当前播放头添加音频标记"
+                    >
+                        <Flag size={12} /> 标记
                     </button>
                     <div className="flex items-center gap-1">
                         <button className="coarse-touch-target p-1 hover:bg-slate-800 rounded text-slate-400 flex items-center justify-center" onClick={() => setZoom(Math.max(20, zoom - 20))}><ZoomOut size={14} /></button>
@@ -346,6 +385,38 @@ export const Timeline: React.FC<TimelineProps> = ({
                             </div>
                         ))}
                     </div>
+
+                    {/* Audio markers */}
+                    {audioMarkers.map((marker) => (
+                        <button
+                            key={marker.id}
+                            type="button"
+                            className="absolute top-0 bottom-0 z-40 w-3 -translate-x-1/2 cursor-pointer border-0 bg-transparent p-0"
+                            style={{
+                                left: (marker.timeMs / 1000) * zoom,
+                            }}
+                            onPointerDown={(event) => event.stopPropagation()}
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                onSeek(marker.timeMs);
+                                setSelectedMarkerId(marker.id);
+                            }}
+                            title={`${marker.label} · ${formatTime(marker.timeMs)}`}
+                            aria-label={`跳转到标记 ${marker.label}`}
+                        >
+                            <span
+                                className="absolute bottom-0 left-1/2 top-0 w-px -translate-x-1/2"
+                                style={{ backgroundColor: marker.color }}
+                            />
+                            <span
+                                className="absolute left-1/2 top-0 flex h-5 max-w-32 items-center gap-1 rounded-r px-1.5 text-[10px] font-semibold text-white shadow-md"
+                                style={{ backgroundColor: marker.color }}
+                            >
+                                <Flag size={10} fill="currentColor" />
+                                <span className="truncate">{marker.label}</span>
+                            </span>
+                        </button>
+                    ))}
 
                     {/* Playhead */}
                     <div
@@ -461,6 +532,87 @@ export const Timeline: React.FC<TimelineProps> = ({
                     </div>
                 </div>
             </div>
+            {selectedMarker && (
+                <div
+                    className="absolute bottom-3 left-1/2 z-[70] w-[min(360px,calc(100vw-1.5rem))] -translate-x-1/2 rounded-xl border border-slate-700 bg-slate-900/98 p-3 shadow-2xl"
+                    onPointerDown={(event) => event.stopPropagation()}
+                >
+                    <div className="mb-3 flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-sm font-semibold text-slate-100">
+                            <Flag size={15} style={{ color: selectedMarker.color }} />
+                            编辑音频标记
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setSelectedMarkerId(null)}
+                            className="rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-white"
+                            aria-label="关闭标记编辑"
+                        >
+                            <X size={15} />
+                        </button>
+                    </div>
+                    <div className="grid grid-cols-[1fr_110px_44px] gap-2">
+                        <label className="text-[10px] text-slate-400">
+                            名称
+                            <input
+                                value={selectedMarker.label}
+                                maxLength={80}
+                                onChange={(event) => updateMarker(selectedMarker.id, { label: event.target.value })}
+                                onBlur={(event) => {
+                                    if (!event.target.value.trim()) {
+                                        updateMarker(selectedMarker.id, { label: '未命名标记' });
+                                    }
+                                }}
+                                className="mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 text-xs text-slate-100 outline-none focus:border-blue-500"
+                            />
+                        </label>
+                        <label className="text-[10px] text-slate-400">
+                            时间（秒）
+                            <input
+                                type="number"
+                                min={0}
+                                max={Math.max(0, duration / 1000)}
+                                step={0.1}
+                                value={selectedMarker.timeMs / 1000}
+                                onChange={(event) => {
+                                    const seconds = Number(event.target.value);
+                                    if (Number.isFinite(seconds)) {
+                                        updateMarker(selectedMarker.id, {
+                                            timeMs: Math.max(0, Math.min(duration, Math.round(seconds * 1000))),
+                                        });
+                                    }
+                                }}
+                                className="mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 font-mono text-xs text-slate-100 outline-none focus:border-blue-500"
+                            />
+                        </label>
+                        <label className="text-[10px] text-slate-400">
+                            颜色
+                            <input
+                                type="color"
+                                value={selectedMarker.color}
+                                onChange={(event) => updateMarker(selectedMarker.id, { color: event.target.value })}
+                                className="mt-1 h-9 w-11 cursor-pointer rounded-md border border-slate-700 bg-slate-950 p-1"
+                            />
+                        </label>
+                    </div>
+                    <div className="mt-3 flex items-center justify-between">
+                        <button
+                            type="button"
+                            onClick={() => onSeek(selectedMarker.timeMs)}
+                            className="rounded-md border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
+                        >
+                            跳转到 {formatTime(selectedMarker.timeMs)}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => deleteMarker(selectedMarker.id)}
+                            className="flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs text-red-300 hover:bg-red-500/10"
+                        >
+                            <Trash2 size={13} /> 删除标记
+                        </button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
