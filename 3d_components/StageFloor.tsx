@@ -1,5 +1,5 @@
 import React from 'react';
-import * as THREE from 'three';
+import { createCenteredStageGridMarks, STAGE_THIRD_POSITIONS } from '../utils/stage-grid';
 
 interface StageFloorProps {
   width: number;
@@ -9,9 +9,8 @@ interface StageFloorProps {
 }
 
 const StageFloor: React.FC<StageFloorProps> = ({ width, depth, wingWidth = 0, gridScale = 1 }) => {
-  // Use same grid density calculation as 2D view
   const totalWidth = width + wingWidth * 2;
-  const divisions = Math.max(1, Math.round(4 * gridScale * (totalWidth / width)));
+  const gridMarks = createCenteredStageGridMarks(totalWidth, gridScale);
 
   return (
     <group>
@@ -32,16 +31,25 @@ const StageFloor: React.FC<StageFloorProps> = ({ width, depth, wingWidth = 0, gr
         </>
       )}
 
-      {/* 
-          Grid helper is square by default. 
-          We scale it on the Z axis to match the stage's aspect ratio (depth/width).
-          This ensures the grid divisions match the 2D view's rectangular grid.
-      */}
-      <gridHelper
-        args={[totalWidth, divisions, 0x444444, 0x222222]}
-        position={[0, 0.01, 0]}
-        scale={[1, 1, depth / totalWidth]}
-      />
+      {gridMarks.map((mark) => (
+        <mesh key={`meter-${mark.offsetMeters}`} position={[mark.offsetMeters, 0.01, 0]}>
+          <boxGeometry args={[mark.offsetMeters === 0 ? 0.035 : 0.02, 0.018, depth]} />
+          <meshBasicMaterial
+            color={mark.offsetMeters === 0 ? '#cbd5e1' : '#475569'}
+            transparent
+            opacity={mark.offsetMeters === 0 ? 0.8 : 0.55}
+          />
+        </mesh>
+      ))}
+      {STAGE_THIRD_POSITIONS.map((position) => (
+        <mesh
+          key={`third-${position}`}
+          position={[0, 0.025, -depth / 2 + position * depth]}
+        >
+          <boxGeometry args={[totalWidth, 0.035, 0.065]} />
+          <meshBasicMaterial color="#38bdf8" transparent opacity={0.85} />
+        </mesh>
+      ))}
       {wingWidth > 0 && (
         <>
           <mesh position={[-width / 2, 0.025, 0]}>

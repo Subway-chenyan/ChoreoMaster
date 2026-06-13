@@ -3,6 +3,7 @@ import type { Performer, Position, StageConfig, LEDContent } from '../types';
 import { mapTo3D, degToRad, getTotalStageWidth, getWingWidth } from './coordinates';
 import { denormalizePoints } from '../components/prop-editor/PolygonUtils';
 import { buildPlatformOccupancy, isPlatformProp } from './platforms';
+import { createCenteredStageGridMarks, STAGE_THIRD_POSITIONS } from './stage-grid';
 
 export type CameraAngle = 'judge' | 'overhead';
 
@@ -81,11 +82,25 @@ function createStageFloor(width: number, depth: number, wingWidth: number, gridS
 
   // Grid
   if (includeGrid) {
-    const divisions = Math.max(1, Math.round(4 * gridScale * (totalWidth / width)));
-    const grid = new THREE.GridHelper(totalWidth, divisions, 0x444444, 0x222222);
-    grid.position.y = 0.01;
-    grid.scale.z = depth / totalWidth;
-    group.add(grid);
+    createCenteredStageGridMarks(totalWidth, gridScale).forEach((mark) => {
+      const geometry = new THREE.BoxGeometry(mark.offsetMeters === 0 ? 0.035 : 0.02, 0.018, depth);
+      const material = new THREE.MeshBasicMaterial({
+        color: mark.offsetMeters === 0 ? 0xcbd5e1 : 0x475569,
+        transparent: true,
+        opacity: mark.offsetMeters === 0 ? 0.8 : 0.55,
+      });
+      const line = new THREE.Mesh(geometry, material);
+      line.position.set(mark.offsetMeters, 0.01, 0);
+      group.add(line);
+    });
+
+    STAGE_THIRD_POSITIONS.forEach((position) => {
+      const geometry = new THREE.BoxGeometry(totalWidth, 0.035, 0.065);
+      const material = new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.85 });
+      const line = new THREE.Mesh(geometry, material);
+      line.position.set(0, 0.025, -depth / 2 + position * depth);
+      group.add(line);
+    });
   }
 
   // Red line at front edge

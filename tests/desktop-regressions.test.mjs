@@ -82,3 +82,23 @@ test('packaged Electron uses the branded application icons', async () => {
   assert.match(main, /app\.isPackaged/);
   assert.match(main, /path\.join\(path\.dirname\(process\.execPath\), 'icon\.png'\)/);
 });
+
+test('stage grid uses meter spacing, centered ruler marks, and third divisions', async () => {
+  const [app, stage, stageFloor, offline, grid] = await Promise.all([
+    read('App.tsx'),
+    read('components/Stage.tsx'),
+    read('3d_components/StageFloor.tsx'),
+    read('utils/OfflineRenderer3D.ts'),
+    read('utils/stage-grid.ts'),
+  ]);
+
+  assert.match(grid, /MIN_STAGE_GRID_SPACING = 0\.5/);
+  assert.match(grid, /MAX_STAGE_GRID_SPACING = 2\.5/);
+  assert.match(grid, /DEFAULT_STAGE_GRID_SPACING = 1/);
+  assert.match(grid, /STAGE_THIRD_POSITIONS = \[1 \/ 3, 2 \/ 3\]/);
+  assert.match(stage, /createCenteredStageGridMarks\(totalStageWidth, gridScale\)/);
+  assert.match(stage, /formatStageGridLabel\(mark\.offsetMeters\)/);
+  assert.match(stageFloor, /STAGE_THIRD_POSITIONS\.map/);
+  assert.match(offline, /createCenteredStageGridMarks\(totalWidth, gridScale\)/);
+  assert.match(app, /\{gridScale\.toFixed\(1\)\}m/);
+});

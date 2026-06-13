@@ -23,6 +23,13 @@ import { DEFAULT_COLORS, STAGE_ASPECT_RATIO } from './constants';
 import { createOfflineScene, preloadPropTextures, preloadLEDVideo, type CameraAngle } from './utils/OfflineRenderer3D';
 import { getTotalStageWidth, getWingWidth, stageXToViewPercent, getStageXBounds } from './utils/coordinates';
 import { buildPlatformOccupancy, isPlatformProp } from './utils/platforms';
+import {
+  createCenteredStageGridMarks,
+  DEFAULT_STAGE_GRID_SPACING,
+  formatStageGridLabel,
+  normalizeStageGridSpacing,
+  STAGE_THIRD_POSITIONS,
+} from './utils/stage-grid';
 import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, Maximize2, ChevronDown, ChevronUp, Menu, X, Download, GripHorizontal, SlidersHorizontal, BookOpen } from 'lucide-react';
 import { StageConfig } from './types';
 
@@ -124,7 +131,7 @@ const App: React.FC = () => {
 
   // Stage View State
   const [showLabels, setShowLabels] = useState(true);
-  const [gridScale, setGridScale] = useState(1);
+  const [gridScale, setGridScale] = useState(DEFAULT_STAGE_GRID_SPACING);
   const [showHelp, setShowHelp] = useState(false);
   const [showProductGuide, setShowProductGuide] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.matchMedia('(max-width: 1100px)').matches);
@@ -2027,16 +2034,22 @@ const App: React.FC = () => {
     ctx.strokeRect(renderX + 0.5, renderY + 0.5, renderW - 1, renderH - 1);
 
     if (includeGrid) {
-      const divisions = Math.round(4 * gridScale);
+      const gridMarks = createCenteredStageGridMarks(totalStageW, gridScale);
       ctx.strokeStyle = '#94a3b8';
       ctx.lineWidth = scale;
-      ctx.globalAlpha = 0.2;
-      for (let i = 0; i <= divisions; i++) {
-        const gx = renderX + (i / divisions) * renderW;
+      gridMarks.forEach((mark) => {
+        const gx = renderX + mark.positionRatio * renderW;
+        ctx.globalAlpha = mark.offsetMeters === 0 ? 0.55 : 0.2;
+        ctx.lineWidth = (mark.offsetMeters === 0 ? 1.5 : 1) * scale;
         ctx.beginPath(); ctx.moveTo(gx, renderY); ctx.lineTo(gx, renderY + renderH); ctx.stroke();
-        const gy = renderY + (i / divisions) * renderH;
+      });
+      ctx.strokeStyle = '#38bdf8';
+      ctx.globalAlpha = 0.72;
+      ctx.lineWidth = 2.5 * scale;
+      STAGE_THIRD_POSITIONS.forEach((position) => {
+        const gy = renderY + position * renderH;
         ctx.beginPath(); ctx.moveTo(renderX, gy); ctx.lineTo(renderX + renderW, gy); ctx.stroke();
-      }
+      });
       ctx.globalAlpha = 1;
     }
 
@@ -2163,10 +2176,26 @@ const App: React.FC = () => {
       }
     });
 
-    ctx.fillStyle = 'rgba(100,116,139,0.5)';
-    ctx.fillRect(renderX, renderY + renderH - 8 * scale, renderW, 8 * scale);
+    const rulerHeight = 28 * scale;
+    ctx.fillStyle = 'rgba(2,6,23,0.78)';
+    ctx.fillRect(renderX, renderY + renderH - rulerHeight, renderW, rulerHeight);
+    const gridMarks = createCenteredStageGridMarks(totalStageW, gridScale);
+    ctx.strokeStyle = '#e2e8f0';
+    ctx.fillStyle = '#f8fafc';
+    ctx.lineWidth = Math.max(1, scale);
+    ctx.font = `${Math.max(7, Math.round(8 * scale))}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    gridMarks.forEach((mark) => {
+      const x = renderX + mark.positionRatio * renderW;
+      ctx.beginPath();
+      ctx.moveTo(x, renderY + renderH - rulerHeight);
+      ctx.lineTo(x, renderY + renderH - rulerHeight + 7 * scale);
+      ctx.stroke();
+      ctx.fillText(formatStageGridLabel(mark.offsetMeters), x, renderY + renderH - rulerHeight + 8 * scale);
+    });
     ctx.fillStyle = '#ffffff';
-    ctx.font = `${Math.round(10 * scale)}px sans-serif`;
+    ctx.font = `${Math.max(7, Math.round(8 * scale))}px sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'alphabetic';
     ctx.fillText('舞台前沿', Math.floor(renderX + renderW / 2), renderY + renderH - 2 * scale);
@@ -2994,10 +3023,7 @@ const App: React.FC = () => {
 
   // Grid Zoom Logic
   const handleGridZoom = (delta: number) => {
-    setGridScale(prev => {
-      const newScale = prev + delta;
-      return Math.max(1, Math.min(5, newScale)); // Clamp between 1x and 5x
-    });
+    setGridScale(prev => normalizeStageGridSpacing(prev + delta));
   };
 
   const cycleTimelineHeight = () => {
@@ -3332,7 +3358,7 @@ const App: React.FC = () => {
                 <div className={`w-px h-6 mx-1 ${theme === 'dark' ? 'bg-slate-700' : 'bg-gray-300'}`}></div>
                 <div className="flex items-center gap-2 px-2">
                   <button onClick={() => handleGridZoom(-0.5)} className={theme === 'dark' ? 'text-slate-500 hover:text-white' : 'text-gray-500 hover:text-gray-900'}><MinusCircle size={16} /></button>
-                  <span className={`text-xs font-mono w-8 text-center ${theme === 'dark' ? 'text-slate-400' : 'text-gray-600'}`}>{gridScale.toFixed(1)}x</span>
+                  <span className={`w-12 text-center font-mono text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-gray-600'}`}>{gridScale.toFixed(1)}m</span>
                   <button onClick={() => handleGridZoom(0.5)} className={theme === 'dark' ? 'text-slate-500 hover:text-white' : 'text-gray-500 hover:text-gray-900'}><PlusCircle size={16} /></button>
                 </div>
               </div>

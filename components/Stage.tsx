@@ -9,6 +9,11 @@ import {
   viewPercentToStageX,
 } from '../utils/coordinates';
 import { buildPlatformOccupancy, isPlatformProp } from '../utils/platforms';
+import {
+  createCenteredStageGridMarks,
+  formatStageGridLabel,
+  STAGE_THIRD_POSITIONS,
+} from '../utils/stage-grid';
 
 interface StageProps {
   performers: Performer[];
@@ -103,6 +108,10 @@ export const Stage: React.FC<StageProps> = ({
   const stageXBounds = useMemo(() => getStageXBounds(stageConfig), [stageConfig]);
   const wingWidth = getWingWidth(stageConfig);
   const totalStageWidth = getTotalStageWidth(stageConfig);
+  const gridMarks = useMemo(
+    () => createCenteredStageGridMarks(totalStageWidth, gridScale),
+    [gridScale, totalStageWidth],
+  );
   const leftMainEdge = stageXToViewPercent(0, stageConfig);
   const rightMainEdge = stageXToViewPercent(100, stageConfig);
   const visualAspectRatio = totalStageWidth / stageConfig.depth;
@@ -414,7 +423,7 @@ export const Stage: React.FC<StageProps> = ({
   const handleWheel = (e: React.WheelEvent) => {
     if (e.ctrlKey && onZoom) {
       e.preventDefault();
-      onZoom(e.deltaY > 0 ? -0.1 : 0.1);
+      onZoom(e.deltaY > 0 ? -0.5 : 0.5);
       return;
     }
 
@@ -444,38 +453,37 @@ export const Stage: React.FC<StageProps> = ({
     }
   };
 
-  // Generate Dynamic Grid
+  // Generate the meter-based center grid and the front/middle/back divisions.
   const gridLines = useMemo(() => {
-    const divisions = Math.round(4 * gridScale);
     return (
-      <svg className="absolute inset-0 w-full h-full pointer-events-none opacity-20" preserveAspectRatio="none">
-        {/* Vertical Lines */}
-        {Array.from({ length: divisions + 1 }).map((_, i) => (
+      <svg className="absolute inset-0 h-full w-full pointer-events-none" preserveAspectRatio="none">
+        {gridMarks.map((mark) => (
           <line
-            key={`v-${i}`}
-            x1={`${(i / divisions) * 100}%`}
+            key={`meter-${mark.offsetMeters}`}
+            x1={`${mark.positionRatio * 100}%`}
             y1="0"
-            x2={`${(i / divisions) * 100}%`}
+            x2={`${mark.positionRatio * 100}%`}
             y2="100%"
-            stroke="#94a3b8"
-            strokeWidth={1}
+            stroke={mark.offsetMeters === 0 ? '#e2e8f0' : '#94a3b8'}
+            strokeWidth={mark.offsetMeters === 0 ? 1.5 : 1}
+            opacity={mark.offsetMeters === 0 ? 0.55 : 0.2}
           />
         ))}
-        {/* Horizontal Lines */}
-        {Array.from({ length: divisions + 1 }).map((_, i) => (
+        {STAGE_THIRD_POSITIONS.map((position) => (
           <line
-            key={`h-${i}`}
+            key={`third-${position}`}
             x1="0"
-            y1={`${(i / divisions) * 100}%`}
+            y1={`${position * 100}%`}
             x2="100%"
-            y2={`${(i / divisions) * 100}%`}
-            stroke="#94a3b8"
-            strokeWidth={1}
+            y2={`${position * 100}%`}
+            stroke="#38bdf8"
+            strokeWidth={2.5}
+            opacity={0.72}
           />
         ))}
       </svg>
     );
-  }, [gridScale]);
+  }, [gridMarks]);
 
   return (
     <div
@@ -527,8 +535,20 @@ export const Stage: React.FC<StageProps> = ({
           主舞台 {Number(stageConfig.width.toFixed(2))}m × {Number(stageConfig.depth.toFixed(2))}m
         </div>
 
-        {/* Stage Front Indicator */}
-        <div className="absolute bottom-0 left-0 right-0 h-2 bg-slate-600 opacity-50 text-center text-[10px] tracking-widest text-white">舞台前沿</div>
+        {/* Stage Front Ruler */}
+        <div className="absolute bottom-0 left-0 right-0 h-7 border-t border-slate-400/70 bg-slate-950/75 pointer-events-none">
+          <div className="absolute inset-x-0 bottom-0 text-center text-[8px] tracking-[0.2em] text-slate-400">舞台前沿</div>
+          {gridMarks.map((mark) => (
+            <div
+              key={`ruler-${mark.offsetMeters}`}
+              className="absolute top-0 -translate-x-1/2 text-center font-mono text-[8px] leading-none text-slate-100"
+              style={{ left: `${mark.positionRatio * 100}%` }}
+            >
+              <span className="mx-auto block h-1.5 w-px bg-slate-200" />
+              <span>{formatStageGridLabel(mark.offsetMeters)}</span>
+            </div>
+          ))}
+        </div>
 
         {/* Performers Layer */}
         {[...visiblePerformers]
