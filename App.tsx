@@ -3047,7 +3047,10 @@ const App: React.FC = () => {
           >
             {sidebarCollapsed ? <Menu size={22} /> : <X size={22} />}
           </button>
-          <h1 className={`text-base sm:text-lg font-bold ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>CosFormation</h1>
+          <div className="flex items-center gap-2">
+            <img src="./icons/icon-192.png" alt="CosStage" className="w-6 h-6" />
+            <h1 className={`text-base sm:text-lg font-bold ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>CosStage</h1>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <button

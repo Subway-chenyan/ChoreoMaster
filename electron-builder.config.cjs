@@ -1,6 +1,6 @@
 module.exports = {
   appId: 'com.choreomaster.app',
-  productName: 'ChoreoMaster',
+  productName: 'CosStage',
   copyright: 'Copyright © 2025',
   directories: {
     output: 'release',
@@ -41,7 +41,7 @@ module.exports = {
     uninstallerIcon: 'build/icon.ico',
     createDesktopShortcut: true,
     createStartMenuShortcut: true,
-    shortcutName: 'ChoreoMaster',
+    shortcutName: 'CosStage',
     deleteAppDataOnUninstall: false,
   },
   mac: {

@@ -1,7 +1,7 @@
 {
   "id": "./",
-  "name": "ChoreoMaster",
-  "short_name": "ChoreoMaster",
+  "name": "CosStage",
+  "short_name": "CosStage",
   "description": "面向排练与舞台编排的触控友好型编辑器",
   "start_url": "./",
   "scope": "./",
