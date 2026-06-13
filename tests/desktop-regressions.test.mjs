@@ -70,3 +70,15 @@ test('Electron build excludes the embedded Agent and FFmpeg', async () => {
   assert.doesNotMatch(preload, /agent:getRuntime|agent:restart/);
   assert.doesNotMatch(agentService, /electronAPI\.agent|agent:getRuntime/);
 });
+
+test('packaged Electron uses the branded application icons', async () => {
+  const [builder, main] = await Promise.all([
+    read('electron-builder.config.cjs'),
+    read('electron/main.ts'),
+  ]);
+
+  assert.match(builder, /icon: 'build\/icon\.ico'/);
+  assert.doesNotMatch(builder, /signAndEditExecutable:\s*false/);
+  assert.match(main, /app\.isPackaged/);
+  assert.match(main, /path\.join\(path\.dirname\(process\.execPath\), 'icon\.png'\)/);
+});

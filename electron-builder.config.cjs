@@ -31,7 +31,6 @@ module.exports = {
     ],
     icon: 'build/icon.ico',
     artifactName: '${productName}-Setup-${version}-${arch}.${ext}',
-    signAndEditExecutable: false,
   },
   nsis: {
     oneClick: false,
