@@ -34,3 +34,14 @@ Do not calculate independent division counts inside a renderer. Physical meter s
 - Exactly two prominent depth division lines are rendered.
 - 2D and 3D views render without console errors.
 - Export renderers use the same shared grid marks.
+
+## Transformed Pointer Overlays
+
+Pointer state may remain in client coordinates for hit testing, but overlays rendered inside the transformed stage must convert client pixels back into local pixels:
+
+```typescript
+const scaleX = stage.offsetWidth / rect.width;
+const localX = (clientX - rect.left) * scaleX;
+```
+
+Apply the same conversion independently on the Y axis. Using raw client pixel deltas as an absolutely positioned child causes selection overlays to be scaled twice after zooming.

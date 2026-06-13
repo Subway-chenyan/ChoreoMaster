@@ -72,6 +72,13 @@ interface PanState {
   initialOffsetY: number;
 }
 
+interface SelectionBoxStyle {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
 function getPolygonClipPath(points: { x: number; y: number }[] | undefined): string | undefined {
   if (!points || points.length < 3) return undefined;
   return `polygon(${points.map(p =>
@@ -453,6 +460,28 @@ export const Stage: React.FC<StageProps> = ({
     }
   };
 
+  const getSelectionBoxStyle = (): SelectionBoxStyle | undefined => {
+    const stage = stageRef.current;
+    if (!selectionBox || !stage) return undefined;
+
+    const rect = stage.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return undefined;
+
+    // The box is rendered inside the transformed stage, so client pixels must
+    // be converted back to the stage's untransformed local coordinate space.
+    const scaleX = stage.offsetWidth / rect.width;
+    const scaleY = stage.offsetHeight / rect.height;
+    const left = Math.min(selectionBox.startX, selectionBox.endX);
+    const top = Math.min(selectionBox.startY, selectionBox.endY);
+
+    return {
+      left: (left - rect.left) * scaleX,
+      top: (top - rect.top) * scaleY,
+      width: Math.abs(selectionBox.endX - selectionBox.startX) * scaleX,
+      height: Math.abs(selectionBox.endY - selectionBox.startY) * scaleY,
+    };
+  };
+
   // Generate the meter-based center grid and the front/middle/back divisions.
   const gridLines = useMemo(() => {
     return (
@@ -680,12 +709,7 @@ export const Stage: React.FC<StageProps> = ({
         {selectionBox && (
           <div
             className="absolute border-2 border-dashed border-blue-400 bg-blue-500/20 pointer-events-none z-30"
-            style={{
-              left: Math.min(selectionBox.startX, selectionBox.endX) - (stageRef.current?.getBoundingClientRect().left || 0),
-              top: Math.min(selectionBox.startY, selectionBox.endY) - (stageRef.current?.getBoundingClientRect().top || 0),
-              width: Math.abs(selectionBox.endX - selectionBox.startX),
-              height: Math.abs(selectionBox.endY - selectionBox.startY),
-            }}
+            style={getSelectionBoxStyle()}
           />
         )}
       </div>

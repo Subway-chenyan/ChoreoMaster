@@ -102,3 +102,12 @@ test('stage grid uses meter spacing, centered ruler marks, and third divisions',
   assert.match(offline, /createCenteredStageGridMarks\(totalWidth, gridScale\)/);
   assert.match(app, /\{gridScale\.toFixed\(1\)\}m/);
 });
+
+test('stage selection box converts client pixels into transformed local coordinates', async () => {
+  const stage = await read('components/Stage.tsx');
+
+  assert.match(stage, /const scaleX = stage\.offsetWidth \/ rect\.width/);
+  assert.match(stage, /const scaleY = stage\.offsetHeight \/ rect\.height/);
+  assert.match(stage, /width: Math\.abs\(selectionBox\.endX - selectionBox\.startX\) \* scaleX/);
+  assert.match(stage, /style=\{getSelectionBoxStyle\(\)\}/);
+});
