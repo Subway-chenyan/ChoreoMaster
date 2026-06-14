@@ -66,9 +66,18 @@ jobs:
             -k "${TENCENT_SECRET_KEY}"
 
       - name: Upload build to COS
+        env:
+          TENCENT_SECRET_ID: ${{ secrets.TENCENT_SECRET_ID }}
+          TENCENT_SECRET_KEY: ${{ secrets.TENCENT_SECRET_KEY }}
         run: |
-          coscli sync ./dist/ "cos://${COS_ALIAS}/" --recursive --force
+          coscli sync ./dist/ "cos://${COS_ALIAS}/" \
+            --secret-id "${TENCENT_SECRET_ID}" \
+            --secret-key "${TENCENT_SECRET_KEY}" \
+            --recursive \
+            --force
           coscli cp ./dist/index.html "cos://${COS_ALIAS}/index.html" \
+            --secret-id "${TENCENT_SECRET_ID}" \
+            --secret-key "${TENCENT_SECRET_KEY}" \
             --meta "Cache-Control:no-cache" \
             --force
 
