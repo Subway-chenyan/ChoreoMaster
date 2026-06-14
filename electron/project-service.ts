@@ -6,6 +6,8 @@ import unzipper from 'unzipper';
 import type {
   AudioMarker,
   FaceTexture,
+  MotionControlPoint,
+  ObjectMotion,
   Performer,
   ProjectAssetKind,
   ProjectAssetResult,
@@ -14,6 +16,7 @@ import type {
   ProjectLoadResult,
   ProjectWarning,
   StageConfig,
+  TransitionSegment,
 } from './project-contract.js';
 
 const PROJECT_VERSION = '3.0';
@@ -81,6 +84,80 @@ function resolveInside(basePath: string, relativePath: string): string {
   return resolved;
 }
 
+function parsePosition(value: unknown): { x: number; y: number; z?: number } | null {
+  if (!isRecord(value)) return null;
+  if (typeof value.x !== 'number' || typeof value.y !== 'number') return null;
+  if (!Number.isFinite(value.x) || !Number.isFinite(value.y)) return null;
+  const position: { x: number; y: number; z?: number } = {
+    x: value.x,
+    y: value.y,
+  };
+  if (typeof value.z === 'number' && Number.isFinite(value.z)) {
+    position.z = value.z;
+  }
+  return position;
+}
+
+function parseMotionControlPoints(value: unknown): MotionControlPoint[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const points = value.flatMap((entry) => {
+    const point = parsePosition(entry);
+    return point ? [point] : [];
+  });
+  return points.length > 0 ? points.slice(0, 2) : undefined;
+}
+
+function parseObjectMotion(value: unknown): ObjectMotion | null {
+  if (!isRecord(value)) return null;
+  const motion: ObjectMotion = {};
+  if (value.pathType === 'linear' || value.pathType === 'bezier') {
+    motion.pathType = value.pathType;
+  }
+  const controlPoints = parseMotionControlPoints(value.controlPoints);
+  if (controlPoints) {
+    motion.controlPoints = controlPoints;
+  }
+  if (value.rotationMode === 'fixed' || value.rotationMode === 'lerp') {
+    motion.rotationMode = value.rotationMode;
+  }
+  if (typeof value.startRotation === 'number' && Number.isFinite(value.startRotation)) {
+    motion.startRotation = value.startRotation;
+  }
+  if (typeof value.endRotation === 'number' && Number.isFinite(value.endRotation)) {
+    motion.endRotation = value.endRotation;
+  }
+  return motion;
+}
+
+function parseTransitions(value: unknown): TransitionSegment[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry, index) => {
+    if (!isRecord(entry) || typeof entry.fromFrameId !== 'string' || typeof entry.toFrameId !== 'string') {
+      return [];
+    }
+    const objectMotions: Record<string, ObjectMotion> = {};
+    if (isRecord(entry.objectMotions)) {
+      Object.entries(entry.objectMotions).forEach(([objectId, motionValue]) => {
+        const parsedMotion = parseObjectMotion(motionValue);
+        if (parsedMotion) {
+          objectMotions[objectId] = parsedMotion;
+        }
+      });
+    }
+    return [{
+      id: typeof entry.id === 'string' && entry.id.trim()
+        ? entry.id.trim().slice(0, 160)
+        : `transition-${index}-${entry.fromFrameId}-${entry.toFrameId}`,
+      fromFrameId: entry.fromFrameId,
+      toFrameId: entry.toFrameId,
+      duration: typeof entry.duration === 'number' && Number.isFinite(entry.duration)
+        ? Math.max(0, Math.round(entry.duration))
+        : undefined,
+      objectMotions,
+    }];
+  });
+}
+
 function parseProjectDocument(value: unknown, fallbackName: string): ProjectDocument {
   if (!isRecord(value)) throw new Error('Project file must contain an object');
   if (!Array.isArray(value.performers) || !Array.isArray(value.frames)) {
@@ -109,6 +186,7 @@ function parseProjectDocument(value: unknown, fallbackName: string): ProjectDocu
       ? value.performerGroups as ProjectDocument['performerGroups']
       : [],
     frames: value.frames as ProjectDocument['frames'],
+    transitions: parseTransitions(value.transitions),
     audioMarkers: parseAudioMarkers(value.audioMarkers),
     stageConfig,
   };

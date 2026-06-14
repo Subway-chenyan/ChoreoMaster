@@ -24,6 +24,7 @@ interface DragContextType {
 interface Scene3DProps {
   performers: Performer[];
   positions: Record<string, Position>;
+  rotations?: Record<string, number>;
   selectedIds: string[];
   onSelect: (id: string) => void;
   stageConfig: StageConfig;
@@ -64,6 +65,7 @@ export const useDragContext = () => useContext(DragContext);
 const Scene3D: React.FC<Scene3DProps> = ({
   performers,
   positions,
+  rotations = {},
   selectedIds,
   onSelect,
   stageConfig,
@@ -173,6 +175,7 @@ const Scene3D: React.FC<Scene3DProps> = ({
           key: p.id,
           performer: p,
           position: pos,
+          rotationDeg: rotations[p.id] ?? p.rotation ?? 0,
           isSelected: selectedIds.includes(p.id),
           onSelect,
           stageConfig,

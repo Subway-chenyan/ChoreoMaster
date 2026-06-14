@@ -4,6 +4,37 @@ export interface Position {
   z?: number;
 }
 
+export interface MotionControlPoint {
+  x: number;
+  y: number;
+  z?: number;
+}
+
+export type MotionPathType = 'linear' | 'bezier';
+export type RotationMode = 'fixed' | 'lerp';
+
+export interface ObjectMotion {
+  pathType?: MotionPathType;
+  controlPoints?: MotionControlPoint[];
+  rotationMode?: RotationMode;
+  startRotation?: number;
+  endRotation?: number;
+}
+
+export interface TransitionSegment {
+  id: string;
+  fromFrameId: string;
+  toFrameId: string;
+  duration?: number;
+  objectMotions: Record<string, ObjectMotion>;
+}
+
+export interface SceneState {
+  positions: Record<string, Position>;
+  rotations: Record<string, number>;
+  hiddenGroupIds: string[];
+}
+
 export type PerformerShape = 'circle' | 'square' | 'triangle';
 export type PerformerType = 'performer' | 'prop';
 export type PropGeometryType = 'box' | 'extruded';
@@ -104,6 +135,7 @@ export interface ProjectDocument {
   performers: Performer[];
   performerGroups: PerformerGroup[];
   frames: Frame[];
+  transitions?: TransitionSegment[];
   audioMarkers?: AudioMarker[];
   stageConfig: StageConfig;
 }

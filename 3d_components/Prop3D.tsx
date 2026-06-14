@@ -21,6 +21,7 @@ function createFaceMaterial(faceTexture?: { dataUrl?: string }, fallbackColor: s
 interface Prop3DProps {
   performer: Performer;
   position: Position;
+  rotationDeg?: number;
   platformLift?: number;
   isSelected: boolean;
   onSelect: (id: string) => void;
@@ -33,6 +34,7 @@ interface Prop3DProps {
 const Prop3D: React.FC<Prop3DProps> = ({
   performer,
   position,
+  rotationDeg = 0,
   platformLift = 0,
   isSelected,
   onSelect,
@@ -157,7 +159,7 @@ const Prop3D: React.FC<Prop3DProps> = ({
       meshRef.current.position.copy(currentPositionRef.current);
 
       // Smoothly interpolate rotation
-      const targetRotation = new THREE.Euler(0, -degToRad(performer.rotation || 0), 0);
+      const targetRotation = new THREE.Euler(0, -degToRad(rotationDeg), 0);
       const targetQ = new THREE.Quaternion().setFromEuler(targetRotation);
       currentRotationRef.current.slerp(targetQ, 0.1);
       meshRef.current.quaternion.copy(currentRotationRef.current);

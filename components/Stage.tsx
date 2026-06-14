@@ -20,6 +20,7 @@ interface StageProps {
   performerGroups?: PerformerGroup[];
   hiddenGroupIds?: string[]; // IDs of groups hidden in current frame
   positions: Record<string, Position>;
+  rotations?: Record<string, number>;
   selectedPerformerIds: string[];
   onSelectionChange: (ids: string[]) => void;
   onPositionChange: (updates: { id: string; pos: Position }[]) => void;
@@ -91,6 +92,7 @@ export const Stage: React.FC<StageProps> = ({
   performerGroups = [],
   hiddenGroupIds = [],
   positions,
+  rotations = {},
   selectedPerformerIds,
   onSelectionChange,
   onPositionChange,
@@ -615,7 +617,7 @@ export const Stage: React.FC<StageProps> = ({
                   width: `${widthPct}%`,
                   height: `${heightPct}%`,
                   backgroundColor: performer.color,
-                  transform: `translate(-50%, -50%) rotate(${performer.rotation || 0}deg)`,
+                  transform: `translate(-50%, -50%) rotate(${rotations[performer.id] ?? performer.rotation ?? 0}deg)`,
                   border: isSelected
                     ? '2px solid white'
                     : isPlatform

@@ -11,6 +11,7 @@ import {
   AIChoreoPlan,
   ProjectDocument,
   ProjectLoadResult,
+  TransitionSegment,
 } from './types';
 import { Sidebar } from './components/Sidebar';
 import { Stage } from './components/Stage';
@@ -32,6 +33,10 @@ import {
 } from './utils/stage-grid';
 import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, Maximize2, ChevronDown, ChevronUp, Menu, X, Download, GripHorizontal, SlidersHorizontal, BookOpen } from 'lucide-react';
 import { StageConfig } from './types';
+import {
+  evaluateSceneStateAtTime,
+  getSortedFrames,
+} from './utils/transitions';
 
 const DEFAULT_FRAME: Frame = {
   id: 'start-frame',
@@ -191,7 +196,9 @@ const App: React.FC = () => {
   const [performers, setPerformers] = useState<Performer[]>([]);
   const [performerGroups, setPerformerGroups] = useState<PerformerGroup[]>([]);
   const [frames, setFrames] = useState<Frame[]>([DEFAULT_FRAME]);
+  const [transitions, setTransitions] = useState<TransitionSegment[]>([]);
   const [currentFrameId, setCurrentFrameId] = useState<string>(DEFAULT_FRAME.id);
+  const [selectedTransitionId, setSelectedTransitionId] = useState<string | null>(null);
   const [selectedPerformerIds, setSelectedPerformerIds] = useState<string[]>([]);
   const [musicUrl, setMusicUrl] = useState<string | null>(null);
   const [audioBuffer, setAudioBuffer] = useState<AudioBuffer | null>(null);
@@ -339,6 +346,28 @@ const App: React.FC = () => {
     };
   };
 
+  const buildProjectDocument = useCallback((name: string = ''): ProjectDocument => ({
+    version: '3.0',
+    name,
+    performers,
+    performerGroups,
+    frames,
+    transitions,
+    audioMarkers,
+    stageConfig,
+    musicName,
+    musicAsset,
+  }), [
+    performers,
+    performerGroups,
+    frames,
+    transitions,
+    audioMarkers,
+    stageConfig,
+    musicName,
+    musicAsset,
+  ]);
+
   // Initialize Audio Context
   useEffect(() => {
     audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -352,135 +381,19 @@ const App: React.FC = () => {
     isPlayingRef.current = isPlaying;
   }, [isPlaying]);
 
-  // Sort frames by start time helper
-  const getSortedFrames = useCallback((currentFrames: Frame[]) => {
-    return [...currentFrames].sort((a, b) => a.startTime - b.startTime);
-  }, []);
+  const computeSceneStateAtTime = useCallback((timeMs: number) => (
+    evaluateSceneStateAtTime(timeMs, frames, performers, transitions)
+  ), [frames, performers, transitions]);
 
-  // Calculated: Interpolated Positions for Current Time
-  const currentPositions = useCallback(() => {
-    const sortedFrames = getSortedFrames(frames);
+  const currentSceneState = useMemo(() => (
+    computeSceneStateAtTime(currentTime)
+  ), [computeSceneStateAtTime, currentTime]);
 
-    // 1. Check if we are inside a specific frame (HOLD phase)
-    const activeFrame = sortedFrames.find(f => currentTime >= f.startTime && currentTime < f.startTime + f.duration);
+  const activeHiddenGroupIds = currentSceneState.hiddenGroupIds;
 
-    if (activeFrame) {
-      return activeFrame.positions;
-    }
-
-    // 2. If not in a frame, we are in a GAP (TRANSITION phase)
-    // Find the frame just before current time and the frame just after
-    const prevFrame = [...sortedFrames].reverse().find(f => f.startTime + f.duration <= currentTime);
-    const nextFrame = sortedFrames.find(f => f.startTime > currentTime);
-
-    if (prevFrame && nextFrame) {
-      // Interpolate between prev and next
-      const gapStart = prevFrame.startTime + prevFrame.duration;
-      const gapEnd = nextFrame.startTime;
-      const totalGap = gapEnd - gapStart;
-
-      if (totalGap <= 0) return prevFrame.positions;
-
-      const progress = (currentTime - gapStart) / totalGap;
-      // Ease in-out
-      const ease = progress < .5 ? 2 * progress * progress : -1 + (4 - 2 * progress) * progress;
-
-      const interpolated: Record<string, Position> = {};
-      performers.forEach(p => {
-        // Only interpolate if performer exists in BOTH frames (Entrance/Exit logic)
-        const start = prevFrame.positions[p.id];
-        const end = nextFrame.positions[p.id];
-
-        if (start && end) {
-          const includeZ = start.z !== undefined || end.z !== undefined;
-          const interpolatedZ = (start.z ?? 0) + ((end.z ?? 0) - (start.z ?? 0)) * ease;
-          interpolated[p.id] = {
-            x: start.x + (end.x - start.x) * ease,
-            y: start.y + (end.y - start.y) * ease,
-            ...(includeZ ? { z: interpolatedZ } : {}),
-          };
-        }
-        // If in one but not other, they do not exist during transition (clean cut)
-      });
-      return interpolated;
-    }
-
-    // 3. Before first frame or after last frame
-    if (sortedFrames.length > 0) {
-      if (currentTime < sortedFrames[0].startTime) {
-        // Before first frame: Show first frame positions (static)
-        return sortedFrames[0].positions;
-      }
-      // After last frame
-      return sortedFrames[sortedFrames.length - 1].positions;
-    }
-
-    return {};
-
-  }, [currentTime, frames, performers, getSortedFrames]);
-
-  // Calculate Active Hidden Groups based on Current Time (for playback syncing)
-  const activeHiddenGroupIds = useMemo(() => {
-    const sortedFrames = getSortedFrames(frames);
-
-    // 1. Inside a frame
-    const activeFrame = sortedFrames.find(f => currentTime >= f.startTime && currentTime < f.startTime + f.duration);
-    if (activeFrame) {
-      return activeFrame.hiddenGroupIds || [];
-    }
-
-    // 2. In a GAP (Transition) -> Use Previous Frame's settings
-    const prevFrame = [...sortedFrames].reverse().find(f => f.startTime + f.duration <= currentTime);
-    if (prevFrame) {
-      return prevFrame.hiddenGroupIds || [];
-    }
-
-    // 3. Before first frame -> Use first frame's settings (if exists) 
-    // This is optional, but keeps consistency if waiting to start
-    if (sortedFrames.length > 0 && currentTime < sortedFrames[0].startTime) {
-      return sortedFrames[0].hiddenGroupIds || [];
-    }
-
-    return [];
-  }, [currentTime, frames, getSortedFrames]);
-
-  const computePositionsAtTime = useCallback((timeMs: number) => {
-    const sortedFrames = getSortedFrames(frames);
-    const activeFrame = sortedFrames.find(f => timeMs >= f.startTime && timeMs < f.startTime + f.duration);
-    if (activeFrame) {
-      return activeFrame.positions;
-    }
-    const prevFrame = [...sortedFrames].reverse().find(f => f.startTime + f.duration <= timeMs);
-    const nextFrame = sortedFrames.find(f => f.startTime > timeMs);
-    if (prevFrame && nextFrame) {
-      const gapStart = prevFrame.startTime + prevFrame.duration;
-      const gapEnd = nextFrame.startTime;
-      const totalGap = gapEnd - gapStart;
-      if (totalGap <= 0) return prevFrame.positions;
-      const progress = (timeMs - gapStart) / totalGap;
-      const ease = progress < .5 ? 2 * progress * progress : -1 + (4 - 2 * progress) * progress;
-      const interpolated: Record<string, Position> = {};
-      performers.forEach(p => {
-        const start = prevFrame.positions[p.id];
-        const end = nextFrame.positions[p.id];
-        if (start && end) {
-          const includeZ = start.z !== undefined || end.z !== undefined;
-          const interpolatedZ = (start.z ?? 0) + ((end.z ?? 0) - (start.z ?? 0)) * ease;
-          interpolated[p.id] = {
-            x: start.x + (end.x - start.x) * ease,
-            y: start.y + (end.y - start.y) * ease,
-            ...(includeZ ? { z: interpolatedZ } : {}),
-          };
-        }
-      });
-      return interpolated;
-    }
-    if (sortedFrames.length > 0) {
-      if (timeMs < sortedFrames[0].startTime) return sortedFrames[0].positions;
-      return sortedFrames[sortedFrames.length - 1].positions;
-    }
-    return {};
-  }, [frames, performers, getSortedFrames]);
+  const computePositionsAtTime = useCallback((timeMs: number) => (
+    computeSceneStateAtTime(timeMs).positions
+  ), [computeSceneStateAtTime]);
 
   const clonePositionMap = (positionsMap: Record<string, Position>): Record<string, Position> => (
     Object.fromEntries(
@@ -709,6 +622,12 @@ const App: React.FC = () => {
   const handleRemovePerformer = (id: string) => {
     setPerformers(performers.filter(p => p.id !== id));
     setSelectedPerformerIds(selectedPerformerIds.filter(pid => pid !== id));
+    setTransitions((prev) => prev.map((transition) => {
+      if (!transition.objectMotions[id]) return transition;
+      const nextObjectMotions = { ...transition.objectMotions };
+      delete nextObjectMotions[id];
+      return { ...transition, objectMotions: nextObjectMotions };
+    }));
   };
 
   const handleUpdatePerformer = (id: string, updates: Partial<Performer>) => {
@@ -865,6 +784,7 @@ const App: React.FC = () => {
     setPerformers(data.performers);
     setPerformerGroups(data.performerGroups);
     setFrames(data.frames);
+    setTransitions(data.transitions || []);
     setAudioMarkers(data.audioMarkers || []);
     setMusicName(data.musicName || null);
     setMusicAsset(data.musicAsset || null);
@@ -874,6 +794,7 @@ const App: React.FC = () => {
     setAudioBuffer(null);
     setMusicUrl(audioUrl);
     setSelectedPerformerIds([]);
+    setSelectedTransitionId(null);
     if (data.frames.length > 0) {
       setCurrentFrameId(data.frames[0].id);
     }
@@ -894,6 +815,7 @@ const App: React.FC = () => {
       performers: data.performers,
       performerGroups: data.performerGroups,
       frames: data.frames,
+      transitions: data.transitions || [],
       audioMarkers: data.audioMarkers || [],
       stageConfig: data.stageConfig,
       musicName: data.musicName || null,
@@ -909,12 +831,13 @@ const App: React.FC = () => {
       performers,
       performerGroups,
       frames,
+      transitions,
       audioMarkers,
       stageConfig,
       musicName,
       musicAsset,
     });
-  }, [performers, performerGroups, frames, audioMarkers, stageConfig, musicName, musicAsset]);
+  }, [performers, performerGroups, frames, transitions, audioMarkers, stageConfig, musicName, musicAsset]);
 
   // Track changes to project
   useEffect(() => {
@@ -922,7 +845,7 @@ const App: React.FC = () => {
       const currentState = getProjectStateString();
       setProjectHasChanges(currentState !== lastSavedState);
     }
-  }, [performers, performerGroups, frames, audioMarkers, stageConfig, musicName, musicAsset, currentProjectId, lastSavedState, getProjectStateString]);
+  }, [performers, performerGroups, frames, transitions, audioMarkers, stageConfig, musicName, musicAsset, currentProjectId, lastSavedState, getProjectStateString]);
 
   // Create a new project
   const handleCreateProject = async (name: string): Promise<string> => {
@@ -931,17 +854,7 @@ const App: React.FC = () => {
     // Auto-save current project before creating new one
     if (currentProjectId && projectHasChanges) {
       try {
-        const projectData: ProjectDocument = {
-          version: '3.0',
-          name: '',
-          performers,
-          performerGroups,
-          frames,
-          audioMarkers,
-          stageConfig,
-          musicName,
-          musicAsset,
-        };
+        const projectData = buildProjectDocument();
         await window.electronAPI.project.save(currentProjectId, projectData);
         console.log('Auto-saved current project before creating new');
       } catch (error) {
@@ -969,8 +882,10 @@ const App: React.FC = () => {
       setPerformers([]);
       setPerformerGroups([]);
       setFrames(newFrames);
+      setTransitions([]);
       setAudioMarkers([]);
       setCurrentFrameId(newFrameId);
+      setSelectedTransitionId(null);
       setStageConfig(newStageConfig);
       setMediaCache({});
       setMusicName(null);
@@ -985,6 +900,7 @@ const App: React.FC = () => {
         performers: [],
         performerGroups: [],
         frames: newFrames,
+        transitions: [],
         audioMarkers: [],
         stageConfig: newStageConfig,
         musicName: null,
@@ -1005,17 +921,7 @@ const App: React.FC = () => {
     // Auto-save current project before switching
     if (currentProjectId && projectHasChanges) {
       try {
-        const projectData: ProjectDocument = {
-          version: '3.0',
-          name: '',
-          performers,
-          performerGroups,
-          frames,
-          audioMarkers,
-          stageConfig,
-          musicName,
-          musicAsset,
-        };
+        const projectData = buildProjectDocument();
         await window.electronAPI.project.save(currentProjectId, projectData);
       } catch (error) {
         console.error('Failed to auto-save before creating template project:', error);
@@ -1035,6 +941,7 @@ const App: React.FC = () => {
         performers: templateData.performers || [],
         performerGroups: templateData.performerGroups || [],
         frames: templateData.frames || [],
+        transitions: templateData.transitions || [],
         audioMarkers: normalizeAudioMarkers(templateData.audioMarkers),
         stageConfig: templateData.stageConfig || stageConfig,
         musicName: null,
@@ -1049,9 +956,11 @@ const App: React.FC = () => {
       setPerformers(saveData.performers);
       setPerformerGroups(saveData.performerGroups);
       setFrames(saveData.frames);
+      setTransitions(saveData.transitions || []);
       setAudioMarkers(saveData.audioMarkers || []);
       setStageConfig(saveData.stageConfig);
       setCurrentFrameId(saveData.frames[0]?.id || '');
+      setSelectedTransitionId(null);
       setMusicName(null);
       setMusicAsset(null);
       setAudioBuffer(null);
@@ -1063,6 +972,7 @@ const App: React.FC = () => {
         performers: saveData.performers,
         performerGroups: saveData.performerGroups,
         frames: saveData.frames,
+        transitions: saveData.transitions || [],
         audioMarkers: saveData.audioMarkers || [],
         stageConfig: saveData.stageConfig,
         musicName: null,
@@ -1081,14 +991,17 @@ const App: React.FC = () => {
     const performers = templateData.performers || [];
     const groups = templateData.performerGroups || [];
     const frames = templateData.frames || [];
+    const transitions = templateData.transitions || [];
     const config = templateData.stageConfig || stageConfig;
 
     setPerformers(performers);
     setPerformerGroups(groups);
     setFrames(frames);
+    setTransitions(transitions);
     setAudioMarkers(normalizeAudioMarkers(templateData.audioMarkers));
     setStageConfig(config);
     setCurrentFrameId(frames[0]?.id || '');
+    setSelectedTransitionId(null);
     setMusicName(null);
     setMusicAsset(null);
     setAudioBuffer(null);
@@ -1105,17 +1018,7 @@ const App: React.FC = () => {
     // Auto-save current project before switching
     if (currentProjectId && projectHasChanges) {
       try {
-        const projectData: ProjectDocument = {
-          version: '3.0',
-          name: '',
-          performers,
-          performerGroups,
-          frames,
-          audioMarkers,
-          stageConfig,
-          musicName,
-          musicAsset,
-        };
+        const projectData = buildProjectDocument();
         await window.electronAPI.project.save(currentProjectId, projectData);
         console.log('Auto-saved current project before switching');
       } catch (error) {
@@ -1135,30 +1038,22 @@ const App: React.FC = () => {
   };
 
   // Save current project
-  const handleSaveProject = async (): Promise<boolean> => {
+  const handleSaveProject = useCallback(async (): Promise<boolean> => {
     if (!window.electronAPI?.isElectron || !currentProjectId) return false;
     
     try {
-      const projectData: ProjectDocument = {
-        version: '3.0',
-        name: '', // Will be preserved from existing project.json
-        performers,
-        performerGroups,
-        frames,
-        audioMarkers,
-        stageConfig,
-        musicName,
-        musicAsset,
-      };
+      const projectData = buildProjectDocument();
       
       const saved = await window.electronAPI.project.save(currentProjectId, projectData);
       setPerformers(saved.data.performers);
+      setTransitions(saved.data.transitions || []);
       setAudioMarkers(saved.data.audioMarkers || []);
       setMediaCache(saved.mediaUrls);
       setLastSavedState(JSON.stringify({
         performers: saved.data.performers,
         performerGroups: saved.data.performerGroups,
         frames: saved.data.frames,
+        transitions: saved.data.transitions || [],
         audioMarkers: saved.data.audioMarkers || [],
         stageConfig: saved.data.stageConfig,
         musicName: saved.data.musicName || null,
@@ -1171,7 +1066,7 @@ const App: React.FC = () => {
       setProjectMessages(['项目保存失败，请检查磁盘空间和目录权限']);
       return false;
     }
-  };
+  }, [buildProjectDocument, currentProjectId]);
 
   const handleImportProjectPackage = async () => {
     if (!window.electronAPI?.isElectron) return;
@@ -1281,6 +1176,33 @@ const App: React.FC = () => {
       return f;
     }));
   };
+
+  const selectedTransition = useMemo(() => (
+    transitions.find((transition) => transition.id === selectedTransitionId) ?? null
+  ), [selectedTransitionId, transitions]);
+
+  const handleSelectTransition = useCallback((transitionId: string | null) => {
+    setSelectedTransitionId(transitionId);
+    setSelectedPerformerIds([]);
+  }, []);
+
+  const handleTransitionUpdate = useCallback((nextTransition: TransitionSegment) => {
+    setTransitions((prev) => {
+      const existingIndex = prev.findIndex((transition) => transition.id === nextTransition.id);
+      if (existingIndex === -1) {
+        return [...prev, nextTransition];
+      }
+      return prev.map((transition) => (
+        transition.id === nextTransition.id ? nextTransition : transition
+      ));
+    });
+    setSelectedTransitionId(nextTransition.id);
+  }, []);
+
+  const handleTransitionDelete = useCallback((transitionId: string) => {
+    setTransitions((prev) => prev.filter((transition) => transition.id !== transitionId));
+    setSelectedTransitionId((current) => current === transitionId ? null : current);
+  }, []);
 
   const handleStageDragStart = useCallback((performerIds: string[]) => {
     if (!currentFrameId || performerIds.length === 0) {
@@ -1479,7 +1401,7 @@ const App: React.FC = () => {
       newStart = Math.max(0, currentTime);
     }
 
-    const currentPos = currentPositions();
+    const currentPos = currentSceneState.positions;
 
     const newFrame: Frame = {
       id: generateId(),
@@ -1494,15 +1416,26 @@ const App: React.FC = () => {
 
     setFrames(newFrames);
     setCurrentFrameId(newFrame.id);
+    setSelectedTransitionId(null);
   };
 
   const handleDeleteFrame = (id: string) => {
     if (frames.length <= 0) return;
     if (isPlaying) handlePlayPause();
     const filtered = frames.filter(f => f.id !== id);
+    setTransitions((prev) => prev.filter((transition) => (
+      transition.fromFrameId !== id && transition.toFrameId !== id
+    )));
+    if (selectedTransitionId && transitions.some((transition) => (
+      transition.id === selectedTransitionId
+      && (transition.fromFrameId === id || transition.toFrameId === id)
+    ))) {
+      setSelectedTransitionId(null);
+    }
     if (filtered.length === 0) {
       const nf: Frame = { id: generateId(), name: 'Opening', startTime: 0, duration: 2000, positions: {} };
       setFrames([nf]);
+      setTransitions([]);
       setCurrentFrameId(nf.id);
       return;
     }
@@ -1578,6 +1511,7 @@ const App: React.FC = () => {
     newFrames.sort((a, b) => a.startTime - b.startTime);
     setFrames(newFrames);
     setCurrentFrameId(newFrame.id);
+    setSelectedTransitionId(null);
     pushUndoAction({
       type: 'paste-frame',
       frame: createFrameCopy(newFrame, { id: newFrame.id }),
@@ -1596,6 +1530,7 @@ const App: React.FC = () => {
       performers,
       performerGroups,
       frames,
+      transitions,
       audioMarkers,
       stageConfig,
     };
@@ -1649,6 +1584,7 @@ const App: React.FC = () => {
     const newFrameId = generateId();
     setPerformers([]);
     setPerformerGroups([]);
+    setTransitions([]);
     setFrames([{
       id: newFrameId,
       name: 'Opening',
@@ -1658,6 +1594,7 @@ const App: React.FC = () => {
     }]);
     setAudioMarkers([]);
     setCurrentFrameId(newFrameId);
+    setSelectedTransitionId(null);
     setMusicName(null);
     setAudioBuffer(null);
     setMusicUrl(null);
@@ -1685,6 +1622,7 @@ const App: React.FC = () => {
           setPerformers(json.performers);
           setPerformerGroups(json.performerGroups || []);
           setFrames(json.frames);
+          setTransitions(Array.isArray(json.transitions) ? json.transitions : []);
           setAudioMarkers(normalizeAudioMarkers(json.audioMarkers));
           setMusicName(json.musicName || null);
 
@@ -1701,6 +1639,7 @@ const App: React.FC = () => {
           setAudioBuffer(null);
           setMusicUrl(null);
           setSelectedPerformerIds([]);
+          setSelectedTransitionId(null);
 
           if (json.frames.length > 0) {
             setCurrentFrameId(json.frames[0].id);
@@ -1730,6 +1669,7 @@ const App: React.FC = () => {
         setPerformers(json.performers);
         setPerformerGroups(json.performerGroups || []);
         setFrames(json.frames);
+        setTransitions(Array.isArray(json.transitions) ? json.transitions : []);
         setAudioMarkers(normalizeAudioMarkers(json.audioMarkers));
         setMusicName(json.musicName || null);
 
@@ -1746,6 +1686,7 @@ const App: React.FC = () => {
         setAudioBuffer(null);
         setMusicUrl(null);
         setSelectedPerformerIds([]);
+        setSelectedTransitionId(null);
 
         if (json.frames.length > 0) {
           setCurrentFrameId(json.frames[0].id);
@@ -2134,13 +2075,10 @@ const App: React.FC = () => {
       ctx.globalAlpha = 1;
     }
 
-    // Compute hidden groups at this time
-    const sortedFrames = [...frames].sort((a, b) => a.startTime - b.startTime);
-    const frame = sortedFrames.find(f => timeMs >= f.startTime && timeMs < f.startTime + f.duration)
-      || [...sortedFrames].reverse().find(f => f.startTime + f.duration <= timeMs);
-    const hiddenGroupIds = frame?.hiddenGroupIds || [];
-
-    const positions = computePositionsAtTime(timeMs);
+    const sceneState = computeSceneStateAtTime(timeMs);
+    const hiddenGroupIds = sceneState.hiddenGroupIds;
+    const positions = sceneState.positions;
+    const rotations = sceneState.rotations;
     const platformOccupancy = buildPlatformOccupancy(performers, positions, stageConfig);
 
     ctx.fillStyle = 'rgba(2,6,23,0.55)';
@@ -2184,7 +2122,7 @@ const App: React.FC = () => {
         const propLift = platformOccupancy.entityLiftById[p.id] ?? 0;
         const propW = (p.width || 1) / totalStageW * renderW;
         const propD = (p.depth || 1) / stageD * renderH;
-        const rot = (p.rotation || 0) * Math.PI / 180;
+        const rot = (rotations[p.id] ?? p.rotation ?? 0) * Math.PI / 180;
 
         ctx.save();
         ctx.translate(cx, cy);
@@ -2747,14 +2685,6 @@ const App: React.FC = () => {
     }
     setExportProgress(0.12);
 
-    // Helper: compute hidden groups at a given time
-    const getHiddenGroups = (timeMs: number): string[] => {
-      const sortedFrames = [...frames].sort((a, b) => a.startTime - b.startTime);
-      const frame = sortedFrames.find(f => timeMs >= f.startTime && timeMs < f.startTime + f.duration)
-        || [...sortedFrames].reverse().find(f => f.startTime + f.duration <= timeMs);
-      return frame?.hiddenGroupIds || [];
-    };
-
     // Canvas for capturing WebGL output
     const tmpCanvas = document.createElement('canvas');
     tmpCanvas.width = width;
@@ -2838,11 +2768,10 @@ const App: React.FC = () => {
           ensureVideoEncoderOpen();
           const t = inPointMs + i * stepMs;
           const clampedT = Math.min(t, outPointMs);
-          const positions = computePositionsAtTime(clampedT);
-          const hiddenGroupIds = getHiddenGroups(clampedT);
+          const sceneState = computeSceneStateAtTime(clampedT);
 
           // Update scene and render (await LED video seek if present)
-          offline.updateAtTime(clampedT, positions, hiddenGroupIds);
+          offline.updateAtTime(clampedT, sceneState.positions, sceneState.rotations, sceneState.hiddenGroupIds);
           offline.renderer.render(offline.scene, offline.camera);
 
           // Copy WebGL canvas to tmpCanvas for VideoFrame
@@ -3034,10 +2963,9 @@ const App: React.FC = () => {
       const elapsed = performance.now() - recordStart;
       const currentFrameIdx = Math.min(Math.floor(elapsed / stepMs), totalFrames);
       const t = Math.min(inPointMs + currentFrameIdx * stepMs, outPointMs);
-      const positions = computePositionsAtTime(t);
-      const hiddenGroupIds = getHiddenGroups(t);
+      const sceneState = computeSceneStateAtTime(t);
 
-      offline.updateAtTime(t, positions, hiddenGroupIds);
+      offline.updateAtTime(t, sceneState.positions, sceneState.rotations, sceneState.hiddenGroupIds);
       offline.renderer.render(offline.scene, offline.camera);
 
       setExportProgress(0.7 + Math.min(0.3, (currentFrameIdx / totalFrames) * 0.3));
@@ -3123,6 +3051,7 @@ const App: React.FC = () => {
 
   const handleSelectFrame = (id: string) => {
     setSelectedPerformerIds([]);
+    setSelectedTransitionId(null);
     setCurrentFrameId(id);
     const f = frames.find(fr => fr.id === id);
     if (f) {
@@ -3168,8 +3097,11 @@ const App: React.FC = () => {
     });
   };
 
-  // Always use currentPositions() to ensure scrubbing shows real-time interpolation
-  const displayedPositions = currentPositions();
+  const displayedPositions = currentSceneState.positions;
+  const displayedRotations = currentSceneState.rotations;
+  const selectedTransitionLabel = selectedTransition
+    ? `${frames.find((frame) => frame.id === selectedTransition.fromFrameId)?.name || '起点'} -> ${frames.find((frame) => frame.id === selectedTransition.toFrameId)?.name || '终点'}`
+    : null;
 
   // Determine total duration for Timeline rendering
   const totalDuration = frames.reduce(
@@ -3345,7 +3277,7 @@ const App: React.FC = () => {
           <div className="min-h-0 flex-1 flex flex-col relative">
           <div className="stage-status absolute top-4 left-4 z-10 pointer-events-none">
             <div className={`backdrop-blur px-4 py-2 rounded-lg border text-sm shadow-xl ${theme === 'dark' ? 'bg-slate-900/90 border-slate-700 text-slate-400' : 'bg-white/90 border-gray-300 text-gray-700'}`}>
-              正在编辑队形：<span className="text-blue-400 font-bold ml-1">{frames.find(f => f.id === currentFrameId)?.name || '过渡/GAP'}</span>
+              正在编辑：<span className="text-blue-400 font-bold ml-1">{selectedTransitionLabel || frames.find(f => f.id === currentFrameId)?.name || '过渡/GAP'}</span>
               <div className={`text-[10px] mt-1 ${theme === 'dark' ? 'text-slate-500' : 'text-gray-500'}`}>{selectedPerformerIds.length} 人已选中</div>
             </div>
           </div>
@@ -3356,6 +3288,7 @@ const App: React.FC = () => {
               performerGroups={performerGroups}
               hiddenGroupIds={activeHiddenGroupIds}
               positions={displayedPositions}
+              rotations={displayedRotations}
               selectedPerformerIds={selectedPerformerIds}
               onSelectionChange={setSelectedPerformerIds}
               onPositionChange={handlePositionChange}
@@ -3372,6 +3305,7 @@ const App: React.FC = () => {
             <Stage3D
               performers={performers}
               positions={displayedPositions}
+              rotations={displayedRotations}
               selectedIds={selectedPerformerIds}
               onSelect={setSelectedPerformerIds}
               hiddenGroupIds={activeHiddenGroupIds}
@@ -3487,7 +3421,9 @@ const App: React.FC = () => {
           </div>
 
           {!timelineCollapsed && <Timeline
+            performers={performers}
             frames={frames}
+            transitions={transitions}
             duration={Math.max(
               totalDuration + 10000,
               audioBuffer ? audioBuffer.duration * 1000 : 0,
@@ -3503,6 +3439,10 @@ const App: React.FC = () => {
             onAddFrame={handleAddFrame}
             onSelectFrame={handleSelectFrame}
             selectedFrameId={selectedPerformerIds.length > 0 ? null : currentFrameId}
+            selectedTransitionId={selectedTransitionId}
+            onSelectTransition={handleSelectTransition}
+            onTransitionUpdate={handleTransitionUpdate}
+            onTransitionDelete={handleTransitionDelete}
             audioMarkers={audioMarkers}
             onAudioMarkersChange={setAudioMarkers}
             heightPx={timelineHeight}

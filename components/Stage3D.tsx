@@ -7,6 +7,7 @@ import { getTotalStageWidth } from '../utils/coordinates';
 interface Stage3DProps {
   performers: Performer[];
   positions: Record<string, Position>;
+  rotations?: Record<string, number>;
   selectedIds: string[];
   hiddenGroupIds?: string[];
   onSelect: (ids: string[]) => void;
@@ -26,6 +27,7 @@ interface Stage3DProps {
 const Stage3D: React.FC<Stage3DProps> = ({
   performers,
   positions,
+  rotations = {},
   selectedIds,
   hiddenGroupIds,
   onSelect,
@@ -56,6 +58,7 @@ const Stage3D: React.FC<Stage3DProps> = ({
         <Scene3D
           performers={performers}
           positions={positions}
+          rotations={rotations}
           selectedIds={selectedIds}
           onSelect={handleSelect}
           stageConfig={stageConfig}

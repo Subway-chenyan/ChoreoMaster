@@ -11,7 +11,12 @@ interface OfflineSceneResult {
   renderer: THREE.WebGLRenderer;
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
-  updateAtTime: (timeMs: number, positions: Record<string, Position>, hiddenGroupIds?: string[]) => void;
+  updateAtTime: (
+    timeMs: number,
+    positions: Record<string, Position>,
+    rotations?: Record<string, number>,
+    hiddenGroupIds?: string[],
+  ) => void;
   /** Pre-capture LED video frames for fast offline export. Call before the render loop. */
   prerenderLEDVideo: (inPointMs: number, outPointMs: number, fps?: number) => Promise<void>;
   dispose: () => void;
@@ -506,7 +511,12 @@ export function createOfflineScene(
    * Positions are set directly (no lerp interpolation) for deterministic frame output.
    * If frame cache exists, uses cached frames (fast). Otherwise falls back to direct seek.
    */
-  function updateAtTime(timeMs: number, positions: Record<string, Position>, hiddenGroupIds: string[] = []): void {
+  function updateAtTime(
+    timeMs: number,
+    positions: Record<string, Position>,
+    rotations: Record<string, number> = {},
+    hiddenGroupIds: string[] = [],
+  ): void {
     const visiblePerformers = performers.filter((p) => !p.groupId || !hiddenGroupIds.includes(p.groupId));
     const platformOccupancy = buildPlatformOccupancy(visiblePerformers, positions, stageConfig);
 
@@ -534,7 +544,7 @@ export function createOfflineScene(
       }
 
       // Rotation
-      mesh.rotation.y = -degToRad(p.rotation || 0);
+      mesh.rotation.y = -degToRad(rotations[p.id] ?? p.rotation ?? 0);
     });
 
     // Update LED image texture

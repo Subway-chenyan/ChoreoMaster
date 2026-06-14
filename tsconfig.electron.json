@@ -12,6 +12,7 @@
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "strict": true,
+    "ignoreDeprecations": "5.0",
     "resolveJsonModule": true,
     "outDir": "./dist-electron",
     "rootDir": "./electron",
