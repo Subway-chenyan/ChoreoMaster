@@ -1,0 +1,104 @@
+name: Deploy web to Tencent COS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-cos-production
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  COS_BUCKET: beat-1317738912
+  COS_REGION: ap-guangzhou
+  COS_ALIAS: production
+  CDN_URL: https://beat.cosdrama.cn/
+  COSCLI_VERSION: v1.0.8
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Install COSCLI
+        run: |
+          curl -fsSL \
+            "https://github.com/tencentyun/coscli/releases/download/${COSCLI_VERSION}/coscli-${COSCLI_VERSION}-linux-amd64" \
+            -o /usr/local/bin/coscli
+          chmod +x /usr/local/bin/coscli
+          coscli --version
+
+      - name: Configure COSCLI
+        env:
+          TENCENT_SECRET_ID: ${{ secrets.TENCENT_SECRET_ID }}
+          TENCENT_SECRET_KEY: ${{ secrets.TENCENT_SECRET_KEY }}
+        run: |
+          : "${TENCENT_SECRET_ID:?Missing GitHub secret TENCENT_SECRET_ID}"
+          : "${TENCENT_SECRET_KEY:?Missing GitHub secret TENCENT_SECRET_KEY}"
+          coscli config add \
+            --init-skip=true \
+            -a "${COS_ALIAS}" \
+            -b "${COS_BUCKET}" \
+            -r "${COS_REGION}" \
+            -e "cos.${COS_REGION}.myqcloud.com" \
+            -i "${TENCENT_SECRET_ID}" \
+            -k "${TENCENT_SECRET_KEY}"
+
+      - name: Upload build to COS
+        run: |
+          coscli sync ./dist/ "cos://${COS_ALIAS}/" --recursive --force
+          coscli cp ./dist/index.html "cos://${COS_ALIAS}/index.html" \
+            --meta "Cache-Control:no-cache" \
+            --force
+
+      - name: Install Tencent Cloud CLI
+        run: pip install --disable-pip-version-check tccli
+
+      - name: Refresh Tencent CDN
+        env:
+          TENCENT_SECRET_ID: ${{ secrets.TENCENT_SECRET_ID }}
+          TENCENT_SECRET_KEY: ${{ secrets.TENCENT_SECRET_KEY }}
+        run: |
+          tccli cdn PurgePathCache \
+            --secretId "${TENCENT_SECRET_ID}" \
+            --secretKey "${TENCENT_SECRET_KEY}" \
+            --region "${COS_REGION}" \
+            --Paths "[\"${CDN_URL}\"]" \
+            --FlushType flush \
+            --Area mainland
+
+      - name: Verify deployment
+        run: |
+          expected_asset="$(grep -oE 'assets/index-[^"]+\.js' dist/index.html | head -n 1)"
+          deployed_html=""
+          for attempt in $(seq 1 12); do
+            deployed_html="$(curl -fsSL "${CDN_URL}?deploy=${GITHUB_SHA}" || true)"
+            if grep -Fq "${expected_asset}" <<< "${deployed_html}"; then
+              break
+            fi
+            echo "Waiting for CDN refresh (${attempt}/12)..."
+            sleep 5
+          done
+          grep -F "${expected_asset}" <<< "${deployed_html}"
+          curl -fsSI --retry 5 --retry-delay 3 "${CDN_URL}${expected_asset}" > /dev/null
