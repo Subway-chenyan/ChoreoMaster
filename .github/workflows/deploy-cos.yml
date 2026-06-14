@@ -73,7 +73,7 @@ jobs:
   deploy:
     needs: build-windows
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
 
     steps:
       - name: Checkout
@@ -137,7 +137,7 @@ jobs:
             --meta "Cache-Control:no-cache"
 
       - name: Upload Windows installer to COS
-        timeout-minutes: 30
+        timeout-minutes: 75
         env:
           TENCENT_SECRET_ID: ${{ secrets.TENCENT_SECRET_ID }}
           TENCENT_SECRET_KEY: ${{ secrets.TENCENT_SECRET_KEY }}
