@@ -73,7 +73,7 @@ jobs:
   deploy:
     needs: build-windows
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -135,10 +135,21 @@ jobs:
             --secret-id "${TENCENT_SECRET_ID}" \
             --secret-key "${TENCENT_SECRET_KEY}" \
             --meta "Cache-Control:no-cache"
+
+      - name: Upload Windows installer to COS
+        timeout-minutes: 30
+        env:
+          TENCENT_SECRET_ID: ${{ secrets.TENCENT_SECRET_ID }}
+          TENCENT_SECRET_KEY: ${{ secrets.TENCENT_SECRET_KEY }}
+        run: |
           coscli cp ./desktop-release/CosStage-Setup-x64.exe \
             "cos://${COS_ALIAS}/${INSTALLER_OBJECT}" \
             --secret-id "${TENCENT_SECRET_ID}" \
             --secret-key "${TENCENT_SECRET_KEY}" \
+            --part-size 4 \
+            --thread-num 16 \
+            --err-retry-num 10 \
+            --err-retry-interval 3 \
             --meta "Cache-Control:public,max-age=3600#Content-Disposition:attachment; filename=CosStage-Setup-x64.exe#Content-Type:application/vnd.microsoft.portable-executable"
           coscli cp ./desktop-release/CosStage-Setup-x64.exe.sha256 \
             "cos://${COS_ALIAS}/${INSTALLER_OBJECT}.sha256" \
