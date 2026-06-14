@@ -17,6 +17,7 @@ env:
   COS_BUCKET: beat-1317738912
   COS_REGION: ap-guangzhou
   COS_ALIAS: production
+  COS_ENDPOINT: cos.accelerate.myqcloud.com
   CDN_URL: https://beat.cosdrama.cn/
   INSTALLER_OBJECT: downloads/CosStage-Setup-x64.exe
   INSTALLER_URL: https://beat.cosdrama.cn/downloads/CosStage-Setup-x64.exe
@@ -117,7 +118,7 @@ jobs:
             -a "${COS_ALIAS}" \
             -b "${COS_BUCKET}" \
             -r "${COS_REGION}" \
-            -e "cos.${COS_REGION}.myqcloud.com" \
+            -e "${COS_ENDPOINT}" \
             -i "${TENCENT_SECRET_ID}" \
             -k "${TENCENT_SECRET_KEY}"
 
