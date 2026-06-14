@@ -105,6 +105,43 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
 }
 
+const getSupportedVideoEncoderConfig = async (
+  width: number,
+  height: number,
+  fps: number,
+  bitrate: number,
+): Promise<VideoEncoderConfig | null> => {
+  const level = width >= 3840 ? '33' : width >= 2560 ? '32' : '28';
+  const configs: VideoEncoderConfig[] = [
+    {
+      codec: `avc1.4200${level}`,
+      width,
+      height,
+      bitrate,
+      framerate: fps,
+    },
+    {
+      codec: `avc1.6400${level}`,
+      width,
+      height,
+      bitrate,
+      bitrateMode: 'constant',
+      framerate: fps,
+    },
+  ];
+
+  for (const config of configs) {
+    try {
+      const support = await VideoEncoder.isConfigSupported(config);
+      if (support.supported) return support.config;
+    } catch (error) {
+      console.warn('Video encoder configuration probe failed:', error);
+    }
+  }
+
+  return null;
+};
+
 const App: React.FC = () => {
   // State
   const [performers, setPerformers] = useState<Performer[]>([]);
@@ -2223,6 +2260,11 @@ const App: React.FC = () => {
     const downloadBaseName = `CosStage-export-${Math.round(inPointMs)}-${Math.round(outPointMs)}`;
     const isDesktopElectron = Boolean(window.electronAPI?.isElectron);
     const hasWebCodecs = typeof VideoEncoder !== 'undefined';
+    const videoBitrate = exportResolution === '4k' ? 20_000_000 : exportResolution === '2k' ? 10_000_000 : 5_000_000;
+    const videoEncoderConfig = hasWebCodecs
+      ? await getSupportedVideoEncoderConfig(width, height, fps, videoBitrate)
+      : null;
+    const canFastExport = videoEncoderConfig != null;
     const showSaveFilePicker = (window as any).showSaveFilePicker as
       | ((options?: any) => Promise<any>)
       | undefined;
@@ -2231,20 +2273,20 @@ const App: React.FC = () => {
     let desktopExportPath: string | null = null;
 
     if (window.electronAPI?.isElectron) {
-      desktopExportPath = await requestElectronExportPath(downloadBaseName, hasWebCodecs ? 'mp4' : 'webm');
+      desktopExportPath = await requestElectronExportPath(downloadBaseName, canFastExport ? 'mp4' : 'webm');
       if (!desktopExportPath) return;
     } else if (showSaveFilePicker) {
       try {
         const handle = await showSaveFilePicker({
-          suggestedName: `${downloadBaseName}.${hasWebCodecs ? 'mp4' : 'webm'}`,
+          suggestedName: `${downloadBaseName}.${canFastExport ? 'mp4' : 'webm'}`,
           types: [{
-            description: hasWebCodecs ? 'MP4 video' : 'WebM video',
-            accept: hasWebCodecs
+            description: canFastExport ? 'MP4 video' : 'WebM video',
+            accept: canFastExport
               ? { 'video/mp4': ['.mp4'] }
               : { 'video/webm': ['.webm'] },
           }],
         });
-        if (hasWebCodecs) {
+        if (canFastExport) {
           mp4Writable = await handle.createWritable();
         } else {
           webmWritable = await handle.createWritable();
@@ -2297,8 +2339,9 @@ const App: React.FC = () => {
       }
     };
 
-    if (hasWebCodecs) {
+    if (canFastExport) {
       // --- WebCodecs + mp4-muxer (fast, offline) ---
+      let videoEncoder: VideoEncoder | null = null;
       try {
         const { Muxer, ArrayBufferTarget, FileSystemWritableFileStreamTarget } = await import('mp4-muxer');
 
@@ -2322,20 +2365,25 @@ const App: React.FC = () => {
         });
 
         // --- Step 1: Render + Encode video (one frame at a time, no batch pre-render) ---
-        const videoEncoder = new VideoEncoder({
+        let videoEncoderError: DOMException | null = null;
+        videoEncoder = new VideoEncoder({
           output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
-          error: (e) => console.error('VideoEncoder error:', e),
+          error: (error) => {
+            videoEncoderError = error;
+            console.error('VideoEncoder error:', error);
+          },
         });
-        videoEncoder.configure({
-          codec: exportResolution === '4k' ? 'avc1.640033' : exportResolution === '2k' ? 'avc1.640032' : 'avc1.640028',
-          width,
-          height,
-          bitrate: exportResolution === '4k' ? 20_000_000 : exportResolution === '2k' ? 10_000_000 : 5_000_000,
-          bitrateMode: 'constant',
-          framerate: fps,
-        });
+        videoEncoder.configure(videoEncoderConfig);
+
+        const ensureVideoEncoderOpen = () => {
+          if (videoEncoderError) throw videoEncoderError;
+          if (videoEncoder?.state === 'closed') {
+            throw new Error('Video encoder closed unexpectedly.');
+          }
+        };
 
         for (let i = 0; i <= totalFrames; i++) {
+          ensureVideoEncoderOpen();
           const t = inPointMs + i * stepMs;
           await renderFrameToCanvas(tmpCanvas, Math.min(t, outPointMs), {
             includeLabels: exportIncludeLabels,
@@ -2343,9 +2391,14 @@ const App: React.FC = () => {
             ledRenderer,
           });
           const frame = await createFrameFromCanvas((i * 1_000_000) / fps, 1_000_000 / fps);
-          videoEncoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
-          frame.close();
+          try {
+            ensureVideoEncoderOpen();
+            videoEncoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
+          } finally {
+            frame.close();
+          }
           await waitForEncoderQueueBelow(videoEncoder, 8);
+          ensureVideoEncoderOpen();
           setExportProgress((i / (totalFrames + 1)) * 0.7);
           if (i % 30 === 0) await new Promise(r => setTimeout(r, 0));
         }
@@ -2431,18 +2484,20 @@ const App: React.FC = () => {
         ledRenderer?.dispose();
         return;
       } catch (err) {
+        if (videoEncoder?.state !== 'closed') {
+          try { videoEncoder?.close(); } catch { }
+        }
         if (mp4Writable) {
           try { await mp4Writable.abort?.(); } catch { }
           mp4Writable = null;
         }
-        ledRenderer?.dispose();
         console.error('WebCodecs export failed, falling back to MediaRecorder:', err);
-        alert('高速导出失败，已回退到实时录制模式。\n错误: ' + (err instanceof Error ? err.message : String(err)));
+        setProjectMessages(['当前设备不支持稳定的高速导出，已自动切换到实时录制模式']);
       }
     }
 
     // --- Fallback: MediaRecorder (real-time playback, render on-the-fly) ---
-    if (hasWebCodecs) {
+    if (canFastExport) {
       if (window.electronAPI?.isElectron) {
         desktopExportPath = await requestElectronExportPath(downloadBaseName, 'webm');
         if (!desktopExportPath) {
@@ -2553,7 +2608,7 @@ const App: React.FC = () => {
       }), Math.max(totalMs + 15000, 30000), '2D 实时录制');
     } catch (err) {
       stream.getTracks().forEach((track) => track.stop());
-      offline.dispose();
+      ledRenderer?.dispose();
       setIsExporting(false);
       alert('实时录制导出失败：' + (err instanceof Error ? err.message : String(err)));
       return;
@@ -2562,6 +2617,7 @@ const App: React.FC = () => {
     stream.getTracks().forEach((track) => track.stop());
     setIsExporting(false);
     setExportProgress(1);
+    ledRenderer?.dispose();
 
     if (!webmWritable) {
       if (desktopExportPath) {
@@ -2583,6 +2639,11 @@ const App: React.FC = () => {
     const stepMs = 1000 / fps;
     const downloadBaseName = `CosStage-3d-${exportCameraAngle}-${Math.round(inPointMs)}-${Math.round(outPointMs)}`;
     const hasWebCodecs = typeof VideoEncoder !== 'undefined';
+    const videoBitrate = exportResolution === '4k' ? 20_000_000 : exportResolution === '2k' ? 10_000_000 : 5_000_000;
+    const videoEncoderConfig = hasWebCodecs
+      ? await getSupportedVideoEncoderConfig(width, height, fps, videoBitrate)
+      : null;
+    const canFastExport = videoEncoderConfig != null;
     const showSaveFilePicker = (window as any).showSaveFilePicker as
       | ((options?: any) => Promise<any>)
       | undefined;
@@ -2591,20 +2652,20 @@ const App: React.FC = () => {
     let desktopExportPath: string | null = null;
 
     if (window.electronAPI?.isElectron) {
-      desktopExportPath = await requestElectronExportPath(downloadBaseName, hasWebCodecs ? 'mp4' : 'webm');
+      desktopExportPath = await requestElectronExportPath(downloadBaseName, canFastExport ? 'mp4' : 'webm');
       if (!desktopExportPath) return;
     } else if (showSaveFilePicker) {
       try {
         const handle = await showSaveFilePicker({
-          suggestedName: `${downloadBaseName}.${hasWebCodecs ? 'mp4' : 'webm'}`,
+          suggestedName: `${downloadBaseName}.${canFastExport ? 'mp4' : 'webm'}`,
           types: [{
-            description: hasWebCodecs ? 'MP4 video' : 'WebM video',
-            accept: hasWebCodecs
+            description: canFastExport ? 'MP4 video' : 'WebM video',
+            accept: canFastExport
               ? { 'video/mp4': ['.mp4'] }
               : { 'video/webm': ['.webm'] },
           }],
         });
-        if (hasWebCodecs) {
+        if (canFastExport) {
           mp4Writable = await handle.createWritable();
         } else {
           webmWritable = await handle.createWritable();
@@ -2683,8 +2744,9 @@ const App: React.FC = () => {
       }
     };
 
-    if (hasWebCodecs) {
+    if (canFastExport) {
       // --- WebCodecs + mp4-muxer (fast, offline) ---
+      let videoEncoder: VideoEncoder | null = null;
       try {
         const { Muxer, ArrayBufferTarget, FileSystemWritableFileStreamTarget } = await import('mp4-muxer');
 
@@ -2708,20 +2770,25 @@ const App: React.FC = () => {
         });
 
         // --- Step 1: Render + Encode video ---
-        const videoEncoder = new VideoEncoder({
+        let videoEncoderError: DOMException | null = null;
+        videoEncoder = new VideoEncoder({
           output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
-          error: (e) => console.error('VideoEncoder error:', e),
+          error: (error) => {
+            videoEncoderError = error;
+            console.error('VideoEncoder error:', error);
+          },
         });
-        videoEncoder.configure({
-          codec: exportResolution === '4k' ? 'avc1.640033' : exportResolution === '2k' ? 'avc1.640032' : 'avc1.640028',
-          width,
-          height,
-          bitrate: exportResolution === '4k' ? 20_000_000 : exportResolution === '2k' ? 10_000_000 : 5_000_000,
-          bitrateMode: 'constant',
-          framerate: fps,
-        });
+        videoEncoder.configure(videoEncoderConfig);
+
+        const ensureVideoEncoderOpen = () => {
+          if (videoEncoderError) throw videoEncoderError;
+          if (videoEncoder?.state === 'closed') {
+            throw new Error('Video encoder closed unexpectedly.');
+          }
+        };
 
         for (let i = 0; i <= totalFrames; i++) {
+          ensureVideoEncoderOpen();
           const t = inPointMs + i * stepMs;
           const clampedT = Math.min(t, outPointMs);
           const positions = computePositionsAtTime(clampedT);
@@ -2737,9 +2804,14 @@ const App: React.FC = () => {
           ctx.drawImage(offline.renderer.domElement, 0, 0);
 
           const frame = await createFrameFromCanvas((i * 1_000_000) / fps, 1_000_000 / fps);
-          videoEncoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
-          frame.close();
+          try {
+            ensureVideoEncoderOpen();
+            videoEncoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
+          } finally {
+            frame.close();
+          }
           await waitForEncoderQueueBelow(videoEncoder, 8);
+          ensureVideoEncoderOpen();
           setExportProgress((i / (totalFrames + 1)) * 0.7);
           if (i % 30 === 0) await new Promise(r => setTimeout(r, 0));
         }
@@ -2825,17 +2897,20 @@ const App: React.FC = () => {
         setExportProgress(1);
         return;
       } catch (err) {
+        if (videoEncoder?.state !== 'closed') {
+          try { videoEncoder?.close(); } catch { }
+        }
         if (mp4Writable) {
           try { await mp4Writable.abort?.(); } catch { }
           mp4Writable = null;
         }
         console.error('WebCodecs 3D export failed, falling back to MediaRecorder:', err);
-        alert('高速导出失败，已回退到实时录制模式。\n错误: ' + (err instanceof Error ? err.message : String(err)));
+        setProjectMessages(['当前设备不支持稳定的高速导出，已自动切换到实时录制模式']);
       }
     }
 
     // --- Fallback: MediaRecorder (real-time rendering) ---
-    if (hasWebCodecs) {
+    if (canFastExport) {
       if (window.electronAPI?.isElectron) {
         desktopExportPath = await requestElectronExportPath(downloadBaseName, 'webm');
         if (!desktopExportPath) {
@@ -2955,7 +3030,7 @@ const App: React.FC = () => {
       }), Math.max(totalMs + 15000, 30000), '3D 实时录制');
     } catch (err) {
       stream.getTracks().forEach((track) => track.stop());
-      ledRenderer?.dispose();
+      offline.dispose();
       setIsExporting(false);
       alert('实时录制导出失败：' + (err instanceof Error ? err.message : String(err)));
       return;
@@ -2964,7 +3039,6 @@ const App: React.FC = () => {
     stream.getTracks().forEach((track) => track.stop());
     setIsExporting(false);
     setExportProgress(1);
-    ledRenderer?.dispose();
 
     if (!webmWritable) {
       if (desktopExportPath) {

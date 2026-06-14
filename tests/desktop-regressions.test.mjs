@@ -44,7 +44,7 @@ test('desktop export uses native binary save path and bounded recording waits', 
   assert.match(ipc, /ipcMain\.handle\('fs:writeBinaryFile'/);
   assert.match(app, /const isDesktopElectron = Boolean\(window\.electronAPI\?\.isElectron\)/);
   assert.match(app, /const hasWebCodecs = typeof VideoEncoder !== 'undefined'/);
-  assert.match(app, /requestElectronExportPath\(downloadBaseName, hasWebCodecs \? 'mp4' : 'webm'\)/);
+  assert.match(app, /requestElectronExportPath\(downloadBaseName, canFastExport \? 'mp4' : 'webm'\)/);
   assert.match(app, /const \{ Muxer, ArrayBufferTarget, FileSystemWritableFileStreamTarget \} = await import\('mp4-muxer'\)/);
   assert.match(app, /const arrayBufferTarget = !mp4Writable \? new ArrayBufferTarget\(\) : null/);
   assert.match(app, /const bytes = new Uint8Array\(arrayBufferTarget\.buffer\)/);
@@ -53,6 +53,19 @@ test('desktop export uses native binary save path and bounded recording waits', 
   assert.match(app, /setExportProgress\(0\.02\)/);
   assert.match(offline, /const maxCachedFrames = Math\.max\(30, Math\.min\(180, Math\.ceil\(exportDurationSec \* Math\.min\(fps, 10\)\)\)\)/);
   assert.match(offline, /ledFrameInterval = Math\.max\(0\.1, exportDurationSec \/ maxCachedFrames\)/);
+});
+
+test('video export probes mobile-safe codecs and stops feeding a closed encoder', async () => {
+  const app = await read('App.tsx');
+
+  assert.match(app, /codec: `avc1\.4200\$\{level\}`/);
+  assert.match(app, /VideoEncoder\.isConfigSupported\(config\)/);
+  assert.match(app, /const canFastExport = videoEncoderConfig != null/g);
+  assert.match(app, /if \(videoEncoderError\) throw videoEncoderError/g);
+  assert.match(app, /if \(videoEncoder\?\.state === 'closed'\)/g);
+  assert.match(app, /stream\.getTracks\(\)\.forEach\(\(track\) => track\.stop\(\)\);\s+ledRenderer\?\.dispose\(\)/);
+  assert.match(app, /stream\.getTracks\(\)\.forEach\(\(track\) => track\.stop\(\)\);\s+offline\.dispose\(\)/);
+  assert.doesNotMatch(app, /alert\('高速导出失败/);
 });
 
 test('Electron build excludes the embedded Agent and FFmpeg', async () => {

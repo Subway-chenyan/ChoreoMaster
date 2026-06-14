@@ -237,6 +237,41 @@ await navigator.clipboard.writeText('text');
 await window.api.clipboard.writeImage(imageBuffer);
 ```
 
+### 4. WebCodecs Video Export
+
+`VideoEncoder` being present does not guarantee that a requested H.264 profile,
+resolution, bitrate mode, or hardware encoder is usable. Mobile Chromium may
+accept `configure()` and then close the codec asynchronously.
+
+**Required contract**:
+
+```typescript
+const support = await VideoEncoder.isConfigSupported(config);
+if (!support.supported) {
+  return exportWithMediaRecorder();
+}
+
+let encoderError: DOMException | null = null;
+const encoder = new VideoEncoder({
+  output: handleChunk,
+  error: (error) => {
+    encoderError = error;
+  },
+});
+encoder.configure(support.config);
+
+if (encoderError || encoder.state === 'closed') {
+  return exportWithMediaRecorder();
+}
+encoder.encode(frame);
+```
+
+- Probe the exact configuration before choosing the MP4 output path.
+- Prefer a broadly supported AVC baseline profile before high profile.
+- Treat the encoder `error` callback as terminal; never call `encode()` after it fires.
+- Preserve resources needed by the `MediaRecorder` fallback until fallback completes.
+- Regression tests must assert configuration probing and closed-encoder guards.
+
 ---
 
 ## Development Guidelines
