@@ -270,6 +270,12 @@ encoder.encode(frame);
 - Prefer a broadly supported AVC baseline profile before high profile.
 - Treat the encoder `error` callback as terminal; never call `encode()` after it fires.
 - Preserve resources needed by the `MediaRecorder` fallback until fallback completes.
+- For real-time fallback, probe `MediaRecorder.isTypeSupported()` in this order:
+  H.264/AAC MP4, H.264 MP4, generic MP4, then WebM.
+- The selected recorder MIME type, save-picker accept type, Blob type, and file
+  extension must come from the same format result. Never rename WebM bytes to `.mp4`.
+- Browsers without native MP4 recording require server-side or WASM transcoding
+  for guaranteed MP4 output; otherwise retain WebM as the last functional fallback.
 - Regression tests must assert configuration probing and closed-encoder guards.
 
 ---

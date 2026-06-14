@@ -142,6 +142,50 @@ const getSupportedVideoEncoderConfig = async (
   return null;
 };
 
+type MediaRecorderExportFormat = {
+  mimeType: string;
+  extension: 'mp4' | 'webm';
+  description: string;
+};
+
+const getMediaRecorderExportFormat = (): MediaRecorderExportFormat => {
+  const candidates: MediaRecorderExportFormat[] = [
+    {
+      mimeType: 'video/mp4;codecs=avc1.42001E,mp4a.40.2',
+      extension: 'mp4',
+      description: 'MP4 video',
+    },
+    {
+      mimeType: 'video/mp4;codecs=avc1.42001E',
+      extension: 'mp4',
+      description: 'MP4 video',
+    },
+    {
+      mimeType: 'video/mp4',
+      extension: 'mp4',
+      description: 'MP4 video',
+    },
+    {
+      mimeType: 'video/webm;codecs=vp9,opus',
+      extension: 'webm',
+      description: 'WebM video',
+    },
+    {
+      mimeType: 'video/webm;codecs=vp8,opus',
+      extension: 'webm',
+      description: 'WebM video',
+    },
+    {
+      mimeType: 'video/webm',
+      extension: 'webm',
+      description: 'WebM video',
+    },
+  ];
+
+  return candidates.find(({ mimeType }) => MediaRecorder.isTypeSupported(mimeType))
+    ?? candidates[candidates.length - 1];
+};
+
 const App: React.FC = () => {
   // State
   const [performers, setPerformers] = useState<Performer[]>([]);
@@ -2265,31 +2309,33 @@ const App: React.FC = () => {
       ? await getSupportedVideoEncoderConfig(width, height, fps, videoBitrate)
       : null;
     const canFastExport = videoEncoderConfig != null;
+    const realtimeFormat = getMediaRecorderExportFormat();
+    const initialExtension = canFastExport ? 'mp4' : realtimeFormat.extension;
     const showSaveFilePicker = (window as any).showSaveFilePicker as
       | ((options?: any) => Promise<any>)
       | undefined;
     let mp4Writable: any = null;
-    let webmWritable: any = null;
+    let realtimeWritable: any = null;
     let desktopExportPath: string | null = null;
 
     if (window.electronAPI?.isElectron) {
-      desktopExportPath = await requestElectronExportPath(downloadBaseName, canFastExport ? 'mp4' : 'webm');
+      desktopExportPath = await requestElectronExportPath(downloadBaseName, initialExtension);
       if (!desktopExportPath) return;
     } else if (showSaveFilePicker) {
       try {
         const handle = await showSaveFilePicker({
-          suggestedName: `${downloadBaseName}.${canFastExport ? 'mp4' : 'webm'}`,
+          suggestedName: `${downloadBaseName}.${initialExtension}`,
           types: [{
-            description: canFastExport ? 'MP4 video' : 'WebM video',
+            description: canFastExport ? 'MP4 video' : realtimeFormat.description,
             accept: canFastExport
               ? { 'video/mp4': ['.mp4'] }
-              : { 'video/webm': ['.webm'] },
+              : { [realtimeFormat.mimeType.split(';')[0]]: [`.${realtimeFormat.extension}`] },
           }],
         });
         if (canFastExport) {
           mp4Writable = await handle.createWritable();
         } else {
-          webmWritable = await handle.createWritable();
+          realtimeWritable = await handle.createWritable();
         }
       } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') return;
@@ -2499,21 +2545,21 @@ const App: React.FC = () => {
     // --- Fallback: MediaRecorder (real-time playback, render on-the-fly) ---
     if (canFastExport) {
       if (window.electronAPI?.isElectron) {
-        desktopExportPath = await requestElectronExportPath(downloadBaseName, 'webm');
+        desktopExportPath = await requestElectronExportPath(downloadBaseName, realtimeFormat.extension);
         if (!desktopExportPath) {
           setIsExporting(false);
           return;
         }
-      } else if (showSaveFilePicker && !webmWritable) {
+      } else if (showSaveFilePicker && !realtimeWritable) {
         try {
           const handle = await showSaveFilePicker({
-            suggestedName: `${downloadBaseName}.webm`,
+            suggestedName: `${downloadBaseName}.${realtimeFormat.extension}`,
             types: [{
-              description: 'WebM video',
-              accept: { 'video/webm': ['.webm'] },
+              description: realtimeFormat.description,
+              accept: { [realtimeFormat.mimeType.split(';')[0]]: [`.${realtimeFormat.extension}`] },
             }],
           });
-          webmWritable = await handle.createWritable();
+          realtimeWritable = await handle.createWritable();
         } catch (err) {
           setIsExporting(false);
           if (err instanceof DOMException && err.name === 'AbortError') return;
@@ -2524,8 +2570,8 @@ const App: React.FC = () => {
 
     const streamV = (tmpCanvas as any).captureStream ? (tmpCanvas as any).captureStream(fps) : null;
     if (!streamV) {
-      if (webmWritable) {
-        try { await webmWritable.abort?.(); } catch { }
+      if (realtimeWritable) {
+        try { await realtimeWritable.abort?.(); } catch { }
       }
       setIsExporting(false);
       return;
@@ -2546,15 +2592,14 @@ const App: React.FC = () => {
       stream = new MediaStream([...streamV.getVideoTracks(), ...dest.stream.getAudioTracks()]);
     }
 
-    const mimeCandidates = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
-    const mime = mimeCandidates.find(m => MediaRecorder.isTypeSupported(m)) || 'video/webm';
+    const mime = realtimeFormat.mimeType;
     const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 5000000 });
     const chunks: Blob[] = [];
-    let webmWriteChain = Promise.resolve();
+    let realtimeWriteChain = Promise.resolve();
     recorder.ondataavailable = (e: any) => {
       if (!e.data || e.data.size <= 0) return;
-      if (webmWritable) {
-        webmWriteChain = webmWriteChain.then(() => webmWritable.write(e.data));
+      if (realtimeWritable) {
+        realtimeWriteChain = realtimeWriteChain.then(() => realtimeWritable.write(e.data));
       } else {
         chunks.push(e.data);
       }
@@ -2589,18 +2634,18 @@ const App: React.FC = () => {
       blob = await withTimeout(new Promise<Blob>((resolve, reject) => {
         recorder.onerror = (event) => reject((event as any).error || new Error('MediaRecorder 导出失败'));
         recorder.onstop = () => {
-          webmWriteChain
+          realtimeWriteChain
             .then(async () => {
-              if (webmWritable) {
-                await webmWritable.close();
+              if (realtimeWritable) {
+                await realtimeWritable.close();
                 resolve(new Blob([], { type: mime }));
               } else {
                 resolve(new Blob(chunks, { type: mime }));
               }
             })
             .catch(async err => {
-              if (webmWritable) {
-                try { await webmWritable.abort?.(); } catch { }
+              if (realtimeWritable) {
+                try { await realtimeWritable.abort?.(); } catch { }
               }
               reject(err);
             });
@@ -2619,11 +2664,11 @@ const App: React.FC = () => {
     setExportProgress(1);
     ledRenderer?.dispose();
 
-    if (!webmWritable) {
+    if (!realtimeWritable) {
       if (desktopExportPath) {
         await writeBlobToElectronPath(desktopExportPath, blob);
       } else {
-        downloadBlob(blob, `${downloadBaseName}.webm`);
+        downloadBlob(blob, `${downloadBaseName}.${realtimeFormat.extension}`);
       }
     }
   };
@@ -2644,31 +2689,33 @@ const App: React.FC = () => {
       ? await getSupportedVideoEncoderConfig(width, height, fps, videoBitrate)
       : null;
     const canFastExport = videoEncoderConfig != null;
+    const realtimeFormat = getMediaRecorderExportFormat();
+    const initialExtension = canFastExport ? 'mp4' : realtimeFormat.extension;
     const showSaveFilePicker = (window as any).showSaveFilePicker as
       | ((options?: any) => Promise<any>)
       | undefined;
     let mp4Writable: any = null;
-    let webmWritable: any = null;
+    let realtimeWritable: any = null;
     let desktopExportPath: string | null = null;
 
     if (window.electronAPI?.isElectron) {
-      desktopExportPath = await requestElectronExportPath(downloadBaseName, canFastExport ? 'mp4' : 'webm');
+      desktopExportPath = await requestElectronExportPath(downloadBaseName, initialExtension);
       if (!desktopExportPath) return;
     } else if (showSaveFilePicker) {
       try {
         const handle = await showSaveFilePicker({
-          suggestedName: `${downloadBaseName}.${canFastExport ? 'mp4' : 'webm'}`,
+          suggestedName: `${downloadBaseName}.${initialExtension}`,
           types: [{
-            description: canFastExport ? 'MP4 video' : 'WebM video',
+            description: canFastExport ? 'MP4 video' : realtimeFormat.description,
             accept: canFastExport
               ? { 'video/mp4': ['.mp4'] }
-              : { 'video/webm': ['.webm'] },
+              : { [realtimeFormat.mimeType.split(';')[0]]: [`.${realtimeFormat.extension}`] },
           }],
         });
         if (canFastExport) {
           mp4Writable = await handle.createWritable();
         } else {
-          webmWritable = await handle.createWritable();
+          realtimeWritable = await handle.createWritable();
         }
       } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') return;
@@ -2912,22 +2959,22 @@ const App: React.FC = () => {
     // --- Fallback: MediaRecorder (real-time rendering) ---
     if (canFastExport) {
       if (window.electronAPI?.isElectron) {
-        desktopExportPath = await requestElectronExportPath(downloadBaseName, 'webm');
+        desktopExportPath = await requestElectronExportPath(downloadBaseName, realtimeFormat.extension);
         if (!desktopExportPath) {
           offline.dispose();
           setIsExporting(false);
           return;
         }
-      } else if (showSaveFilePicker && !webmWritable) {
+      } else if (showSaveFilePicker && !realtimeWritable) {
         try {
           const handle = await showSaveFilePicker({
-            suggestedName: `${downloadBaseName}.webm`,
+            suggestedName: `${downloadBaseName}.${realtimeFormat.extension}`,
             types: [{
-              description: 'WebM video',
-              accept: { 'video/webm': ['.webm'] },
+              description: realtimeFormat.description,
+              accept: { [realtimeFormat.mimeType.split(';')[0]]: [`.${realtimeFormat.extension}`] },
             }],
           });
-          webmWritable = await handle.createWritable();
+          realtimeWritable = await handle.createWritable();
         } catch (err) {
           if (err instanceof DOMException && err.name === 'AbortError') {
             offline.dispose();
@@ -2943,8 +2990,8 @@ const App: React.FC = () => {
       ? (offline.renderer.domElement as any).captureStream(fps)
       : null;
     if (!streamV) {
-      if (webmWritable) {
-        try { await webmWritable.abort?.(); } catch { }
+      if (realtimeWritable) {
+        try { await realtimeWritable.abort?.(); } catch { }
       }
       offline.dispose();
       setIsExporting(false);
@@ -2966,15 +3013,14 @@ const App: React.FC = () => {
       stream = new MediaStream([...streamV.getVideoTracks(), ...dest.stream.getAudioTracks()]);
     }
 
-    const mimeCandidates = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
-    const mime = mimeCandidates.find(m => MediaRecorder.isTypeSupported(m)) || 'video/webm';
+    const mime = realtimeFormat.mimeType;
     const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 5000000 });
     const chunks: Blob[] = [];
-    let webmWriteChain = Promise.resolve();
+    let realtimeWriteChain = Promise.resolve();
     recorder.ondataavailable = (e: any) => {
       if (!e.data || e.data.size <= 0) return;
-      if (webmWritable) {
-        webmWriteChain = webmWriteChain.then(() => webmWritable.write(e.data));
+      if (realtimeWritable) {
+        realtimeWriteChain = realtimeWriteChain.then(() => realtimeWritable.write(e.data));
       } else {
         chunks.push(e.data);
       }
@@ -3011,18 +3057,18 @@ const App: React.FC = () => {
       blob = await withTimeout(new Promise<Blob>((resolve, reject) => {
         recorder.onerror = (event) => reject((event as any).error || new Error('MediaRecorder 导出失败'));
         recorder.onstop = () => {
-          webmWriteChain
+          realtimeWriteChain
             .then(async () => {
-              if (webmWritable) {
-                await webmWritable.close();
+              if (realtimeWritable) {
+                await realtimeWritable.close();
                 resolve(new Blob([], { type: mime }));
               } else {
                 resolve(new Blob(chunks, { type: mime }));
               }
             })
             .catch(async err => {
-              if (webmWritable) {
-                try { await webmWritable.abort?.(); } catch { }
+              if (realtimeWritable) {
+                try { await realtimeWritable.abort?.(); } catch { }
               }
               reject(err);
             });
@@ -3040,11 +3086,11 @@ const App: React.FC = () => {
     setIsExporting(false);
     setExportProgress(1);
 
-    if (!webmWritable) {
+    if (!realtimeWritable) {
       if (desktopExportPath) {
         await writeBlobToElectronPath(desktopExportPath, blob);
       } else {
-        downloadBlob(blob, `${downloadBaseName}.webm`);
+        downloadBlob(blob, `${downloadBaseName}.${realtimeFormat.extension}`);
       }
     }
   };

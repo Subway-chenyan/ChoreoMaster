@@ -44,7 +44,7 @@ test('desktop export uses native binary save path and bounded recording waits', 
   assert.match(ipc, /ipcMain\.handle\('fs:writeBinaryFile'/);
   assert.match(app, /const isDesktopElectron = Boolean\(window\.electronAPI\?\.isElectron\)/);
   assert.match(app, /const hasWebCodecs = typeof VideoEncoder !== 'undefined'/);
-  assert.match(app, /requestElectronExportPath\(downloadBaseName, canFastExport \? 'mp4' : 'webm'\)/);
+  assert.match(app, /requestElectronExportPath\(downloadBaseName, initialExtension\)/);
   assert.match(app, /const \{ Muxer, ArrayBufferTarget, FileSystemWritableFileStreamTarget \} = await import\('mp4-muxer'\)/);
   assert.match(app, /const arrayBufferTarget = !mp4Writable \? new ArrayBufferTarget\(\) : null/);
   assert.match(app, /const bytes = new Uint8Array\(arrayBufferTarget\.buffer\)/);
@@ -60,6 +60,9 @@ test('video export probes mobile-safe codecs and stops feeding a closed encoder'
 
   assert.match(app, /codec: `avc1\.4200\$\{level\}`/);
   assert.match(app, /VideoEncoder\.isConfigSupported\(config\)/);
+  assert.match(app, /mimeType: 'video\/mp4;codecs=avc1\.42001E,mp4a\.40\.2'/);
+  assert.match(app, /const realtimeFormat = getMediaRecorderExportFormat\(\)/g);
+  assert.match(app, /downloadBlob\(blob, `\$\{downloadBaseName\}\.\$\{realtimeFormat\.extension\}`\)/g);
   assert.match(app, /const canFastExport = videoEncoderConfig != null/g);
   assert.match(app, /if \(videoEncoderError\) throw videoEncoderError/g);
   assert.match(app, /if \(videoEncoder\?\.state === 'closed'\)/g);
