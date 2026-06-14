@@ -78,8 +78,7 @@ jobs:
           coscli cp ./dist/index.html "cos://${COS_ALIAS}/index.html" \
             --secret-id "${TENCENT_SECRET_ID}" \
             --secret-key "${TENCENT_SECRET_KEY}" \
-            --meta "Cache-Control:no-cache" \
-            --force
+            --meta "Cache-Control:no-cache"
 
       - name: Install Tencent Cloud CLI
         run: pip install --disable-pip-version-check tccli
