@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   AudioMarker,
   Frame,
+  MotionControlPoint,
   Performer,
   Position,
   PerformerShape,
@@ -35,6 +36,7 @@ import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, Maximize2, 
 import { StageConfig } from './types';
 import {
   evaluateSceneStateAtTime,
+  getDefaultBezierControlPoints,
   getSortedFrames,
 } from './utils/transitions';
 
@@ -199,6 +201,7 @@ const App: React.FC = () => {
   const [transitions, setTransitions] = useState<TransitionSegment[]>([]);
   const [currentFrameId, setCurrentFrameId] = useState<string>(DEFAULT_FRAME.id);
   const [selectedTransitionId, setSelectedTransitionId] = useState<string | null>(null);
+  const [selectedTransitionPerformerId, setSelectedTransitionPerformerId] = useState<string | null>(null);
   const [selectedPerformerIds, setSelectedPerformerIds] = useState<string[]>([]);
   const [musicUrl, setMusicUrl] = useState<string | null>(null);
   const [audioBuffer, setAudioBuffer] = useState<AudioBuffer | null>(null);
@@ -795,6 +798,7 @@ const App: React.FC = () => {
     setMusicUrl(audioUrl);
     setSelectedPerformerIds([]);
     setSelectedTransitionId(null);
+    setSelectedTransitionPerformerId(null);
     if (data.frames.length > 0) {
       setCurrentFrameId(data.frames[0].id);
     }
@@ -886,6 +890,7 @@ const App: React.FC = () => {
       setAudioMarkers([]);
       setCurrentFrameId(newFrameId);
       setSelectedTransitionId(null);
+      setSelectedTransitionPerformerId(null);
       setStageConfig(newStageConfig);
       setMediaCache({});
       setMusicName(null);
@@ -961,6 +966,7 @@ const App: React.FC = () => {
       setStageConfig(saveData.stageConfig);
       setCurrentFrameId(saveData.frames[0]?.id || '');
       setSelectedTransitionId(null);
+      setSelectedTransitionPerformerId(null);
       setMusicName(null);
       setMusicAsset(null);
       setAudioBuffer(null);
@@ -1002,6 +1008,7 @@ const App: React.FC = () => {
     setStageConfig(config);
     setCurrentFrameId(frames[0]?.id || '');
     setSelectedTransitionId(null);
+    setSelectedTransitionPerformerId(null);
     setMusicName(null);
     setMusicAsset(null);
     setAudioBuffer(null);
@@ -1181,8 +1188,53 @@ const App: React.FC = () => {
     transitions.find((transition) => transition.id === selectedTransitionId) ?? null
   ), [selectedTransitionId, transitions]);
 
+  const selectedTransitionFrames = useMemo(() => {
+    if (!selectedTransition) return null;
+    const fromFrame = frames.find((frame) => frame.id === selectedTransition.fromFrameId);
+    const toFrame = frames.find((frame) => frame.id === selectedTransition.toFrameId);
+    if (!fromFrame || !toFrame) return null;
+    return { fromFrame, toFrame };
+  }, [frames, selectedTransition]);
+
+  const transitionSelectablePerformers = useMemo(() => {
+    if (!selectedTransitionFrames) return [];
+    return performers.filter((performer) => (
+      selectedTransitionFrames.fromFrame.positions[performer.id] !== undefined
+      && selectedTransitionFrames.toFrame.positions[performer.id] !== undefined
+    ));
+  }, [performers, selectedTransitionFrames]);
+
+  useEffect(() => {
+    if (transitionSelectablePerformers.length === 0) {
+      setSelectedTransitionPerformerId(null);
+      return;
+    }
+    setSelectedTransitionPerformerId((current) => (
+      current && transitionSelectablePerformers.some((performer) => performer.id === current)
+        ? current
+        : transitionSelectablePerformers[0].id
+    ));
+  }, [transitionSelectablePerformers]);
+
+  const selectedTransitionPath = useMemo(() => {
+    if (!selectedTransition || !selectedTransitionFrames || !selectedTransitionPerformerId) return null;
+    const start = selectedTransitionFrames.fromFrame.positions[selectedTransitionPerformerId];
+    const end = selectedTransitionFrames.toFrame.positions[selectedTransitionPerformerId];
+    if (!start || !end) return null;
+    const motion = selectedTransition.objectMotions[selectedTransitionPerformerId] || {};
+    const controlPoints: MotionControlPoint[] = motion.controlPoints || getDefaultBezierControlPoints(start, end);
+    return {
+      performerId: selectedTransitionPerformerId,
+      start,
+      end,
+      pathType: motion.pathType || 'linear',
+      controlPoints,
+    };
+  }, [selectedTransition, selectedTransitionFrames, selectedTransitionPerformerId]);
+
   const handleSelectTransition = useCallback((transitionId: string | null) => {
     setSelectedTransitionId(transitionId);
+    setSelectedTransitionPerformerId(null);
     setSelectedPerformerIds([]);
   }, []);
 
@@ -1202,7 +1254,43 @@ const App: React.FC = () => {
   const handleTransitionDelete = useCallback((transitionId: string) => {
     setTransitions((prev) => prev.filter((transition) => transition.id !== transitionId));
     setSelectedTransitionId((current) => current === transitionId ? null : current);
-  }, []);
+    setSelectedTransitionPerformerId((current) => (
+      selectedTransitionId === transitionId ? null : current
+    ));
+  }, [selectedTransitionId]);
+
+  const handleTransitionControlPointChange = useCallback((controlPointIndex: number, nextPosition: Position) => {
+    if (!selectedTransition || !selectedTransitionPerformerId || !selectedTransitionFrames) return;
+    const start = selectedTransitionFrames.fromFrame.positions[selectedTransitionPerformerId];
+    const end = selectedTransitionFrames.toFrame.positions[selectedTransitionPerformerId];
+    if (!start || !end) return;
+
+    const motion = selectedTransition.objectMotions[selectedTransitionPerformerId] || {};
+    const controlPoints = [...(motion.controlPoints || getDefaultBezierControlPoints(start, end))];
+    controlPoints[controlPointIndex] = {
+      ...controlPoints[controlPointIndex],
+      x: nextPosition.x,
+      y: nextPosition.y,
+      ...(nextPosition.z !== undefined ? { z: nextPosition.z } : {}),
+    };
+
+    handleTransitionUpdate({
+      ...selectedTransition,
+      objectMotions: {
+        ...selectedTransition.objectMotions,
+        [selectedTransitionPerformerId]: {
+          ...motion,
+          pathType: 'bezier',
+          controlPoints,
+        },
+      },
+    });
+  }, [
+    handleTransitionUpdate,
+    selectedTransition,
+    selectedTransitionFrames,
+    selectedTransitionPerformerId,
+  ]);
 
   const handleStageDragStart = useCallback((performerIds: string[]) => {
     if (!currentFrameId || performerIds.length === 0) {
@@ -1417,6 +1505,7 @@ const App: React.FC = () => {
     setFrames(newFrames);
     setCurrentFrameId(newFrame.id);
     setSelectedTransitionId(null);
+    setSelectedTransitionPerformerId(null);
   };
 
   const handleDeleteFrame = (id: string) => {
@@ -1431,6 +1520,7 @@ const App: React.FC = () => {
       && (transition.fromFrameId === id || transition.toFrameId === id)
     ))) {
       setSelectedTransitionId(null);
+      setSelectedTransitionPerformerId(null);
     }
     if (filtered.length === 0) {
       const nf: Frame = { id: generateId(), name: 'Opening', startTime: 0, duration: 2000, positions: {} };
@@ -1512,6 +1602,7 @@ const App: React.FC = () => {
     setFrames(newFrames);
     setCurrentFrameId(newFrame.id);
     setSelectedTransitionId(null);
+    setSelectedTransitionPerformerId(null);
     pushUndoAction({
       type: 'paste-frame',
       frame: createFrameCopy(newFrame, { id: newFrame.id }),
@@ -1595,6 +1686,7 @@ const App: React.FC = () => {
     setAudioMarkers([]);
     setCurrentFrameId(newFrameId);
     setSelectedTransitionId(null);
+    setSelectedTransitionPerformerId(null);
     setMusicName(null);
     setAudioBuffer(null);
     setMusicUrl(null);
@@ -1640,6 +1732,7 @@ const App: React.FC = () => {
           setMusicUrl(null);
           setSelectedPerformerIds([]);
           setSelectedTransitionId(null);
+          setSelectedTransitionPerformerId(null);
 
           if (json.frames.length > 0) {
             setCurrentFrameId(json.frames[0].id);
@@ -1687,6 +1780,7 @@ const App: React.FC = () => {
         setMusicUrl(null);
         setSelectedPerformerIds([]);
         setSelectedTransitionId(null);
+        setSelectedTransitionPerformerId(null);
 
         if (json.frames.length > 0) {
           setCurrentFrameId(json.frames[0].id);
@@ -3052,6 +3146,7 @@ const App: React.FC = () => {
   const handleSelectFrame = (id: string) => {
     setSelectedPerformerIds([]);
     setSelectedTransitionId(null);
+    setSelectedTransitionPerformerId(null);
     setCurrentFrameId(id);
     const f = frames.find(fr => fr.id === id);
     if (f) {
@@ -3289,9 +3384,11 @@ const App: React.FC = () => {
               hiddenGroupIds={activeHiddenGroupIds}
               positions={displayedPositions}
               rotations={displayedRotations}
+              transitionPath={selectedTransitionPath}
               selectedPerformerIds={selectedPerformerIds}
               onSelectionChange={setSelectedPerformerIds}
               onPositionChange={handlePositionChange}
+              onTransitionControlPointChange={handleTransitionControlPointChange}
               onDragStart={handleStageDragStart}
               onDragEnd={handleStageDragEnd}
               onUpdatePerformer={handleUpdatePerformer}
@@ -3441,6 +3538,8 @@ const App: React.FC = () => {
             selectedFrameId={selectedPerformerIds.length > 0 ? null : currentFrameId}
             selectedTransitionId={selectedTransitionId}
             onSelectTransition={handleSelectTransition}
+            selectedMotionPerformerId={selectedTransitionPerformerId}
+            onSelectedMotionPerformerChange={setSelectedTransitionPerformerId}
             onTransitionUpdate={handleTransitionUpdate}
             onTransitionDelete={handleTransitionDelete}
             audioMarkers={audioMarkers}

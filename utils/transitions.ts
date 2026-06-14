@@ -14,6 +14,25 @@ function lerp(start: number, end: number, t: number): number {
   return start + (end - start) * t;
 }
 
+export function getDefaultBezierControlPoints(
+  start: Position,
+  end: Position,
+): [MotionControlPoint, MotionControlPoint] {
+  const hasZ = start.z !== undefined || end.z !== undefined;
+  return [
+    {
+      x: start.x + ((end.x - start.x) / 3),
+      y: start.y + ((end.y - start.y) / 3),
+      ...(hasZ ? { z: (start.z ?? 0) + (((end.z ?? 0) - (start.z ?? 0)) / 3) } : {}),
+    },
+    {
+      x: start.x + (((end.x - start.x) * 2) / 3),
+      y: start.y + (((end.y - start.y) * 2) / 3),
+      ...(hasZ ? { z: (start.z ?? 0) + ((((end.z ?? 0) - (start.z ?? 0)) * 2) / 3) } : {}),
+    },
+  ];
+}
+
 export function easeInOutQuad(progress: number): number {
   return progress < 0.5
     ? 2 * progress * progress

@@ -1,6 +1,6 @@
 
 import React, { useRef, useState, useEffect, useMemo } from 'react';
-import { Performer, Position, SelectionBox, ToolMode, PerformerGroup, StageConfig } from '../types';
+import { MotionControlPoint, Performer, Position, SelectionBox, ToolMode, PerformerGroup, StageConfig } from '../types';
 import {
   getStageXBounds,
   getTotalStageWidth,
@@ -21,9 +21,17 @@ interface StageProps {
   hiddenGroupIds?: string[]; // IDs of groups hidden in current frame
   positions: Record<string, Position>;
   rotations?: Record<string, number>;
+  transitionPath?: {
+    performerId: string;
+    start: Position;
+    end: Position;
+    pathType: 'linear' | 'bezier';
+    controlPoints: MotionControlPoint[];
+  } | null;
   selectedPerformerIds: string[];
   onSelectionChange: (ids: string[]) => void;
   onPositionChange: (updates: { id: string; pos: Position }[]) => void;
+  onTransitionControlPointChange?: (index: number, pos: Position) => void;
   onDragStart?: (ids: string[]) => void;
   onDragEnd?: (ids: string[]) => void;
   onUpdatePerformer?: (id: string, updates: Partial<Performer>) => void;
@@ -93,9 +101,11 @@ export const Stage: React.FC<StageProps> = ({
   hiddenGroupIds = [],
   positions,
   rotations = {},
+  transitionPath = null,
   selectedPerformerIds,
   onSelectionChange,
   onPositionChange,
+  onTransitionControlPointChange,
   onDragStart,
   onDragEnd,
   onUpdatePerformer,
@@ -166,6 +176,7 @@ export const Stage: React.FC<StageProps> = ({
     handle: 'nw' | 'ne' | 'sw' | 'se';
   }
   const [resizeState, setResizeState] = useState<ResizeState | null>(null);
+  const [controlPointDragIndex, setControlPointDragIndex] = useState<number | null>(null);
 
   // Filter performers based on group visibility in current frame
   const visiblePerformers = useMemo(() => {
@@ -187,6 +198,35 @@ export const Stage: React.FC<StageProps> = ({
     const y = ((clientY - rect.top) / rect.height) * 100;
     return { x, y };
   };
+
+  useEffect(() => {
+    if (controlPointDragIndex === null || !transitionPath || !onTransitionControlPointChange || readonly) {
+      return undefined;
+    }
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const nextPos = getPercentagePos(event.clientX, event.clientY);
+      const currentControlPoint = transitionPath.controlPoints[controlPointDragIndex];
+      onTransitionControlPointChange(controlPointDragIndex, {
+        x: Math.max(stageXBounds.min, Math.min(stageXBounds.max, nextPos.x)),
+        y: Math.max(0, Math.min(100, nextPos.y)),
+        ...(currentControlPoint?.z !== undefined ? { z: currentControlPoint.z } : {}),
+      });
+    };
+
+    const handlePointerUp = () => {
+      setControlPointDragIndex(null);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
+    };
+  }, [controlPointDragIndex, getPercentagePos, onTransitionControlPointChange, readonly, stageXBounds.max, stageXBounds.min, transitionPath]);
 
   const handleResizeStart = (e: React.PointerEvent, id: string, handle: 'nw' | 'ne' | 'sw' | 'se', currentWidth: number, currentHeight: number) => {
     e.stopPropagation();
@@ -516,6 +556,30 @@ export const Stage: React.FC<StageProps> = ({
     );
   }, [gridMarks]);
 
+  const transitionOverlay = useMemo(() => {
+    if (!transitionPath) return null;
+
+    const startX = stageXToViewPercent(transitionPath.start.x, stageConfig);
+    const endX = stageXToViewPercent(transitionPath.end.x, stageConfig);
+    const cp1 = transitionPath.controlPoints[0] ?? transitionPath.start;
+    const cp2 = transitionPath.controlPoints[1] ?? transitionPath.end;
+    const cp1X = stageXToViewPercent(cp1.x, stageConfig);
+    const cp2X = stageXToViewPercent(cp2.x, stageConfig);
+    const pathD = transitionPath.pathType === 'bezier'
+      ? `M ${startX} ${transitionPath.start.y} C ${cp1X} ${cp1.y}, ${cp2X} ${cp2.y}, ${endX} ${transitionPath.end.y}`
+      : `M ${startX} ${transitionPath.start.y} L ${endX} ${transitionPath.end.y}`;
+
+    return {
+      pathD,
+      start: { x: startX, y: transitionPath.start.y },
+      end: { x: endX, y: transitionPath.end.y },
+      controlPoints: [
+        { x: cp1X, y: cp1.y },
+        { x: cp2X, y: cp2.y },
+      ],
+    };
+  }, [stageConfig, transitionPath]);
+
   return (
     <div
       ref={containerRef}
@@ -552,6 +616,65 @@ export const Stage: React.FC<StageProps> = ({
 
         {/* Dynamic Grid Lines */}
         {gridLines}
+
+        {transitionOverlay && (
+          <>
+            <svg className="absolute inset-0 h-full w-full pointer-events-none z-[15]" preserveAspectRatio="none" viewBox="0 0 100 100">
+              {transitionPath?.pathType === 'bezier' && (
+                <>
+                  <line
+                    x1={transitionOverlay.start.x}
+                    y1={transitionOverlay.start.y}
+                    x2={transitionOverlay.controlPoints[0].x}
+                    y2={transitionOverlay.controlPoints[0].y}
+                    stroke="#38bdf8"
+                    strokeWidth="0.3"
+                    strokeDasharray="1.2 0.8"
+                    opacity="0.8"
+                  />
+                  <line
+                    x1={transitionOverlay.end.x}
+                    y1={transitionOverlay.end.y}
+                    x2={transitionOverlay.controlPoints[1].x}
+                    y2={transitionOverlay.controlPoints[1].y}
+                    stroke="#38bdf8"
+                    strokeWidth="0.3"
+                    strokeDasharray="1.2 0.8"
+                    opacity="0.8"
+                  />
+                </>
+              )}
+              <path
+                d={transitionOverlay.pathD}
+                fill="none"
+                stroke={transitionPath?.pathType === 'bezier' ? '#22d3ee' : '#60a5fa'}
+                strokeWidth="0.6"
+                strokeDasharray="1.6 1"
+                opacity="0.95"
+              />
+              <circle cx={transitionOverlay.start.x} cy={transitionOverlay.start.y} r="0.8" fill="#34d399" />
+              <circle cx={transitionOverlay.end.x} cy={transitionOverlay.end.y} r="0.8" fill="#f59e0b" />
+            </svg>
+            {transitionPath?.pathType === 'bezier' && transitionOverlay.controlPoints.map((controlPoint, index) => (
+              <button
+                key={`transition-control-${index}`}
+                type="button"
+                onPointerDown={(event) => {
+                  if (readonly) return;
+                  event.stopPropagation();
+                  event.preventDefault();
+                  setControlPointDragIndex(index);
+                }}
+                className={`absolute z-[16] h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 shadow-lg ${readonly ? 'cursor-default border-slate-400 bg-slate-600' : 'cursor-grab border-cyan-100 bg-cyan-500 active:cursor-grabbing'}`}
+                style={{
+                  left: `${controlPoint.x}%`,
+                  top: `${controlPoint.y}%`,
+                }}
+                title={`控制点 ${index + 1}`}
+              />
+            ))}
+          </>
+        )}
 
         {wingWidth > 0 && (
           <>

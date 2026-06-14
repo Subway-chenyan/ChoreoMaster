@@ -2,7 +2,7 @@
 import React, { useEffect, useRef, useMemo, useState } from 'react';
 import { AudioMarker, Frame, MotionControlPoint, ObjectMotion, Performer, TransitionSegment } from '../types';
 import { Flag, Pause, Play, PlusCircle, SkipBack, Trash2, X, ZoomIn, ZoomOut } from 'lucide-react';
-import { createTransitionId } from '../utils/transitions';
+import { createTransitionId, getDefaultBezierControlPoints } from '../utils/transitions';
 
 interface TimelineProps {
     performers: Performer[];
@@ -20,6 +20,8 @@ interface TimelineProps {
     selectedFrameId: string | null;
     selectedTransitionId: string | null;
     onSelectTransition: (transitionId: string | null) => void;
+    selectedMotionPerformerId: string | null;
+    onSelectedMotionPerformerChange: (performerId: string | null) => void;
     onTransitionUpdate: (transition: TransitionSegment) => void;
     onTransitionDelete: (transitionId: string) => void;
     audioMarkers: AudioMarker[];
@@ -49,6 +51,8 @@ export const Timeline: React.FC<TimelineProps> = ({
     selectedFrameId,
     selectedTransitionId,
     onSelectTransition,
+    selectedMotionPerformerId,
+    onSelectedMotionPerformerChange,
     onTransitionUpdate,
     onTransitionDelete,
     audioMarkers,
@@ -68,7 +72,6 @@ export const Timeline: React.FC<TimelineProps> = ({
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState<string>('');
     const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null);
-    const [selectedMotionPerformerId, setSelectedMotionPerformerId] = useState<string | null>(null);
     const toolbarHeight = 48;
     const trackHeight = Math.max(84, heightPx - toolbarHeight);
     const clipHeight = Math.min(80, Math.max(52, trackHeight - 28));
@@ -217,15 +220,16 @@ export const Timeline: React.FC<TimelineProps> = ({
 
     useEffect(() => {
         if (selectableMotionPerformers.length === 0) {
-            setSelectedMotionPerformerId(null);
+            onSelectedMotionPerformerChange(null);
             return;
         }
-        setSelectedMotionPerformerId((current) => (
-            current && selectableMotionPerformers.some((performer) => performer.id === current)
-                ? current
-                : selectableMotionPerformers[0].id
-        ));
-    }, [selectableMotionPerformers]);
+        const nextPerformerId = selectedMotionPerformerId && selectableMotionPerformers.some((performer) => performer.id === selectedMotionPerformerId)
+            ? selectedMotionPerformerId
+            : selectableMotionPerformers[0].id;
+        if (nextPerformerId !== selectedMotionPerformerId) {
+            onSelectedMotionPerformerChange(nextPerformerId);
+        }
+    }, [onSelectedMotionPerformerChange, selectableMotionPerformers, selectedMotionPerformerId]);
 
     const selectedTransition = useMemo(() => {
         if (!selectedGap?.prevId) return null;
@@ -298,18 +302,7 @@ export const Timeline: React.FC<TimelineProps> = ({
         const start = selectedGapFrames.fromFrame.positions[selectedMotionPerformerId];
         const end = selectedGapFrames.toFrame.positions[selectedMotionPerformerId];
         if (!start || !end) return;
-        const defaults: MotionControlPoint[] = [
-            {
-                x: start.x + ((end.x - start.x) / 3),
-                y: start.y + ((end.y - start.y) / 3),
-                z: start.z !== undefined || end.z !== undefined ? (start.z ?? 0) + (((end.z ?? 0) - (start.z ?? 0)) / 3) : undefined,
-            },
-            {
-                x: start.x + (((end.x - start.x) * 2) / 3),
-                y: start.y + (((end.y - start.y) * 2) / 3),
-                z: start.z !== undefined || end.z !== undefined ? (start.z ?? 0) + ((((end.z ?? 0) - (start.z ?? 0)) * 2) / 3) : undefined,
-            },
-        ];
+        const defaults: MotionControlPoint[] = getDefaultBezierControlPoints(start, end);
         const nextControlPoints = [...(selectedMotion.controlPoints || defaults)];
         nextControlPoints[index] = {
             ...nextControlPoints[index],
@@ -699,7 +692,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                                     对象
                                     <select
                                         value={selectedMotionPerformerId || ''}
-                                        onChange={(event) => setSelectedMotionPerformerId(event.target.value)}
+                                        onChange={(event) => onSelectedMotionPerformerChange(event.target.value)}
                                         className="mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 text-xs text-slate-100 outline-none focus:border-blue-500"
                                     >
                                         {selectableMotionPerformers.map((performer) => (
