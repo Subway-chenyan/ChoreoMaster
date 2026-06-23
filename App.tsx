@@ -30,7 +30,7 @@ import {
   normalizeStageGridSpacing,
   STAGE_THIRD_POSITIONS,
 } from './utils/stage-grid';
-import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, ChevronDown, ChevronUp, PanelLeftClose, PanelLeftOpen, X, Download, GripHorizontal, SlidersHorizontal, BookOpen } from 'lucide-react';
+import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, ChevronDown, ChevronUp, PanelLeftClose, PanelLeftOpen, X, GripHorizontal, SlidersHorizontal, BookOpen, MessageCircle } from 'lucide-react';
 import { StageConfig } from './types';
 
 const DEFAULT_FRAME: Frame = {
@@ -99,11 +99,6 @@ type PasteFrameUndoAction = {
 };
 
 type UndoAction = MovePerformersUndoAction | PastePerformersUndoAction | PasteFrameUndoAction;
-
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
-}
 
 const getSupportedVideoEncoderConfig = async (
   width: number,
@@ -224,7 +219,6 @@ const App: React.FC = () => {
   const [timelineCollapsed, setTimelineCollapsed] = useState(false);
   const previousTimelineHeightRef = useRef(180);
   const [isCompactLayout, setIsCompactLayout] = useState(() => window.matchMedia('(max-width: 1100px)').matches);
-  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [undoStack, setUndoStack] = useState<UndoAction[]>([]);
   const [redoStack, setRedoStack] = useState<UndoAction[]>([]);
   const pendingMoveUndoRef = useRef<{
@@ -246,27 +240,6 @@ const App: React.FC = () => {
     media.addEventListener('change', syncLayout);
     return () => media.removeEventListener('change', syncLayout);
   }, []);
-
-  useEffect(() => {
-    const handleBeforeInstallPrompt = (event: Event) => {
-      event.preventDefault();
-      setInstallPrompt(event as BeforeInstallPromptEvent);
-    };
-    const handleInstalled = () => setInstallPrompt(null);
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    window.addEventListener('appinstalled', handleInstalled);
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-      window.removeEventListener('appinstalled', handleInstalled);
-    };
-  }, []);
-
-  const handleInstallPwa = async () => {
-    if (!installPrompt) return;
-    await installPrompt.prompt();
-    await installPrompt.userChoice;
-    setInstallPrompt(null);
-  };
 
   // 新增：3D 模式相关状态
   const [viewMode, setViewMode] = useState<'2d' | '3d'>('2d');
@@ -3231,16 +3204,18 @@ const App: React.FC = () => {
             <BookOpen size={19} />
             <span className="desktop-only">产品指南</span>
           </button>
-          {installPrompt && (
-            <button
-              onClick={handleInstallPwa}
-              className="touch-target flex items-center justify-center gap-1.5 rounded-lg px-2 text-xs text-blue-300 hover:bg-slate-800 hover:text-blue-200"
-              title="安装 CosStage"
-            >
-              <Download size={18} />
-              <span className="desktop-only">安装</span>
-            </button>
-          )}
+          <div
+            className={`flex h-9 items-center gap-1.5 rounded-lg px-2 text-xs font-medium ${
+              theme === 'dark'
+                ? 'border border-slate-700 bg-slate-800/70 text-slate-300'
+                : 'border border-gray-200 bg-gray-100 text-gray-700'
+            }`}
+            title="使用反馈 QQ群：1016629275"
+          >
+            <MessageCircle size={17} />
+            <span className="desktop-only">反馈QQ群</span>
+            <span className="font-mono text-blue-400">1016629275</span>
+          </div>
           <button
             onClick={() => setShowHelp(true)}
             className={`touch-target flex items-center justify-center rounded-lg transition-colors ${theme === 'dark' ? 'hover:bg-slate-800 text-slate-400 hover:text-blue-400' : 'hover:bg-gray-100 text-gray-600 hover:text-blue-600'}`}
