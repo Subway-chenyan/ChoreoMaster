@@ -124,6 +124,10 @@ html {
   scrollbar-gutter: stable;
 }
 
+.sidebar-tab-scroll {
+  scrollbar-gutter: stable;
+}
+
 .timeline-clip {
   touch-action: none;
 }

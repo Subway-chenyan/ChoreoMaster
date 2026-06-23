@@ -586,7 +586,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
             <div className={`flex-1 min-h-0 overflow-x-hidden custom-scrollbar bg-slate-900 ${
                 activeTab === 'performers' || activeTab === 'props'
-                    ? 'overflow-hidden'
+                    ? 'overflow-y-auto sidebar-tab-scroll'
                     : 'overflow-y-auto p-4'
             }`}>
 
