@@ -19,22 +19,14 @@ root.render(
 );
 
 if ('serviceWorker' in navigator) {
-  if (import.meta.env.PROD) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js').catch((error) => {
-        console.warn('PWA Service Worker registration failed:', error);
-      });
+  void navigator.serviceWorker.getRegistrations().then((registrations) => {
+    registrations.forEach((registration) => void registration.unregister());
+  });
+  if ('caches' in window) {
+    void caches.keys().then((keys) => {
+      keys
+        .filter((key) => key.startsWith('choreomaster-') || key.startsWith('cosstage-'))
+        .forEach((key) => void caches.delete(key));
     });
-  } else {
-    void navigator.serviceWorker.getRegistrations().then((registrations) => {
-      registrations.forEach((registration) => void registration.unregister());
-    });
-    if ('caches' in window) {
-      void caches.keys().then((keys) => {
-        keys
-          .filter((key) => key.startsWith('choreomaster-') || key.startsWith('cosstage-'))
-          .forEach((key) => void caches.delete(key));
-      });
-    }
   }
 }
