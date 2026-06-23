@@ -30,7 +30,7 @@ import {
   normalizeStageGridSpacing,
   STAGE_THIRD_POSITIONS,
 } from './utils/stage-grid';
-import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, Maximize2, ChevronDown, ChevronUp, Menu, X, Download, GripHorizontal, SlidersHorizontal, BookOpen } from 'lucide-react';
+import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, ChevronDown, ChevronUp, PanelLeftClose, PanelLeftOpen, X, Download, GripHorizontal, SlidersHorizontal, BookOpen } from 'lucide-react';
 import { StageConfig } from './types';
 
 const DEFAULT_FRAME: Frame = {
@@ -215,7 +215,7 @@ const App: React.FC = () => {
   const [gridScale, setGridScale] = useState(DEFAULT_STAGE_GRID_SPACING);
   const [showHelp, setShowHelp] = useState(false);
   const [showProductGuide, setShowProductGuide] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.matchMedia('(max-width: 1100px)').matches);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [stageToolbarCollapsed, setStageToolbarCollapsed] = useState(() => window.matchMedia('(max-width: 1100px)').matches);
   const [sidebarWidth, setSidebarWidth] = useState<number>(320);
   const [timelineHeight, setTimelineHeight] = useState<number>(() => (
@@ -238,7 +238,6 @@ const App: React.FC = () => {
     const syncLayout = () => {
       setIsCompactLayout(media.matches);
       if (media.matches) {
-        setSidebarCollapsed(true);
         setTimelineHeight((height) => height === 180 ? 132 : Math.min(height, 320));
         setStageToolbarCollapsed(true);
       }
@@ -3215,7 +3214,7 @@ const App: React.FC = () => {
             className={`compact-only touch-target -ml-2 items-center justify-center rounded-lg ${theme === 'dark' ? 'text-slate-300 hover:bg-slate-800' : 'text-gray-700 hover:bg-gray-100'}`}
             aria-label={sidebarCollapsed ? '打开侧栏' : '关闭侧栏'}
           >
-            {sidebarCollapsed ? <Menu size={22} /> : <X size={22} />}
+            {sidebarCollapsed ? <PanelLeftOpen size={22} /> : <PanelLeftClose size={22} />}
           </button>
           <div className="flex items-center gap-2">
             <img src="./icons/icon-192.png" alt="CosStage" className="w-6 h-6" />
@@ -3261,14 +3260,6 @@ const App: React.FC = () => {
           >
             {viewMode === '2d' ? '🎲' : '🔲'}
           </button>
-          <button
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            className={`desktop-only touch-target flex items-center justify-center rounded-lg transition-colors ${theme === 'dark' ? 'hover:bg-slate-800 text-slate-400 hover:text-green-400' : 'hover:bg-gray-100 text-gray-600 hover:text-green-600'}`}
-            title={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
-          >
-            <Maximize2 size={20} />
-          </button>
-
         </div>
       </div>
 
@@ -3362,6 +3353,25 @@ const App: React.FC = () => {
               <div className="w-1 h-1 bg-white rounded-full"></div>
               <div className="w-1 h-1 bg-white rounded-full"></div>
             </div>
+          </div>
+        )}
+
+        {!isCompactLayout && (
+          <div className="desktop-only z-30 flex flex-shrink-0 items-start px-2 pt-3">
+            <button
+              type="button"
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              className={`flex h-10 items-center gap-2 rounded-lg border px-3 text-xs font-semibold shadow-lg transition-all ${
+                theme === 'dark'
+                  ? 'border-blue-500/50 bg-blue-500/15 text-blue-100 hover:border-blue-400 hover:bg-blue-500/25'
+                  : 'border-blue-300 bg-blue-50 text-blue-700 hover:border-blue-400 hover:bg-blue-100'
+              }`}
+              title={sidebarCollapsed ? '打开左侧栏' : '收起左侧栏'}
+              aria-label={sidebarCollapsed ? '打开左侧栏' : '收起左侧栏'}
+            >
+              {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+              <span>{sidebarCollapsed ? '打开侧栏' : '收起侧栏'}</span>
+            </button>
           </div>
         )}
 
