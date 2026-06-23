@@ -8,7 +8,7 @@ import { StageConfig } from '../types';
 import { ProjectBrowser } from './ProjectBrowser';
 import { PropEditorModal } from './PropEditorModal';
 import { ChoreoAgentModal } from './ChoreoAgentModal';
-import { SelectField, StepperNumberField } from './FormControls';
+import { EditableNumberInput, SelectField, StepperNumberField } from './FormControls';
 import { validateAgentAccess } from '../services/choreoAgentService';
 
 interface SidebarProps {
@@ -692,13 +692,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 <div className="space-y-2">
                                     <label className="text-xs text-slate-400">舞台宽度</label>
                                     <div className="flex items-center gap-2">
-                                        <input
-                                            type="number"
+                                        <EditableNumberInput
                                             step={0.5}
                                             min={1}
                                             max={100}
                                             value={stageConfig?.width ?? 20}
-                                            onChange={(e) => onStageConfigChange({ width: Math.max(1, Number(e.target.value)) })}
+                                            onChange={(value) => onStageConfigChange({ width: Math.max(1, value) })}
                                             className="min-w-0 flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
                                         />
                                         <span className="text-xs text-slate-500">米</span>
@@ -707,13 +706,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 <div className="space-y-2">
                                     <label className="text-xs text-slate-400">舞台深度</label>
                                     <div className="flex items-center gap-2">
-                                        <input
-                                            type="number"
+                                        <EditableNumberInput
                                             step={0.5}
                                             min={1}
                                             max={100}
                                             value={stageConfig?.depth ?? 11.25}
-                                            onChange={(e) => onStageConfigChange({ depth: Math.max(1, Number(e.target.value)) })}
+                                            onChange={(value) => onStageConfigChange({ depth: Math.max(1, value) })}
                                             className="min-w-0 flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
                                         />
                                         <span className="text-xs text-slate-500">米</span>
@@ -725,13 +723,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             <div className="space-y-2 mb-3">
                                 <label className="text-xs text-slate-400">左右备场区宽度（每侧）</label>
                                 <div className="flex items-center gap-2">
-                                    <input
-                                        type="number"
+                                    <EditableNumberInput
                                         step={0.5}
                                         min={0}
                                         max={20}
                                         value={stageConfig?.wingWidth ?? 4}
-                                        onChange={(e) => onStageConfigChange({ wingWidth: Math.max(0, Number(e.target.value)) })}
+                                        onChange={(value) => onStageConfigChange({ wingWidth: Math.max(0, value) })}
                                         className="flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
                                     />
                                     <span className="text-xs text-slate-500">米</span>
@@ -742,13 +739,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             <div className="space-y-2 mb-3">
                                 <label className="text-xs text-slate-400">LED 屏幕宽度</label>
                                 <div className="flex items-center gap-2">
-                                    <input
-                                        type="number"
+                                    <EditableNumberInput
                                         step={0.5}
                                         min={1}
                                         max={60}
                                         value={stageConfig?.ledWidth ?? stageConfig?.width ?? 20}
-                                        onChange={(e) => onStageConfigChange({ ledWidth: Math.max(1, Number(e.target.value)) })}
+                                        onChange={(value) => onStageConfigChange({ ledWidth: Math.max(1, value) })}
                                         className="flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
                                     />
                                     <span className="text-xs text-slate-500">米</span>
@@ -758,13 +754,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             <div className="space-y-2 mb-3">
                                 <label className="text-xs text-slate-400">LED 屏幕高度</label>
                                 <div className="flex items-center gap-2">
-                                    <input
-                                        type="number"
+                                    <EditableNumberInput
                                         step={0.5}
                                         min={2}
                                         max={15}
                                         value={stageConfig?.ledHeight || 6}
-                                        onChange={(e) => onStageConfigChange({ ledHeight: Number(e.target.value) })}
+                                        onChange={(value) => onStageConfigChange({ ledHeight: value })}
                                         className="flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
                                     />
                                     <span className="text-xs text-slate-500">米</span>

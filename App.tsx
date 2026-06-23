@@ -1304,17 +1304,18 @@ const App: React.FC = () => {
       : null;
   }, [currentFrameId, frames]);
 
-  const handleStageDragEnd = useCallback((performerIds: string[]) => {
+  const handleStageDragEnd = useCallback((performerIds: string[], finalUpdates?: { id: string; pos: Position }[]) => {
     const snapshot = pendingMoveUndoRef.current;
     pendingMoveUndoRef.current = null;
     if (!snapshot || snapshot.frameId !== currentFrameId) return;
     const currentFrame = frames.find((frame) => frame.id === snapshot.frameId);
     if (!currentFrame) return;
     const relevantIds = snapshot.performerIds.filter((id) => performerIds.length === 0 || performerIds.includes(id));
+    const finalPositionById = new Map((finalUpdates ?? []).map((update) => [update.id, update.pos]));
     const after = clonePositionMap(
       Object.fromEntries(
         relevantIds
-          .map((id) => [id, currentFrame.positions[id]] as const)
+          .map((id) => [id, finalPositionById.get(id) ?? currentFrame.positions[id]] as const)
           .filter((entry): entry is [string, Position] => entry[1] !== undefined)
       )
     );
@@ -1346,21 +1347,44 @@ const App: React.FC = () => {
     if (effectiveTargets.length === 0) return;
 
     const limit = Math.min(effectiveTargets.length, coords.length);
+    const presetUpdates = effectiveTargets.slice(0, limit).map((performerId, index) => {
+      let { x, y } = coords[index];
+      x = Math.max(2, Math.min(98, x));
+      y = Math.max(2, Math.min(98, y));
+      return { performerId, pos: { x, y } };
+    });
+    const before: Record<string, Position> = {};
+    const after: Record<string, Position> = {};
+
+    presetUpdates.forEach((update) => {
+      const previous = frame.positions[update.performerId];
+      if (previous && !positionsEqual(previous, update.pos)) {
+        before[update.performerId] = { ...previous };
+        after[update.performerId] = { ...update.pos };
+      }
+    });
 
     setFrames(prev => prev.map(f => {
       if (f.id === currentFrameId) {
         const newPositions = { ...f.positions };
-        for (let i = 0; i < limit; i++) {
-          // Clamp coordinates to stage bounds (2% to 98%)
-          let { x, y } = coords[i];
-          x = Math.max(2, Math.min(98, x));
-          y = Math.max(2, Math.min(98, y));
-          newPositions[effectiveTargets[i]] = { x, y };
-        }
+        presetUpdates.forEach((update) => {
+          newPositions[update.performerId] = { ...update.pos };
+        });
         return { ...f, positions: newPositions };
       }
       return f;
     }));
+
+    const changedIds = Object.keys(before);
+    if (changedIds.length > 0) {
+      pushUndoAction({
+        type: 'move-performers',
+        frameId: currentFrameId,
+        performerIds: changedIds,
+        before: clonePositionMap(before),
+        after: clonePositionMap(after),
+      });
+    }
   };
 
   const handleApplyAIPlan = (plan: AIChoreoPlan) => {
