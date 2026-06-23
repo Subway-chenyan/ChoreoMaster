@@ -142,14 +142,21 @@ jobs:
           TENCENT_SECRET_ID: ${{ secrets.TENCENT_SECRET_ID }}
           TENCENT_SECRET_KEY: ${{ secrets.TENCENT_SECRET_KEY }}
         run: |
-          coscli rm "cos://${COS_ALIAS}/sw.js" \
-            --secret-id "${TENCENT_SECRET_ID}" \
-            --secret-key "${TENCENT_SECRET_KEY}" \
-            -f || true
-          coscli rm "cos://${COS_ALIAS}/manifest.webmanifest" \
-            --secret-id "${TENCENT_SECRET_ID}" \
-            --secret-key "${TENCENT_SECRET_KEY}" \
-            -f || true
+          remove_legacy_object() {
+            local object_path="$1"
+            echo "Removing legacy object: ${object_path}"
+            if coscli rm "cos://${COS_ALIAS}/${object_path}" \
+              --secret-id "${TENCENT_SECRET_ID}" \
+              --secret-key "${TENCENT_SECRET_KEY}" \
+              -f; then
+              echo "Removed legacy object: ${object_path}"
+            else
+              echo "Legacy object was absent or could not be removed immediately: ${object_path}"
+            fi
+          }
+
+          remove_legacy_object "sw.js"
+          remove_legacy_object "manifest.webmanifest"
 
       - name: Upload Windows installer to COS
         timeout-minutes: 75
@@ -218,11 +225,24 @@ jobs:
           test "${deployed_size}" = "${expected_size}"
           curl -fsSL --retry 5 --retry-delay 3 "${INSTALLER_URL}.sha256?deploy=${GITHUB_SHA}" |
             grep -Fq 'CosStage-Setup-x64.exe'
-          if curl -fsSI --retry 5 --retry-delay 3 "${CDN_URL}sw.js?deploy=${GITHUB_SHA}" > /dev/null; then
-            echo "Legacy sw.js is still reachable"
-            exit 1
-          fi
-          if curl -fsSI --retry 5 --retry-delay 3 "${CDN_URL}manifest.webmanifest?deploy=${GITHUB_SHA}" > /dev/null; then
-            echo "Legacy manifest.webmanifest is still reachable"
-            exit 1
-          fi
+          wait_until_unreachable() {
+            local url="$1"
+            local label="$2"
+            for attempt in $(seq 1 24); do
+              status="$(
+                curl -sS -o /dev/null -w '%{http_code}' -I \
+                  "${url}?deploy=${GITHUB_SHA}&legacy-check=${attempt}" || true
+              )"
+              if [ "${status}" = "000" ] || [ "${status}" = "403" ] || [ "${status}" = "404" ]; then
+                echo "${label} is no longer reachable (status=${status})"
+                return 0
+              fi
+              echo "Waiting for ${label} to disappear (${attempt}/24), status=${status}"
+              sleep 5
+            done
+            echo "${label} is still reachable after CDN purge wait"
+            return 1
+          }
+
+          wait_until_unreachable "${CDN_URL}sw.js" "Legacy sw.js"
+          wait_until_unreachable "${CDN_URL}manifest.webmanifest" "Legacy manifest.webmanifest"
