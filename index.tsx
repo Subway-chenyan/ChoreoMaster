@@ -19,8 +19,15 @@ root.render(
 );
 
 if ('serviceWorker' in navigator) {
-  void navigator.serviceWorker.getRegistrations().then((registrations) => {
-    registrations.forEach((registration) => void registration.unregister());
+  void navigator.serviceWorker.getRegistration().then((registration) => {
+    if (registration) {
+      void navigator.serviceWorker.register('./sw.js').catch((error) => {
+        console.warn('Legacy PWA cleanup service worker failed:', error);
+      });
+    }
+    void navigator.serviceWorker.getRegistrations().then((registrations) => {
+      registrations.forEach((item) => void item.update());
+    });
   });
   if ('caches' in window) {
     void caches.keys().then((keys) => {

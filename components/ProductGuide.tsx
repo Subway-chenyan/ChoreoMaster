@@ -165,6 +165,7 @@ export const ProductGuide: React.FC<ProductGuideProps> = ({ onClose }) => {
                 </button>
                 <a
                   href="https://beat.cosdrama.cn/downloads/CosStage-Setup-x64.exe"
+                  download="CosStage-Setup-x64.exe"
                   target="_blank"
                   rel="noopener noreferrer"
                   className={`focus-ring inline-flex items-center gap-2 rounded-lg border px-5 py-3 text-sm font-semibold transition active:translate-y-px ${lineClass} ${isDark ? 'hover:bg-slate-900' : 'hover:bg-white'}`}
