@@ -137,6 +137,20 @@ jobs:
             --secret-key "${TENCENT_SECRET_KEY}" \
             --meta "Cache-Control:no-cache"
 
+      - name: Remove legacy web app artifacts
+        env:
+          TENCENT_SECRET_ID: ${{ secrets.TENCENT_SECRET_ID }}
+          TENCENT_SECRET_KEY: ${{ secrets.TENCENT_SECRET_KEY }}
+        run: |
+          coscli rm "cos://${COS_ALIAS}/sw.js" \
+            --secret-id "${TENCENT_SECRET_ID}" \
+            --secret-key "${TENCENT_SECRET_KEY}" \
+            -f || true
+          coscli rm "cos://${COS_ALIAS}/manifest.webmanifest" \
+            --secret-id "${TENCENT_SECRET_ID}" \
+            --secret-key "${TENCENT_SECRET_KEY}" \
+            -f || true
+
       - name: Upload Windows installer to COS
         timeout-minutes: 75
         env:
@@ -177,7 +191,7 @@ jobs:
             --secretId "${TENCENT_SECRET_ID}" \
             --secretKey "${TENCENT_SECRET_KEY}" \
             --region "${COS_REGION}" \
-            --Urls "[\"${INSTALLER_URL}\",\"${INSTALLER_URL}.sha256\"]" \
+            --Urls "[\"${INSTALLER_URL}\",\"${INSTALLER_URL}.sha256\",\"${CDN_URL}sw.js\",\"${CDN_URL}manifest.webmanifest\"]" \
             --Area mainland
 
       - name: Verify deployment
@@ -204,3 +218,11 @@ jobs:
           test "${deployed_size}" = "${expected_size}"
           curl -fsSL --retry 5 --retry-delay 3 "${INSTALLER_URL}.sha256?deploy=${GITHUB_SHA}" |
             grep -Fq 'CosStage-Setup-x64.exe'
+          if curl -fsSI --retry 5 --retry-delay 3 "${CDN_URL}sw.js?deploy=${GITHUB_SHA}" > /dev/null; then
+            echo "Legacy sw.js is still reachable"
+            exit 1
+          fi
+          if curl -fsSI --retry 5 --retry-delay 3 "${CDN_URL}manifest.webmanifest?deploy=${GITHUB_SHA}" > /dev/null; then
+            echo "Legacy manifest.webmanifest is still reachable"
+            exit 1
+          fi

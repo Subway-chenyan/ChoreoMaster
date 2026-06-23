@@ -143,37 +143,6 @@ import type { TodoState, TodoPriority } from '../shared/types/entity';
 
 ---
 
-## Retiring Service Workers
-
-When removing PWA support or any service worker, do not delete `public/sw.js`
-immediately. Browsers with an existing registration may keep the old worker
-active if the update script 404s, which can continue intercepting navigation or
-download requests.
-
-Required pattern:
-
-```javascript
-self.addEventListener('install', (event) => {
-  self.skipWaiting();
-});
-
-self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    (async () => {
-      await self.clients.claim();
-      await self.registration.unregister();
-    })(),
-  );
-});
-```
-
-Keep the retiring `sw.js` deployed until the old worker population has had time
-to update. The page entry may also call `navigator.serviceWorker.register('./sw.js')`
-only when an existing registration is detected, so old clients receive the
-cleanup worker without reintroducing PWA install prompts.
-
----
-
 ## Avoid Duplicate Definitions
 
 Before defining constants, mappings, or configuration values, **search the codebase first**:
