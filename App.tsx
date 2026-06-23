@@ -3357,11 +3357,11 @@ const App: React.FC = () => {
         )}
 
         {!isCompactLayout && (
-          <div className="desktop-only z-30 flex flex-shrink-0 items-start px-2 pt-3">
+          <div className="desktop-only z-30 flex flex-shrink-0 items-start px-1 pt-3">
             <button
               type="button"
               onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-              className={`flex h-10 items-center gap-2 rounded-lg border px-3 text-xs font-semibold shadow-lg transition-all ${
+              className={`group relative flex h-10 w-10 items-center justify-center rounded-lg border text-xs font-semibold shadow-lg transition-all ${
                 theme === 'dark'
                   ? 'border-blue-500/50 bg-blue-500/15 text-blue-100 hover:border-blue-400 hover:bg-blue-500/25'
                   : 'border-blue-300 bg-blue-50 text-blue-700 hover:border-blue-400 hover:bg-blue-100'
@@ -3370,7 +3370,15 @@ const App: React.FC = () => {
               aria-label={sidebarCollapsed ? '打开左侧栏' : '收起左侧栏'}
             >
               {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
-              <span>{sidebarCollapsed ? '打开侧栏' : '收起侧栏'}</span>
+              <span
+                className={`pointer-events-none absolute left-full ml-2 whitespace-nowrap rounded-md border px-2 py-1 text-[11px] font-medium opacity-0 shadow-lg transition-opacity group-hover:opacity-100 ${
+                  theme === 'dark'
+                    ? 'border-slate-700 bg-slate-900 text-slate-100'
+                    : 'border-gray-200 bg-white text-gray-700'
+                }`}
+              >
+                {sidebarCollapsed ? '打开侧栏' : '收起侧栏'}
+              </span>
             </button>
           </div>
         )}
