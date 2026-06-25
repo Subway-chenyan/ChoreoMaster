@@ -27,6 +27,7 @@
 | [css-design.md](./css-design.md)                                               | CSS organization and design tokens              | Reference     |
 | [quality.md](./quality.md)                                                     | Code quality and performance standards          | Reference     |
 | [stage-division.md](./stage-division.md)                                       | Meter grid and stage zone rendering              | Stage changes |
+| [transition-motion.md](./transition-motion.md)                                 | Per-frame rotation, paths, and prop pivot contract | Motion changes |
 
 ---
 

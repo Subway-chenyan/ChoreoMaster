@@ -6,6 +6,7 @@ import { Performer, Position, ExtrudedTextures, StageConfig } from '../types';
 import { mapTo3D, mapTo2D, degToRad, getTotalStageWidth } from '../utils/coordinates';
 import { useDragContext } from './Scene3D';
 import { denormalizePoints } from '../components/prop-editor/PolygonUtils';
+import { getPropCenterFromAnchor } from '../utils/prop-pivot';
 
 function createFaceMaterial(faceTexture?: { dataUrl?: string }, fallbackColor: string = '#475569'): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial({ color: fallbackColor, transparent: true, opacity: 1, side: THREE.FrontSide });
@@ -129,10 +130,12 @@ const Prop3D: React.FC<Prop3DProps> = ({
   }, [isExtruded, extrudeGeometry, dims.width, dims.height, dims.depth]);
 
   // Initialize position on mount or when position changes significantly
+  const centerPosition = getPropCenterFromAnchor(position, rotationDeg, performer, stageConfig);
+
   useEffect(() => {
     const [targetX, targetY, targetZ] = mapTo3D({
-      ...position,
-      z: (position.z || 0) + platformLift,
+      ...centerPosition,
+      z: (centerPosition.z || 0) + platformLift,
     }, stageConfig);
     // Only jump if this is a large change (not smooth animation)
     const current = currentPositionRef.current;
@@ -144,11 +147,11 @@ const Prop3D: React.FC<Prop3DProps> = ({
         meshRef.current.position.copy(targetWithHeight);
       }
     }
-  }, [performer.id, position, platformLift, stageConfig, dims.height]);
+  }, [performer.id, centerPosition.x, centerPosition.y, centerPosition.z, platformLift, stageConfig, dims.height]);
 
   const [targetX, targetY, targetZ] = mapTo3D({
-    ...position,
-    z: (position.z || 0) + platformLift,
+    ...centerPosition,
+    z: (centerPosition.z || 0) + platformLift,
   }, stageConfig);
 
   useFrame(() => {

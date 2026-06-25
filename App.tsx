@@ -12,7 +12,11 @@ import {
   AIChoreoPlan,
   ProjectDocument,
   ProjectLoadResult,
+  PropRotationPivot,
   TransitionSegment,
+  normalizeFrames,
+  normalizePerformers,
+  normalizeTransitions,
 } from './types';
 import { Sidebar } from './components/Sidebar';
 import { Stage } from './components/Stage';
@@ -36,16 +40,20 @@ import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, ChevronDown
 import { StageConfig } from './types';
 import {
   evaluateSceneStateAtTime,
+  getGapSegments,
+  getGapSelectionId,
   getDefaultBezierControlPoints,
   getSortedFrames,
 } from './utils/transitions';
+import { getPropCenterFromAnchor, migratePropAnchor } from './utils/prop-pivot';
 
 const DEFAULT_FRAME: Frame = {
   id: 'start-frame',
   name: 'Opening',
   startTime: 0,
   duration: 2000,
-  positions: {}
+  positions: {},
+  rotations: {},
 };
 
 const createDefaultStageConfig = (): StageConfig => ({
@@ -105,7 +113,15 @@ type PasteFrameUndoAction = {
   previousCurrentFrameId: string | null;
 };
 
-type UndoAction = MovePerformersUndoAction | PastePerformersUndoAction | PasteFrameUndoAction;
+type RotatePerformerUndoAction = {
+  type: 'rotate-performer';
+  frameId: string;
+  performerId: string;
+  before: number;
+  after: number;
+};
+
+type UndoAction = MovePerformersUndoAction | PastePerformersUndoAction | PasteFrameUndoAction | RotatePerformerUndoAction;
 
 const getSupportedVideoEncoderConfig = async (
   width: number,
@@ -235,6 +251,11 @@ const App: React.FC = () => {
     frameId: string;
     performerIds: string[];
     before: Record<string, Position>;
+  } | null>(null);
+  const pendingRotationUndoRef = useRef<{
+    frameId: string;
+    performerId: string;
+    before: number;
   } | null>(null);
 
   useEffect(() => {
@@ -390,13 +411,15 @@ const App: React.FC = () => {
     setFrames((prev) => prev.map((frame) => {
       let changed = false;
       const nextPositions = { ...frame.positions } as Record<string, Position>;
+      const nextRotations = { ...(frame.rotations ?? {}) };
       Object.keys(nextPositions).forEach((performerId) => {
         if (idSet.has(performerId)) {
           delete nextPositions[performerId];
+          delete nextRotations[performerId];
           changed = true;
         }
       });
-      return changed ? { ...frame, positions: nextPositions } : frame;
+      return changed ? { ...frame, positions: nextPositions, rotations: nextRotations } : frame;
     }));
   }, []);
 
@@ -417,7 +440,8 @@ const App: React.FC = () => {
     name: overrides?.name ?? source.name,
     startTime: overrides?.startTime ?? source.startTime,
     duration: overrides?.duration ?? source.duration,
-    positions: JSON.parse(JSON.stringify(overrides?.positions ?? source.positions))
+    positions: JSON.parse(JSON.stringify(overrides?.positions ?? source.positions)),
+    rotations: { ...(overrides?.rotations ?? source.rotations ?? {}) },
   }), []);
 
   const writeBlobToElectronPath = useCallback(async (filePath: string, blob: Blob) => {
@@ -589,7 +613,8 @@ const App: React.FC = () => {
       }
       return {
         ...f,
-        positions: { ...f.positions, [newPerformer.id]: { x: 50, y: 50 } }
+        positions: { ...f.positions, [newPerformer.id]: { x: 50, y: 50 } },
+        rotations: { ...(f.rotations ?? {}), [newPerformer.id]: newPerformer.rotation ?? 0 },
       };
     }));
   };
@@ -606,7 +631,51 @@ const App: React.FC = () => {
   };
 
   const handleUpdatePerformer = (id: string, updates: Partial<Performer>) => {
-    setPerformers(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
+    const performer = performers.find((item) => item.id === id);
+    if (!performer) return;
+    const oldPivot = performer.rotationPivot ?? 'center';
+    const requestedPivot = updates.rotationPivot ?? oldPivot;
+    const newPivot: PropRotationPivot = performer.propCategory === 'platform' || updates.propCategory === 'platform'
+      ? 'center'
+      : requestedPivot;
+
+    if (oldPivot !== newPivot && performer.type === 'prop') {
+      const nextPerformer = { ...performer, ...updates, rotationPivot: newPivot };
+      const frameById = new Map(frames.map((frame) => [frame.id, frame]));
+      setFrames((previousFrames) => previousFrames.map((frame) => {
+        const position = frame.positions[id];
+        if (!position) return frame;
+        const rotation = frame.rotations?.[id] ?? performer.rotation ?? 0;
+        return {
+          ...frame,
+          positions: {
+            ...frame.positions,
+            [id]: migratePropAnchor(position, rotation, nextPerformer, oldPivot, newPivot, stageConfig),
+          },
+        };
+      }));
+      setTransitions((previousTransitions) => previousTransitions.map((transition) => {
+        const motion = transition.objectMotions[id];
+        if (!motion?.controlPoints?.length) return transition;
+        const fromFrame = frameById.get(transition.fromFrameId);
+        const toFrame = frameById.get(transition.toFrameId);
+        const startRotation = fromFrame?.rotations?.[id] ?? performer.rotation ?? 0;
+        const endRotation = toFrame?.rotations?.[id] ?? performer.rotation ?? 0;
+        const controlPoints = motion.controlPoints.map((point, index, points) => {
+          const progress = (index + 1) / (points.length + 1);
+          const rotation = startRotation + ((endRotation - startRotation) * progress);
+          return migratePropAnchor(point, rotation, nextPerformer, oldPivot, newPivot, stageConfig);
+        });
+        return {
+          ...transition,
+          objectMotions: {
+            ...transition.objectMotions,
+            [id]: { ...motion, controlPoints },
+          },
+        };
+      }));
+    }
+    setPerformers(prev => prev.map(p => p.id === id ? { ...p, ...updates, rotationPivot: newPivot } : p));
   };
 
   // --- Group Management ---
@@ -853,6 +922,7 @@ const App: React.FC = () => {
         startTime: 0,
         duration: 2000,
         positions: {},
+        rotations: {},
       }];
       const newStageConfig = createDefaultStageConfig();
       setPerformers([]);
@@ -915,10 +985,10 @@ const App: React.FC = () => {
       const saveData: ProjectDocument = {
         version: '3.0',
         name: '',
-        performers: templateData.performers || [],
+        performers: normalizePerformers(templateData.performers),
         performerGroups: templateData.performerGroups || [],
-        frames: templateData.frames || [],
-        transitions: templateData.transitions || [],
+        frames: normalizeFrames(templateData.frames),
+        transitions: normalizeTransitions(templateData.transitions),
         audioMarkers: normalizeAudioMarkers(templateData.audioMarkers),
         stageConfig: templateData.stageConfig || stageConfig,
         musicName: null,
@@ -966,10 +1036,10 @@ const App: React.FC = () => {
   };
 
   const handleLoadTemplate = (templateData: any) => {
-    const performers = templateData.performers || [];
+    const performers = normalizePerformers(templateData.performers);
     const groups = templateData.performerGroups || [];
-    const frames = templateData.frames || [];
-    const transitions = templateData.transitions || [];
+    const frames = normalizeFrames(templateData.frames);
+    const transitions = normalizeTransitions(templateData.transitions);
     const config = templateData.stageConfig || stageConfig;
 
     setPerformers(performers);
@@ -1108,8 +1178,10 @@ const App: React.FC = () => {
     setFrames(prev => prev.map(f => {
       if (f.id !== currentFrameId) return f;
       const newPositions = { ...f.positions } as Record<string, Position>;
+      const newRotations = { ...(f.rotations ?? {}) };
       Object.keys(newPositions).forEach(pid => { if (ids.has(pid)) delete (newPositions as any)[pid]; });
-      return { ...f, positions: newPositions };
+      ids.forEach((id) => delete newRotations[id]);
+      return { ...f, positions: newPositions, rotations: newRotations };
     }));
     setSelectedPerformerIds([]);
   };
@@ -1120,9 +1192,11 @@ const App: React.FC = () => {
       return prevFrames.map(f => {
         if (f.id === currentFrameId) {
           const newPositions = { ...f.positions };
+          const newRotations = { ...(f.rotations ?? {}) };
           if (newPositions[performerId]) {
             // Remove from this frame
             delete newPositions[performerId];
+            delete newRotations[performerId];
           } else {
             // Add to this frame. Try to find previous frame's position for continuity, or default.
             const sorted = getSortedFrames(prevFrames);
@@ -1130,8 +1204,10 @@ const App: React.FC = () => {
 
             const initialPos = prevFrame?.positions[performerId] || { x: 50, y: 50 };
             newPositions[performerId] = initialPos;
+            const performer = performers.find((item) => item.id === performerId);
+            newRotations[performerId] = prevFrame?.rotations?.[performerId] ?? performer?.rotation ?? 0;
           }
-          return { ...f, positions: newPositions };
+          return { ...f, positions: newPositions, rotations: newRotations };
         }
         return f;
       });
@@ -1156,9 +1232,21 @@ const App: React.FC = () => {
     }));
   };
 
-  const selectedTransition = useMemo(() => (
-    transitions.find((transition) => transition.id === selectedTransitionId) ?? null
-  ), [selectedTransitionId, transitions]);
+  const selectedTransition = useMemo(() => {
+    if (!selectedTransitionId) return null;
+    const existing = transitions.find((transition) => transition.id === selectedTransitionId);
+    if (existing) return existing;
+    const gap = getGapSegments(frames, transitions)
+      .find((item) => getGapSelectionId(item) === selectedTransitionId);
+    if (!gap?.prevId) return null;
+    return {
+      id: gap.id,
+      fromFrameId: gap.prevId,
+      toFrameId: gap.nextId,
+      duration: gap.duration,
+      objectMotions: {},
+    };
+  }, [frames, selectedTransitionId, transitions]);
 
   const selectedTransitionFrames = useMemo(() => {
     if (!selectedTransition) return null;
@@ -1188,21 +1276,30 @@ const App: React.FC = () => {
     ));
   }, [transitionSelectablePerformers]);
 
-  const selectedTransitionPath = useMemo(() => {
-    if (!selectedTransition || !selectedTransitionFrames || !selectedTransitionPerformerId) return null;
-    const start = selectedTransitionFrames.fromFrame.positions[selectedTransitionPerformerId];
-    const end = selectedTransitionFrames.toFrame.positions[selectedTransitionPerformerId];
-    if (!start || !end) return null;
-    const motion = selectedTransition.objectMotions[selectedTransitionPerformerId] || {};
-    const controlPoints: MotionControlPoint[] = motion.controlPoints || getDefaultBezierControlPoints(start, end);
-    return {
-      performerId: selectedTransitionPerformerId,
-      start,
-      end,
-      pathType: motion.pathType || 'linear',
-      controlPoints,
-    };
-  }, [selectedTransition, selectedTransitionFrames, selectedTransitionPerformerId]);
+  const selectedTransitionPaths = useMemo(() => {
+    if (!selectedTransition || !selectedTransitionFrames) return [];
+    return transitionSelectablePerformers.flatMap((performer) => {
+      const start = selectedTransitionFrames.fromFrame.positions[performer.id];
+      const end = selectedTransitionFrames.toFrame.positions[performer.id];
+      if (!start || !end) return [];
+      const motion = selectedTransition.objectMotions[performer.id] || {};
+      const controlPoints: MotionControlPoint[] = motion.controlPoints || getDefaultBezierControlPoints(start, end);
+      return [{
+        performerId: performer.id,
+        color: performer.color,
+        start,
+        end,
+        pathType: motion.pathType || 'linear' as const,
+        controlPoints,
+        isSelected: performer.id === selectedTransitionPerformerId,
+      }];
+    });
+  }, [
+    selectedTransition,
+    selectedTransitionFrames,
+    selectedTransitionPerformerId,
+    transitionSelectablePerformers,
+  ]);
 
   const handleSelectTransition = useCallback((transitionId: string | null) => {
     setSelectedTransitionId(transitionId);
@@ -1263,6 +1360,68 @@ const App: React.FC = () => {
     selectedTransitionFrames,
     selectedTransitionPerformerId,
   ]);
+
+  const getRotationTargetFrameId = useCallback((): string | null => (
+    selectedTransitionFrames?.toFrame.id ?? currentFrameId ?? null
+  ), [currentFrameId, selectedTransitionFrames]);
+
+  const handleRotationStart = useCallback((performerId: string) => {
+    const frameId = getRotationTargetFrameId();
+    if (!frameId) return;
+    const frame = frames.find((item) => item.id === frameId);
+    const performer = performers.find((item) => item.id === performerId);
+    if (!frame || !performer) return;
+    pendingRotationUndoRef.current = {
+      frameId,
+      performerId,
+      before: frame.rotations?.[performerId] ?? performer.rotation ?? 0,
+    };
+  }, [frames, getRotationTargetFrameId, performers]);
+
+  const handleRotationChange = useCallback((performerId: string, rotation: number) => {
+    const frameId = getRotationTargetFrameId();
+    if (!frameId || !Number.isFinite(rotation)) return;
+    setFrames((previousFrames) => previousFrames.map((frame) => (
+      frame.id === frameId
+        ? { ...frame, rotations: { ...(frame.rotations ?? {}), [performerId]: rotation } }
+        : frame
+    )));
+  }, [getRotationTargetFrameId]);
+
+  const handleFrameRotationChange = useCallback((frameId: string, performerId: string, rotation: number) => {
+    if (!Number.isFinite(rotation)) return;
+    const frame = frames.find((item) => item.id === frameId);
+    const performer = performers.find((item) => item.id === performerId);
+    if (!frame || !performer) return;
+    const before = frame.rotations?.[performerId] ?? performer.rotation ?? 0;
+    if (Math.abs(before - rotation) < 0.01) return;
+    setFrames((previousFrames) => previousFrames.map((frame) => (
+      frame.id === frameId
+        ? { ...frame, rotations: { ...(frame.rotations ?? {}), [performerId]: rotation } }
+        : frame
+    )));
+    pushUndoAction({
+      type: 'rotate-performer',
+      frameId,
+      performerId,
+      before,
+      after: rotation,
+    });
+  }, [frames, performers, pushUndoAction]);
+
+  const handleRotationEnd = useCallback((performerId: string, rotation: number) => {
+    handleRotationChange(performerId, rotation);
+    const pending = pendingRotationUndoRef.current;
+    pendingRotationUndoRef.current = null;
+    if (!pending || pending.performerId !== performerId || Math.abs(pending.before - rotation) < 0.01) return;
+    pushUndoAction({
+      type: 'rotate-performer',
+      frameId: pending.frameId,
+      performerId,
+      before: pending.before,
+      after: rotation,
+    });
+  }, [handleRotationChange, pushUndoAction]);
 
   const handleStageDragStart = useCallback((performerIds: string[]) => {
     if (!currentFrameId || performerIds.length === 0) {
@@ -1492,7 +1651,8 @@ const App: React.FC = () => {
       name: `Formation ${frames.length + 1}`,
       startTime: newStart,
       duration: 2000,
-      positions: JSON.parse(JSON.stringify(currentPos)) // Deep copy current positions
+      positions: JSON.parse(JSON.stringify(currentPos)),
+      rotations: { ...currentSceneState.rotations },
     };
 
     const newFrames = [...frames, newFrame];
@@ -1519,7 +1679,7 @@ const App: React.FC = () => {
       setSelectedTransitionPerformerId(null);
     }
     if (filtered.length === 0) {
-      const nf: Frame = { id: generateId(), name: 'Opening', startTime: 0, duration: 2000, positions: {} };
+      const nf: Frame = { id: generateId(), name: 'Opening', startTime: 0, duration: 2000, positions: {}, rotations: {} };
       setFrames([nf]);
       setTransitions([]);
       setCurrentFrameId(nf.id);
@@ -1544,6 +1704,12 @@ const App: React.FC = () => {
         };
       }));
       setSelectedPerformerIds(last.performerIds);
+    } else if (last.type === 'rotate-performer') {
+      setFrames((prev) => prev.map((frame) => (
+        frame.id === last.frameId
+          ? { ...frame, rotations: { ...(frame.rotations ?? {}), [last.performerId]: last.before } }
+          : frame
+      )));
     } else if (last.type === 'paste-performers') {
       const pastedIds = last.performers.map((performer) => performer.id);
       setPerformers((prev) => prev.filter((performer) => !pastedIds.includes(performer.id)));
@@ -1571,6 +1737,12 @@ const App: React.FC = () => {
         };
       }));
       setSelectedPerformerIds(last.performerIds);
+    } else if (last.type === 'rotate-performer') {
+      setFrames((prev) => prev.map((frame) => (
+        frame.id === last.frameId
+          ? { ...frame, rotations: { ...(frame.rotations ?? {}), [last.performerId]: last.after } }
+          : frame
+      )));
     } else if (last.type === 'paste-performers') {
       setPerformers((prev) => [...prev, ...last.performers.map((performer) => ({ ...performer }))]);
       restoreFrameUpdates(last.frameUpdates);
@@ -1677,7 +1849,8 @@ const App: React.FC = () => {
       name: 'Opening',
       startTime: 0,
       duration: 2000,
-      positions: {}
+      positions: {},
+      rotations: {},
     }]);
     setAudioMarkers([]);
     setCurrentFrameId(newFrameId);
@@ -1707,10 +1880,10 @@ const App: React.FC = () => {
           if (!json.performers || !Array.isArray(json.performers)) throw new Error("Invalid project file: missing performers");
           if (!json.frames || !Array.isArray(json.frames)) throw new Error("Invalid project file: missing frames");
 
-          setPerformers(json.performers);
+          setPerformers(normalizePerformers(json.performers));
           setPerformerGroups(json.performerGroups || []);
-          setFrames(json.frames);
-          setTransitions(Array.isArray(json.transitions) ? json.transitions : []);
+          setFrames(normalizeFrames(json.frames));
+          setTransitions(normalizeTransitions(json.transitions));
           setAudioMarkers(normalizeAudioMarkers(json.audioMarkers));
           setMusicName(json.musicName || null);
 
@@ -1755,10 +1928,10 @@ const App: React.FC = () => {
         if (!json.performers || !Array.isArray(json.performers)) throw new Error("Invalid project file: missing performers");
         if (!json.frames || !Array.isArray(json.frames)) throw new Error("Invalid project file: missing frames");
 
-        setPerformers(json.performers);
+        setPerformers(normalizePerformers(json.performers));
         setPerformerGroups(json.performerGroups || []);
-        setFrames(json.frames);
-        setTransitions(Array.isArray(json.transitions) ? json.transitions : []);
+        setFrames(normalizeFrames(json.frames));
+        setTransitions(normalizeTransitions(json.transitions));
         setAudioMarkers(normalizeAudioMarkers(json.audioMarkers));
         setMusicName(json.musicName || null);
 
@@ -2205,14 +2378,18 @@ const App: React.FC = () => {
       if (p.groupId && hiddenGroupIds.includes(p.groupId)) return;
       const pos = positions[p.id];
       if (!pos) return;
-      const cx = renderX + (stageXToViewPercent(pos.x, stageConfig) / 100) * renderW;
-      const cy = renderY + (pos.y / 100) * renderH;
+      const rotation = rotations[p.id] ?? p.rotation ?? 0;
+      const renderPosition = p.type === 'prop'
+        ? getPropCenterFromAnchor(pos, rotation, p, stageConfig)
+        : pos;
+      const cx = renderX + (stageXToViewPercent(renderPosition.x, stageConfig) / 100) * renderW;
+      const cy = renderY + (renderPosition.y / 100) * renderH;
 
       if (p.type === 'prop') {
         const propLift = platformOccupancy.entityLiftById[p.id] ?? 0;
         const propW = (p.width || 1) / totalStageW * renderW;
         const propD = (p.depth || 1) / stageD * renderH;
-        const rot = (rotations[p.id] ?? p.rotation ?? 0) * Math.PI / 180;
+        const rot = rotation * Math.PI / 180;
 
         ctx.save();
         ctx.translate(cx, cy);
@@ -3399,11 +3576,15 @@ const App: React.FC = () => {
               hiddenGroupIds={activeHiddenGroupIds}
               positions={displayedPositions}
               rotations={displayedRotations}
-              transitionPath={selectedTransitionPath}
+              transitionPaths={selectedTransitionPaths}
               selectedPerformerIds={selectedPerformerIds}
               onSelectionChange={setSelectedPerformerIds}
               onPositionChange={handlePositionChange}
               onTransitionControlPointChange={handleTransitionControlPointChange}
+              onTransitionObjectSelect={setSelectedTransitionPerformerId}
+              onRotationStart={handleRotationStart}
+              onRotationChange={handleRotationChange}
+              onRotationEnd={handleRotationEnd}
               onDragStart={handleStageDragStart}
               onDragEnd={handleStageDragEnd}
               onUpdatePerformer={handleUpdatePerformer}
@@ -3557,6 +3738,7 @@ const App: React.FC = () => {
             onSelectedMotionPerformerChange={setSelectedTransitionPerformerId}
             onTransitionUpdate={handleTransitionUpdate}
             onTransitionDelete={handleTransitionDelete}
+            onFrameRotationChange={handleFrameRotationChange}
             audioMarkers={audioMarkers}
             onAudioMarkersChange={setAudioMarkers}
             heightPx={timelineHeight}

@@ -1,6 +1,6 @@
 
 import React, { useRef, useState, useEffect, useMemo } from 'react';
-import { MotionControlPoint, Performer, Position, SelectionBox, ToolMode, PerformerGroup, StageConfig } from '../types';
+import { Performer, Position, SelectionBox, ToolMode, PerformerGroup, StageConfig, TransitionPathDisplay } from '../types';
 import {
   getStageXBounds,
   getTotalStageWidth,
@@ -9,6 +9,7 @@ import {
   viewPercentToStageX,
 } from '../utils/coordinates';
 import { buildPlatformOccupancy, isPlatformProp } from '../utils/platforms';
+import { getPropCenterFromAnchor } from '../utils/prop-pivot';
 import {
   createCenteredStageGridMarks,
   formatStageGridLabel,
@@ -21,17 +22,15 @@ interface StageProps {
   hiddenGroupIds?: string[]; // IDs of groups hidden in current frame
   positions: Record<string, Position>;
   rotations?: Record<string, number>;
-  transitionPath?: {
-    performerId: string;
-    start: Position;
-    end: Position;
-    pathType: 'linear' | 'bezier';
-    controlPoints: MotionControlPoint[];
-  } | null;
+  transitionPaths?: TransitionPathDisplay[];
   selectedPerformerIds: string[];
   onSelectionChange: (ids: string[]) => void;
   onPositionChange: (updates: { id: string; pos: Position }[]) => void;
   onTransitionControlPointChange?: (index: number, pos: Position) => void;
+  onTransitionObjectSelect?: (performerId: string) => void;
+  onRotationStart?: (performerId: string) => void;
+  onRotationChange?: (performerId: string, rotation: number) => void;
+  onRotationEnd?: (performerId: string, rotation: number) => void;
   onDragStart?: (ids: string[]) => void;
   onDragEnd?: (ids: string[], finalUpdates?: { id: string; pos: Position }[]) => void;
   onUpdatePerformer?: (id: string, updates: Partial<Performer>) => void;
@@ -101,11 +100,15 @@ export const Stage: React.FC<StageProps> = ({
   hiddenGroupIds = [],
   positions,
   rotations = {},
-  transitionPath = null,
+  transitionPaths = [],
   selectedPerformerIds,
   onSelectionChange,
   onPositionChange,
   onTransitionControlPointChange,
+  onTransitionObjectSelect,
+  onRotationStart,
+  onRotationChange,
+  onRotationEnd,
   onDragStart,
   onDragEnd,
   onUpdatePerformer,
@@ -194,6 +197,8 @@ export const Stage: React.FC<StageProps> = ({
   }
   const [resizeState, setResizeState] = useState<ResizeState | null>(null);
   const [controlPointDragIndex, setControlPointDragIndex] = useState<number | null>(null);
+  const [rotationDragId, setRotationDragId] = useState<string | null>(null);
+  const selectedTransitionPath = transitionPaths.find((path) => path.isSelected) ?? null;
 
   // Filter performers based on group visibility in current frame
   const visiblePerformers = useMemo(() => {
@@ -217,13 +222,13 @@ export const Stage: React.FC<StageProps> = ({
   };
 
   useEffect(() => {
-    if (controlPointDragIndex === null || !transitionPath || !onTransitionControlPointChange || readonly) {
+    if (controlPointDragIndex === null || !selectedTransitionPath || !onTransitionControlPointChange || readonly) {
       return undefined;
     }
 
     const handlePointerMove = (event: PointerEvent) => {
       const nextPos = getPercentagePos(event.clientX, event.clientY);
-      const currentControlPoint = transitionPath.controlPoints[controlPointDragIndex];
+      const currentControlPoint = selectedTransitionPath.controlPoints[controlPointDragIndex];
       onTransitionControlPointChange(controlPointDragIndex, {
         x: Math.max(stageXBounds.min, Math.min(stageXBounds.max, nextPos.x)),
         y: Math.max(0, Math.min(100, nextPos.y)),
@@ -243,7 +248,35 @@ export const Stage: React.FC<StageProps> = ({
       window.removeEventListener('pointerup', handlePointerUp);
       window.removeEventListener('pointercancel', handlePointerUp);
     };
-  }, [controlPointDragIndex, getPercentagePos, onTransitionControlPointChange, readonly, stageXBounds.max, stageXBounds.min, transitionPath]);
+  }, [controlPointDragIndex, getPercentagePos, onTransitionControlPointChange, readonly, selectedTransitionPath, stageXBounds.max, stageXBounds.min]);
+
+  useEffect(() => {
+    if (!rotationDragId || readonly || !onRotationChange) return undefined;
+    const handleRotationMove = (event: PointerEvent) => {
+      const element = stageRef.current?.querySelector<HTMLElement>(`[data-performer-id="${rotationDragId}"]`);
+      if (!element) return;
+      const rect = element.getBoundingClientRect();
+      const angle = (Math.atan2(event.clientY - (rect.top + rect.height / 2), event.clientX - (rect.left + rect.width / 2)) * 180 / Math.PI) + 90;
+      onRotationChange(rotationDragId, angle);
+    };
+    const handleRotationEnd = (event: PointerEvent) => {
+      const element = stageRef.current?.querySelector<HTMLElement>(`[data-performer-id="${rotationDragId}"]`);
+      if (element && onRotationEnd) {
+        const rect = element.getBoundingClientRect();
+        const angle = (Math.atan2(event.clientY - (rect.top + rect.height / 2), event.clientX - (rect.left + rect.width / 2)) * 180 / Math.PI) + 90;
+        onRotationEnd(rotationDragId, angle);
+      }
+      setRotationDragId(null);
+    };
+    window.addEventListener('pointermove', handleRotationMove);
+    window.addEventListener('pointerup', handleRotationEnd);
+    window.addEventListener('pointercancel', handleRotationEnd);
+    return () => {
+      window.removeEventListener('pointermove', handleRotationMove);
+      window.removeEventListener('pointerup', handleRotationEnd);
+      window.removeEventListener('pointercancel', handleRotationEnd);
+    };
+  }, [onRotationChange, onRotationEnd, readonly, rotationDragId]);
 
   const handleResizeStart = (e: React.PointerEvent, id: string, handle: 'nw' | 'ne' | 'sw' | 'se', currentWidth: number, currentHeight: number) => {
     e.stopPropagation();
@@ -425,6 +458,9 @@ export const Stage: React.FC<StageProps> = ({
 
     e.stopPropagation();
     if (readonly) return;
+    if (transitionPaths.length > 0) {
+      onTransitionObjectSelect?.(id);
+    }
     e.currentTarget.setPointerCapture(e.pointerId);
 
     let newSelection = [...selectedPerformerIds];
@@ -558,29 +594,23 @@ export const Stage: React.FC<StageProps> = ({
     );
   }, [gridMarks]);
 
-  const transitionOverlay = useMemo(() => {
-    if (!transitionPath) return null;
-
+  const transitionOverlays = useMemo(() => transitionPaths.map((transitionPath) => {
     const startX = stageXToViewPercent(transitionPath.start.x, stageConfig);
     const endX = stageXToViewPercent(transitionPath.end.x, stageConfig);
     const cp1 = transitionPath.controlPoints[0] ?? transitionPath.start;
     const cp2 = transitionPath.controlPoints[1] ?? transitionPath.end;
     const cp1X = stageXToViewPercent(cp1.x, stageConfig);
     const cp2X = stageXToViewPercent(cp2.x, stageConfig);
-    const pathD = transitionPath.pathType === 'bezier'
-      ? `M ${startX} ${transitionPath.start.y} C ${cp1X} ${cp1.y}, ${cp2X} ${cp2.y}, ${endX} ${transitionPath.end.y}`
-      : `M ${startX} ${transitionPath.start.y} L ${endX} ${transitionPath.end.y}`;
-
     return {
-      pathD,
-      start: { x: startX, y: transitionPath.start.y },
-      end: { x: endX, y: transitionPath.end.y },
-      controlPoints: [
-        { x: cp1X, y: cp1.y },
-        { x: cp2X, y: cp2.y },
-      ],
+      ...transitionPath,
+      pathD: transitionPath.pathType === 'bezier'
+        ? `M ${startX} ${transitionPath.start.y} C ${cp1X} ${cp1.y}, ${cp2X} ${cp2.y}, ${endX} ${transitionPath.end.y}`
+        : `M ${startX} ${transitionPath.start.y} L ${endX} ${transitionPath.end.y}`,
+      startView: { x: startX, y: transitionPath.start.y },
+      endView: { x: endX, y: transitionPath.end.y },
+      controlPointsView: [{ x: cp1X, y: cp1.y }, { x: cp2X, y: cp2.y }],
     };
-  }, [stageConfig, transitionPath]);
+  }), [stageConfig, transitionPaths]);
 
   return (
     <div
@@ -619,47 +649,45 @@ export const Stage: React.FC<StageProps> = ({
         {/* Dynamic Grid Lines */}
         {gridLines}
 
-        {transitionOverlay && (
+        {transitionOverlays.length > 0 && (
           <>
             <svg className="absolute inset-0 h-full w-full pointer-events-none z-[15]" preserveAspectRatio="none" viewBox="0 0 100 100">
-              {transitionPath?.pathType === 'bezier' && (
-                <>
-                  <line
-                    x1={transitionOverlay.start.x}
-                    y1={transitionOverlay.start.y}
-                    x2={transitionOverlay.controlPoints[0].x}
-                    y2={transitionOverlay.controlPoints[0].y}
-                    stroke="#38bdf8"
-                    strokeWidth="0.3"
-                    strokeDasharray="1.2 0.8"
-                    opacity="0.8"
+              {transitionOverlays.map((overlay) => (
+                <g key={overlay.performerId}>
+                  {overlay.isSelected && overlay.pathType === 'bezier' && (
+                    <>
+                      <line x1={overlay.startView.x} y1={overlay.startView.y} x2={overlay.controlPointsView[0].x} y2={overlay.controlPointsView[0].y} stroke="#38bdf8" strokeWidth="0.3" strokeDasharray="1.2 0.8" opacity="0.8" />
+                      <line x1={overlay.endView.x} y1={overlay.endView.y} x2={overlay.controlPointsView[1].x} y2={overlay.controlPointsView[1].y} stroke="#38bdf8" strokeWidth="0.3" strokeDasharray="1.2 0.8" opacity="0.8" />
+                    </>
+                  )}
+                  <path
+                    className="pointer-events-auto cursor-pointer"
+                    d={overlay.pathD}
+                    fill="none"
+                    stroke={overlay.color}
+                    strokeWidth={overlay.isSelected ? '0.75' : '0.35'}
+                    strokeDasharray={overlay.isSelected ? '1.6 1' : '1 1.4'}
+                    opacity={overlay.isSelected ? '1' : '0.38'}
+                    pointerEvents="stroke"
+                    onPointerDown={(event) => {
+                      event.stopPropagation();
+                      onTransitionObjectSelect?.(overlay.performerId);
+                    }}
                   />
-                  <line
-                    x1={transitionOverlay.end.x}
-                    y1={transitionOverlay.end.y}
-                    x2={transitionOverlay.controlPoints[1].x}
-                    y2={transitionOverlay.controlPoints[1].y}
-                    stroke="#38bdf8"
-                    strokeWidth="0.3"
-                    strokeDasharray="1.2 0.8"
-                    opacity="0.8"
-                  />
-                </>
-              )}
-              <path
-                d={transitionOverlay.pathD}
-                fill="none"
-                stroke={transitionPath?.pathType === 'bezier' ? '#22d3ee' : '#60a5fa'}
-                strokeWidth="0.6"
-                strokeDasharray="1.6 1"
-                opacity="0.95"
-              />
-              <circle cx={transitionOverlay.start.x} cy={transitionOverlay.start.y} r="0.8" fill="#34d399" />
-              <circle cx={transitionOverlay.end.x} cy={transitionOverlay.end.y} r="0.8" fill="#f59e0b" />
+                  {overlay.isSelected && (
+                    <>
+                      <circle cx={overlay.startView.x} cy={overlay.startView.y} r="0.8" fill="#34d399" />
+                      <circle cx={overlay.endView.x} cy={overlay.endView.y} r="0.8" fill="#f59e0b" />
+                    </>
+                  )}
+                </g>
+              ))}
             </svg>
-            {transitionPath?.pathType === 'bezier' && transitionOverlay.controlPoints.map((controlPoint, index) => (
+            {transitionOverlays
+              .filter((overlay) => overlay.isSelected && overlay.pathType === 'bezier')
+              .flatMap((overlay) => overlay.controlPointsView.map((controlPoint, index) => (
               <button
-                key={`transition-control-${index}`}
+                key={`transition-control-${overlay.performerId}-${index}`}
                 type="button"
                 onPointerDown={(event) => {
                   if (readonly) return;
@@ -674,7 +702,7 @@ export const Stage: React.FC<StageProps> = ({
                 }}
                 title={`控制点 ${index + 1}`}
               />
-            ))}
+              )))}
           </>
         )}
 
@@ -718,7 +746,8 @@ export const Stage: React.FC<StageProps> = ({
           const pos = positions[performer.id];
           if (!pos) return null; // Don't render if not in current frame/interpolation
 
-          const isSelected = selectedPerformerIds.includes(performer.id);
+          const isSelected = selectedPerformerIds.includes(performer.id)
+            || selectedTransitionPath?.performerId === performer.id;
 
           // Render Prop
           if (performer.type === 'prop') {
@@ -726,6 +755,8 @@ export const Stage: React.FC<StageProps> = ({
             const isPlatform = isPlatformProp(performer);
             const isOccupiedPlatform = platformOccupancy.occupiedPlatformIds.has(performer.id);
             const propLift = platformOccupancy.entityLiftById[performer.id] ?? 0;
+            const rotation = rotations[performer.id] ?? performer.rotation ?? 0;
+            const displayPos = getPropCenterFromAnchor(pos, rotation, performer, stageConfig);
 
             // width(长) for 2D x-axis, depth(宽) for 2D y-axis
             const widthPct = ((performer.width || 1) / totalStageWidth) * 100;
@@ -734,15 +765,16 @@ export const Stage: React.FC<StageProps> = ({
             return (
               <div
                 key={performer.id}
+                data-performer-id={performer.id}
                 onPointerDown={(e) => handlePerformerPointerDown(e, performer.id)}
                 className={`absolute cursor-grab active:cursor-grabbing z-10 group flex items-center justify-center`}
                 style={{
-                  left: `${stageXToViewPercent(pos.x, stageConfig)}%`,
-                  top: `${pos.y}%`,
+                  left: `${stageXToViewPercent(displayPos.x, stageConfig)}%`,
+                  top: `${displayPos.y}%`,
                   width: `${widthPct}%`,
                   height: `${heightPct}%`,
                   backgroundColor: performer.color,
-                  transform: `translate(-50%, -50%) rotate(${rotations[performer.id] ?? performer.rotation ?? 0}deg)`,
+                  transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
                   border: isSelected
                     ? '2px solid white'
                     : isPlatform
@@ -770,6 +802,20 @@ export const Stage: React.FC<StageProps> = ({
                 {/* Resize Handles */}
                 {isSelected && !readonly && (
                   <>
+                    {!isPlatform && (
+                      <button
+                        type="button"
+                        className="absolute left-1/2 top-[-34px] h-5 w-5 -translate-x-1/2 rounded-full border-2 border-white bg-amber-500 shadow-lg cursor-grab active:cursor-grabbing"
+                        style={{ transform: `translateX(-50%) rotate(${-rotation}deg)` }}
+                        title="拖动旋转"
+                        onPointerDown={(event) => {
+                          event.stopPropagation();
+                          event.preventDefault();
+                          onRotationStart?.(performer.id);
+                          setRotationDragId(performer.id);
+                        }}
+                      />
+                    )}
                     <div className="absolute top-0 left-0 w-5 h-5 md:w-3 md:h-3 bg-white border border-blue-600 rounded-full cursor-nw-resize -translate-x-1/2 -translate-y-1/2 z-20 shadow-sm hover:scale-125 transition-transform touch-none" onPointerDown={(e) => handleResizeStart(e, performer.id, 'nw', performer.width || 1, performer.depth || 1)} />
                     <div className="absolute top-0 right-0 w-5 h-5 md:w-3 md:h-3 bg-white border border-blue-600 rounded-full cursor-ne-resize translate-x-1/2 -translate-y-1/2 z-20 shadow-sm hover:scale-125 transition-transform touch-none" onPointerDown={(e) => handleResizeStart(e, performer.id, 'ne', performer.width || 1, performer.depth || 1)} />
                     <div className="absolute bottom-0 left-0 w-5 h-5 md:w-3 md:h-3 bg-white border border-blue-600 rounded-full cursor-sw-resize -translate-x-1/2 translate-y-1/2 z-20 shadow-sm hover:scale-125 transition-transform touch-none" onPointerDown={(e) => handleResizeStart(e, performer.id, 'sw', performer.width || 1, performer.depth || 1)} />

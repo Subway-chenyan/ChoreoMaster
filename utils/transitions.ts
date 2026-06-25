@@ -47,6 +47,10 @@ export function createTransitionId(fromFrameId: string, toFrameId: string): stri
   return `transition-${fromFrameId}-${toFrameId}`;
 }
 
+export function getGapSelectionId(gap: GapSegment): string {
+  return gap.transition?.id ?? gap.id;
+}
+
 export function findTransitionSegment(
   transitions: TransitionSegment[],
   fromFrameId: string,
@@ -123,12 +127,13 @@ function getObjectRotationAtTime(
   performer: Performer,
   motion: ObjectMotion | undefined,
   progress: number,
+  frameStartRotation: number,
+  frameEndRotation: number,
 ): number {
-  const performerRotation = performer.rotation ?? 0;
-  if (!motion) return performerRotation;
+  if (!motion) return lerp(frameStartRotation, frameEndRotation, progress);
 
-  const startRotation = normalizeRotation(motion.startRotation, performerRotation);
-  const endRotation = normalizeRotation(motion.endRotation, performerRotation);
+  const startRotation = normalizeRotation(motion.startRotation, frameStartRotation);
+  const endRotation = normalizeRotation(motion.endRotation, frameEndRotation);
 
   if (motion.rotationMode === 'fixed') {
     return startRotation;
@@ -138,7 +143,7 @@ function getObjectRotationAtTime(
     return lerp(startRotation, endRotation, progress);
   }
 
-  return performerRotation;
+  return lerp(frameStartRotation, frameEndRotation, progress);
 }
 
 function getBezierControlPoints(
@@ -206,9 +211,13 @@ function buildStaticSceneState(
   framePositions: Record<string, Position>,
   performers: Performer[],
   hiddenGroupIds: string[],
+  frameRotations: Record<string, number> = {},
 ): SceneState {
   const rotations = Object.fromEntries(
-    performers.map((performer) => [performer.id, performer.rotation ?? 0]),
+    performers.map((performer) => [
+      performer.id,
+      frameRotations[performer.id] ?? performer.rotation ?? 0,
+    ]),
   );
   return {
     positions: framePositions,
@@ -227,7 +236,12 @@ export function evaluateSceneStateAtTime(
   const activeFrame = sortedFrames.find((frame) => timeMs >= frame.startTime && timeMs < frame.startTime + frame.duration);
 
   if (activeFrame) {
-    return buildStaticSceneState(activeFrame.positions, performers, activeFrame.hiddenGroupIds || []);
+    return buildStaticSceneState(
+      activeFrame.positions,
+      performers,
+      activeFrame.hiddenGroupIds || [],
+      activeFrame.rotations,
+    );
   }
 
   const previousFrame = [...sortedFrames].reverse().find((frame) => frame.startTime + frame.duration <= timeMs);
@@ -239,11 +253,23 @@ export function evaluateSceneStateAtTime(
     const totalGap = gapEnd - gapStart;
 
     if (totalGap <= 0) {
-      return buildStaticSceneState(previousFrame.positions, performers, previousFrame.hiddenGroupIds || []);
+      return buildStaticSceneState(
+        previousFrame.positions,
+        performers,
+        previousFrame.hiddenGroupIds || [],
+        previousFrame.rotations,
+      );
     }
 
-    const progress = easeInOutQuad((timeMs - gapStart) / totalGap);
     const transition = findTransitionSegment(transitions, previousFrame.id, nextFrame.id);
+    const configuredDuration = transition?.duration;
+    const transitionDuration = typeof configuredDuration === 'number' && Number.isFinite(configuredDuration)
+      ? Math.min(totalGap, Math.max(0, configuredDuration))
+      : totalGap;
+    const rawProgress = transitionDuration === 0
+      ? 1
+      : (timeMs - gapStart) / transitionDuration;
+    const progress = easeInOutQuad(Math.max(0, Math.min(1, rawProgress)));
     const positions: Record<string, Position> = {};
     const rotations: Record<string, number> = {};
 
@@ -254,7 +280,14 @@ export function evaluateSceneStateAtTime(
 
       const motion = transition?.objectMotions?.[performer.id];
       positions[performer.id] = interpolatePosition(start, end, motion, progress);
-      rotations[performer.id] = getObjectRotationAtTime(performer, motion, progress);
+      const fallbackRotation = performer.rotation ?? 0;
+      rotations[performer.id] = getObjectRotationAtTime(
+        performer,
+        motion,
+        progress,
+        previousFrame.rotations?.[performer.id] ?? fallbackRotation,
+        nextFrame.rotations?.[performer.id] ?? fallbackRotation,
+      );
     });
 
     return {
@@ -266,11 +299,21 @@ export function evaluateSceneStateAtTime(
 
   if (sortedFrames.length > 0) {
     if (timeMs < sortedFrames[0].startTime) {
-      return buildStaticSceneState(sortedFrames[0].positions, performers, sortedFrames[0].hiddenGroupIds || []);
+      return buildStaticSceneState(
+        sortedFrames[0].positions,
+        performers,
+        sortedFrames[0].hiddenGroupIds || [],
+        sortedFrames[0].rotations,
+      );
     }
 
     const lastFrame = sortedFrames[sortedFrames.length - 1];
-    return buildStaticSceneState(lastFrame.positions, performers, lastFrame.hiddenGroupIds || []);
+    return buildStaticSceneState(
+      lastFrame.positions,
+      performers,
+      lastFrame.hiddenGroupIds || [],
+      lastFrame.rotations,
+    );
   }
 
   return {

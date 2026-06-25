@@ -29,6 +29,86 @@ export interface TransitionSegment {
   objectMotions: Record<string, ObjectMotion>;
 }
 
+type UnknownRecord = Record<string, unknown>;
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function normalizeMotionControlPoint(value: unknown): MotionControlPoint | null {
+  if (!isRecord(value)) return null;
+  if (typeof value.x !== 'number' || typeof value.y !== 'number') return null;
+  if (!Number.isFinite(value.x) || !Number.isFinite(value.y)) return null;
+  return {
+    x: value.x,
+    y: value.y,
+    ...(typeof value.z === 'number' && Number.isFinite(value.z) ? { z: value.z } : {}),
+  };
+}
+
+function normalizeObjectMotion(value: unknown): ObjectMotion | null {
+  if (!isRecord(value)) return null;
+  const motion: ObjectMotion = {};
+  if (value.pathType === 'linear' || value.pathType === 'bezier') {
+    motion.pathType = value.pathType;
+  }
+  if (Array.isArray(value.controlPoints)) {
+    const controlPoints = value.controlPoints
+      .flatMap((entry) => {
+        const point = normalizeMotionControlPoint(entry);
+        return point ? [point] : [];
+      })
+      .slice(0, 2);
+    if (controlPoints.length > 0) {
+      motion.controlPoints = controlPoints;
+    }
+  }
+  if (value.rotationMode === 'fixed' || value.rotationMode === 'lerp') {
+    motion.rotationMode = value.rotationMode;
+  }
+  if (typeof value.startRotation === 'number' && Number.isFinite(value.startRotation)) {
+    motion.startRotation = value.startRotation;
+  }
+  if (typeof value.endRotation === 'number' && Number.isFinite(value.endRotation)) {
+    motion.endRotation = value.endRotation;
+  }
+  return motion;
+}
+
+export function normalizeTransitions(value: unknown): TransitionSegment[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry, index) => {
+    if (!isRecord(entry) || typeof entry.fromFrameId !== 'string' || typeof entry.toFrameId !== 'string') {
+      return [];
+    }
+    const fromFrameId = entry.fromFrameId.trim();
+    const toFrameId = entry.toFrameId.trim();
+    if (!fromFrameId || !toFrameId) return [];
+
+    const objectMotions: Record<string, ObjectMotion> = {};
+    if (isRecord(entry.objectMotions)) {
+      Object.entries(entry.objectMotions).forEach(([objectId, motionValue]) => {
+        const motion = normalizeObjectMotion(motionValue);
+        if (motion) {
+          objectMotions[objectId] = motion;
+        }
+      });
+    }
+
+    return [{
+      id: typeof entry.id === 'string' && entry.id.trim()
+        ? entry.id.trim().slice(0, 160)
+        : `transition-${index}-${fromFrameId}-${toFrameId}`,
+      fromFrameId,
+      toFrameId,
+      ...(typeof entry.duration === 'number' && Number.isFinite(entry.duration)
+        ? { duration: Math.max(0, Math.round(entry.duration)) }
+        : {}),
+      objectMotions,
+    }];
+  });
+}
+
 export interface SceneState {
   positions: Record<string, Position>;
   rotations: Record<string, number>;
@@ -39,6 +119,7 @@ export type PerformerShape = 'circle' | 'square' | 'triangle';
 export type PerformerType = 'performer' | 'prop';
 export type PropGeometryType = 'box' | 'extruded';
 export type PropCategory = 'prop' | 'platform';
+export type PropRotationPivot = 'center' | 'left' | 'right';
 
 export interface FaceTexture {
   dataUrl?: string;
@@ -82,6 +163,7 @@ export interface Performer {
   textureAssetPath?: string;
   propShape?: 'rectangle' | 'ellipse' | 'triangle' | 'diamond' | 'hexagon' | 'custom';
   propCategory?: PropCategory;
+  rotationPivot?: PropRotationPivot;
   boundToId?: string;
 }
 
@@ -99,8 +181,56 @@ export interface Frame {
   startTime: number;
   duration: number;
   positions: Record<string, Position>;
+  rotations?: Record<string, number>;
   notes?: string;
   hiddenGroupIds?: string[];
+}
+
+function normalizeRotationMap(value: unknown): Record<string, number> {
+  if (!isRecord(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value).filter((entry): entry is [string, number] => (
+      typeof entry[1] === 'number' && Number.isFinite(entry[1])
+    )),
+  );
+}
+
+export function normalizeFrames(value: unknown): Frame[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!isRecord(entry)
+      || typeof entry.id !== 'string'
+      || typeof entry.name !== 'string'
+      || typeof entry.startTime !== 'number'
+      || typeof entry.duration !== 'number'
+      || !isRecord(entry.positions)) {
+      return [];
+    }
+    return [{
+      ...entry,
+      id: entry.id,
+      name: entry.name,
+      startTime: entry.startTime,
+      duration: entry.duration,
+      positions: entry.positions as Record<string, Position>,
+      rotations: normalizeRotationMap(entry.rotations),
+    } as Frame];
+  });
+}
+
+export function normalizePerformers(value: unknown): Performer[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!isRecord(entry) || typeof entry.id !== 'string' || typeof entry.name !== 'string') {
+      return [];
+    }
+    const performer = { ...entry } as unknown as Performer;
+    performer.rotationPivot = performer.type === 'prop' && performer.propCategory !== 'platform'
+      && (entry.rotationPivot === 'left' || entry.rotationPivot === 'right')
+      ? entry.rotationPivot
+      : 'center';
+    return [performer];
+  });
 }
 
 export interface LEDContent {

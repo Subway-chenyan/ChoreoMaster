@@ -3,6 +3,7 @@ import type { Performer, Position, StageConfig, LEDContent } from '../types';
 import { mapTo3D, degToRad, getTotalStageWidth, getWingWidth } from './coordinates';
 import { denormalizePoints } from '../components/prop-editor/PolygonUtils';
 import { buildPlatformOccupancy, isPlatformProp } from './platforms';
+import { getPropCenterFromAnchor } from './prop-pivot';
 import { createCenteredStageGridMarks, STAGE_THIRD_POSITIONS } from './stage-grid';
 
 export type CameraAngle = 'judge' | 'overhead';
@@ -531,9 +532,13 @@ export function createOfflineScene(
       }
 
       mesh.visible = true;
+      const rotation = rotations[p.id] ?? p.rotation ?? 0;
+      const renderPosition = p.type === 'prop'
+        ? getPropCenterFromAnchor(pos, rotation, p, stageConfig)
+        : pos;
       const [x3d, y3d, z3d] = mapTo3D({
-        ...pos,
-        z: (pos.z || 0) + (platformOccupancy.entityLiftById[p.id] ?? 0),
+        ...renderPosition,
+        z: (renderPosition.z || 0) + (platformOccupancy.entityLiftById[p.id] ?? 0),
       }, stageConfig);
 
       if (p.type === 'prop') {
@@ -544,7 +549,7 @@ export function createOfflineScene(
       }
 
       // Rotation
-      mesh.rotation.y = -degToRad(rotations[p.id] ?? p.rotation ?? 0);
+      mesh.rotation.y = -degToRad(rotation);
     });
 
     // Update LED image texture

@@ -22,14 +22,22 @@ export type {
   ProjectWarning,
   PropCategory,
   PropGeometryType,
+  PropRotationPivot,
   RotationMode,
   SceneState,
   StageConfig,
   TransitionSegment,
 } from './electron/project-contract';
 
+export {
+  normalizeFrames,
+  normalizePerformers,
+  normalizeTransitions,
+} from './electron/project-contract';
+
 import type {
   Frame,
+  MotionControlPoint,
   ObjectMotion,
   Performer,
   PerformerGroup,
@@ -167,6 +175,16 @@ export interface TransitionFrameContext {
   fromFrame: Frame;
   toFrame: Frame;
   motion: ObjectMotion;
+}
+
+export interface TransitionPathDisplay {
+  performerId: string;
+  color: string;
+  start: Position;
+  end: Position;
+  pathType: 'linear' | 'bezier';
+  controlPoints: MotionControlPoint[];
+  isSelected: boolean;
 }
 
 export interface ChoreoTimedInsight {

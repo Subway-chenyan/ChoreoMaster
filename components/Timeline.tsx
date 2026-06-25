@@ -2,7 +2,8 @@
 import React, { useEffect, useRef, useMemo, useState } from 'react';
 import { AudioMarker, Frame, MotionControlPoint, ObjectMotion, Performer, TransitionSegment } from '../types';
 import { Flag, Pause, Play, PlusCircle, SkipBack, Trash2, X, ZoomIn, ZoomOut } from 'lucide-react';
-import { createTransitionId, getDefaultBezierControlPoints } from '../utils/transitions';
+import { EditableNumberInput } from './FormControls';
+import { createTransitionId, getDefaultBezierControlPoints, getGapSelectionId } from '../utils/transitions';
 
 interface TimelineProps {
     performers: Performer[];
@@ -24,6 +25,7 @@ interface TimelineProps {
     onSelectedMotionPerformerChange: (performerId: string | null) => void;
     onTransitionUpdate: (transition: TransitionSegment) => void;
     onTransitionDelete: (transitionId: string) => void;
+    onFrameRotationChange: (frameId: string, performerId: string, rotation: number) => void;
     audioMarkers: AudioMarker[];
     onAudioMarkersChange: (markers: AudioMarker[]) => void;
     onRenameFrame?: (frameId: string) => void;
@@ -55,6 +57,7 @@ export const Timeline: React.FC<TimelineProps> = ({
     onSelectedMotionPerformerChange,
     onTransitionUpdate,
     onTransitionDelete,
+    onFrameRotationChange,
     audioMarkers,
     onAudioMarkersChange,
     onRenameFrame,
@@ -198,7 +201,7 @@ export const Timeline: React.FC<TimelineProps> = ({
     }, [frames, transitions]);
 
     const selectedGap = useMemo(
-        () => gapSegments.find((gap) => gap.id === selectedTransitionId) || null,
+        () => gapSegments.find((gap) => getGapSelectionId(gap) === selectedTransitionId) || null,
         [gapSegments, selectedTransitionId],
     );
 
@@ -289,7 +292,7 @@ export const Timeline: React.FC<TimelineProps> = ({
         };
         onTransitionUpdate({
             ...selectedTransition,
-            duration: selectedGap?.duration,
+            duration: selectedGap?.transition?.duration ?? selectedGap?.duration,
             objectMotions: {
                 ...selectedTransition.objectMotions,
                 [selectedMotionPerformerId]: nextMotion,
@@ -564,9 +567,10 @@ export const Timeline: React.FC<TimelineProps> = ({
                                 onClick={(event) => {
                                     event.stopPropagation();
                                     if (!gap.prevId) return;
-                                    onSelectTransition(gap.id);
+                                    onSeek(gap.start + (gap.duration / 2));
+                                    onSelectTransition(getGapSelectionId(gap));
                                 }}
-                                className={`absolute top-0 flex items-center justify-center overflow-hidden border transition-colors ${gap.prevId ? 'cursor-pointer' : 'cursor-not-allowed'} ${selectedTransitionId === gap.id ? 'border-blue-400 bg-blue-500/10' : gap.transition ? 'border-emerald-500/40 bg-emerald-500/5 hover:bg-emerald-500/10' : 'border-slate-700/50 bg-transparent hover:bg-slate-800/30'}`}
+                                className={`absolute top-0 flex items-center justify-center overflow-hidden border transition-colors ${gap.prevId ? 'cursor-pointer' : 'cursor-not-allowed'} ${selectedTransitionId === getGapSelectionId(gap) ? 'border-blue-400 bg-blue-500/10' : gap.transition ? 'border-emerald-500/40 bg-emerald-500/5 hover:bg-emerald-500/10' : 'border-slate-700/50 bg-transparent hover:bg-slate-800/30'}`}
                                 style={{
                                     left: (gap.start / 1000) * zoom,
                                     width: (gap.duration / 1000) * zoom,
@@ -687,21 +691,37 @@ export const Timeline: React.FC<TimelineProps> = ({
                         </div>
                     ) : (
                         <>
+                            <div className="mb-3 max-h-24 overflow-y-auto rounded-lg border border-slate-800 bg-slate-950/70 p-1.5">
+                                <div className="grid grid-cols-2 gap-1">
+                                    {selectableMotionPerformers.map((performer) => {
+                                        const motion = selectedTransition.objectMotions[performer.id];
+                                        const selected = performer.id === selectedMotionPerformerId;
+                                        return (
+                                            <button
+                                                key={performer.id}
+                                                type="button"
+                                                data-motion-id={performer.id}
+                                                onPointerDown={(event) => {
+                                                    event.stopPropagation();
+                                                    onSelectedMotionPerformerChange(event.currentTarget.dataset.motionId || performer.id);
+                                                }}
+                                                onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    onSelectedMotionPerformerChange(event.currentTarget.dataset.motionId || performer.id);
+                                                }}
+                                                className={`flex items-center justify-between rounded px-2 py-1.5 text-left text-[11px] ${selected ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'}`}
+                                            >
+                                                <span className="truncate">{performer.name}</span>
+                                                <span className="ml-2 shrink-0 text-[9px] opacity-75">
+                                                    {motion?.pathType === 'bezier' ? '曲线' : '直线'}
+                                                    {performer.type === 'prop' ? ` · ${motion?.rotationMode === 'fixed' ? '固定' : '旋转'}` : ''}
+                                                </span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
                             <div className="grid grid-cols-2 gap-2">
-                                <label className="text-[10px] text-slate-400">
-                                    对象
-                                    <select
-                                        value={selectedMotionPerformerId || ''}
-                                        onChange={(event) => onSelectedMotionPerformerChange(event.target.value)}
-                                        className="mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 text-xs text-slate-100 outline-none focus:border-blue-500"
-                                    >
-                                        {selectableMotionPerformers.map((performer) => (
-                                            <option key={performer.id} value={performer.id}>
-                                                {performer.name}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </label>
                                 <label className="text-[10px] text-slate-400">
                                     路径
                                     <select
@@ -740,22 +760,36 @@ export const Timeline: React.FC<TimelineProps> = ({
                             </div>
                             <div className="mt-3 grid grid-cols-2 gap-2">
                                 <label className="text-[10px] text-slate-400">
-                                    起始角度
-                                    <input
-                                        type="number"
+                                    起始队形角度
+                                    <EditableNumberInput
                                         step={1}
-                                        value={selectedMotion.startRotation ?? 0}
-                                        onChange={(event) => updateSelectedMotion({ startRotation: Number(event.target.value) })}
+                                        value={selectedMotionPerformerId
+                                            ? selectedGapFrames.fromFrame.rotations?.[selectedMotionPerformerId]
+                                                ?? selectableMotionPerformers.find((item) => item.id === selectedMotionPerformerId)?.rotation
+                                                ?? 0
+                                            : 0}
+                                        onChange={(value) => {
+                                            if (selectedMotionPerformerId) {
+                                                onFrameRotationChange(selectedGapFrames.fromFrame.id, selectedMotionPerformerId, value);
+                                            }
+                                        }}
                                         className="mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 font-mono text-xs text-slate-100 outline-none focus:border-blue-500"
                                     />
                                 </label>
                                 <label className="text-[10px] text-slate-400">
-                                    结束角度
-                                    <input
-                                        type="number"
+                                    目标队形角度
+                                    <EditableNumberInput
                                         step={1}
-                                        value={selectedMotion.endRotation ?? 0}
-                                        onChange={(event) => updateSelectedMotion({ endRotation: Number(event.target.value) })}
+                                        value={selectedMotionPerformerId
+                                            ? selectedGapFrames.toFrame.rotations?.[selectedMotionPerformerId]
+                                                ?? selectableMotionPerformers.find((item) => item.id === selectedMotionPerformerId)?.rotation
+                                                ?? 0
+                                            : 0}
+                                        onChange={(value) => {
+                                            if (selectedMotionPerformerId) {
+                                                onFrameRotationChange(selectedGapFrames.toFrame.id, selectedMotionPerformerId, value);
+                                            }
+                                        }}
                                         className="mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 font-mono text-xs text-slate-100 outline-none focus:border-blue-500"
                                     />
                                 </label>
@@ -769,11 +803,10 @@ export const Timeline: React.FC<TimelineProps> = ({
                                                 {(['x', 'y', 'z'] as const).map((axis) => (
                                                     <label key={axis} className="text-[10px] text-slate-500">
                                                         {axis.toUpperCase()}
-                                                        <input
-                                                            type="number"
+                                                        <EditableNumberInput
                                                             step={0.1}
                                                             value={selectedMotion.controlPoints?.[index]?.[axis] ?? 0}
-                                                            onChange={(event) => updateControlPoint(index, axis, Number(event.target.value))}
+                                                            onChange={(value) => updateControlPoint(index, axis, value)}
                                                             className="mt-1 h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 font-mono text-[11px] text-slate-100 outline-none focus:border-blue-500"
                                                         />
                                                     </label>

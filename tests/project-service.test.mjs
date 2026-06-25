@@ -207,6 +207,40 @@ test('persists transition segments and motion settings in project.json', async (
   });
 });
 
+test('persists frame rotations and prop pivot settings', async () => {
+  await withTempDir(async (storagePath) => {
+    const created = await createManagedProject(storagePath, 'Pivot Project');
+    const document = projectDocument('Pivot Project');
+    document.performers = [{
+      id: 'door',
+      name: 'Door',
+      color: '#334155',
+      label: 'D',
+      shape: 'square',
+      type: 'prop',
+      propCategory: 'prop',
+      width: 2,
+      height: 3,
+      depth: 0.2,
+      rotationPivot: 'left',
+    }];
+    document.frames = [{
+      id: 'frame-1',
+      name: 'Open',
+      startTime: 0,
+      duration: 2000,
+      positions: { door: { x: 25, y: 50 } },
+      rotations: { door: 75 },
+    }];
+
+    await saveManagedProject(storagePath, created.id, document);
+    const loaded = await loadManagedProject(storagePath, created.id);
+
+    assert.equal(loaded.data.performers[0].rotationPivot, 'left');
+    assert.equal(loaded.data.frames[0].rotations.door, 75);
+  });
+});
+
 test('exports and imports a complete project as a new managed project', async () => {
   await withTempDir(async (storagePath) => {
     const created = await createManagedProject(storagePath, 'Portable Project');
