@@ -17,13 +17,64 @@ env:
   COS_BUCKET: beat-1317738912
   COS_REGION: ap-guangzhou
   COS_ALIAS: production
+  COS_ENDPOINT: cos.accelerate.myqcloud.com
   CDN_URL: https://beat.cosdrama.cn/
+  INSTALLER_OBJECT: downloads/CosStage-Setup-x64.exe
+  INSTALLER_URL: https://beat.cosdrama.cn/downloads/CosStage-Setup-x64.exe
   COSCLI_VERSION: v1.0.8
 
 jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows installer
+        run: npm run build:electron
+
+      - name: Prepare stable installer
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -Path release -Filter '*-Setup-*-x64.exe' |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+          if (-not $installer) {
+            throw 'Windows installer was not generated.'
+          }
+
+          $stableInstaller = Join-Path $installer.DirectoryName 'CosStage-Setup-x64.exe'
+          Copy-Item -LiteralPath $installer.FullName -Destination $stableInstaller -Force
+
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $stableInstaller).Hash.ToLowerInvariant()
+          "$hash  CosStage-Setup-x64.exe" |
+            Set-Content -Encoding ascii -Path 'release/CosStage-Setup-x64.exe.sha256'
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: |
+            release/CosStage-Setup-x64.exe
+            release/CosStage-Setup-x64.exe.sha256
+          if-no-files-found: error
+          retention-days: 1
+
   deploy:
+    needs: build-windows
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 90
 
     steps:
       - name: Checkout
@@ -40,6 +91,12 @@ jobs:
 
       - name: Build web app
         run: npm run build
+
+      - name: Download Windows installer
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-installer
+          path: desktop-release
 
       - name: Install COSCLI
         run: |
@@ -61,7 +118,7 @@ jobs:
             -a "${COS_ALIAS}" \
             -b "${COS_BUCKET}" \
             -r "${COS_REGION}" \
-            -e "cos.${COS_REGION}.myqcloud.com" \
+            -e "${COS_ENDPOINT}" \
             -i "${TENCENT_SECRET_ID}" \
             -k "${TENCENT_SECRET_KEY}"
 
@@ -80,6 +137,48 @@ jobs:
             --secret-key "${TENCENT_SECRET_KEY}" \
             --meta "Cache-Control:no-cache"
 
+      - name: Remove legacy web app artifacts
+        env:
+          TENCENT_SECRET_ID: ${{ secrets.TENCENT_SECRET_ID }}
+          TENCENT_SECRET_KEY: ${{ secrets.TENCENT_SECRET_KEY }}
+        run: |
+          remove_legacy_object() {
+            local object_path="$1"
+            echo "Removing legacy object: ${object_path}"
+            if coscli rm "cos://${COS_ALIAS}/${object_path}" \
+              --secret-id "${TENCENT_SECRET_ID}" \
+              --secret-key "${TENCENT_SECRET_KEY}" \
+              -f; then
+              echo "Removed legacy object: ${object_path}"
+            else
+              echo "Legacy object was absent or could not be removed immediately: ${object_path}"
+            fi
+          }
+
+          remove_legacy_object "sw.js"
+          remove_legacy_object "manifest.webmanifest"
+
+      - name: Upload Windows installer to COS
+        timeout-minutes: 75
+        env:
+          TENCENT_SECRET_ID: ${{ secrets.TENCENT_SECRET_ID }}
+          TENCENT_SECRET_KEY: ${{ secrets.TENCENT_SECRET_KEY }}
+        run: |
+          coscli cp ./desktop-release/CosStage-Setup-x64.exe \
+            "cos://${COS_ALIAS}/${INSTALLER_OBJECT}" \
+            --secret-id "${TENCENT_SECRET_ID}" \
+            --secret-key "${TENCENT_SECRET_KEY}" \
+            --part-size 4 \
+            --thread-num 16 \
+            --err-retry-num 10 \
+            --err-retry-interval 3 \
+            --meta "Cache-Control:public,max-age=3600#Content-Disposition:attachment; filename=CosStage-Setup-x64.exe#Content-Type:application/vnd.microsoft.portable-executable"
+          coscli cp ./desktop-release/CosStage-Setup-x64.exe.sha256 \
+            "cos://${COS_ALIAS}/${INSTALLER_OBJECT}.sha256" \
+            --secret-id "${TENCENT_SECRET_ID}" \
+            --secret-key "${TENCENT_SECRET_KEY}" \
+            --meta "Cache-Control:no-cache#Content-Type:text/plain"
+
       - name: Install Tencent Cloud CLI
         run: pip install --disable-pip-version-check tccli
 
@@ -94,6 +193,12 @@ jobs:
             --region "${COS_REGION}" \
             --Paths "[\"${CDN_URL}\"]" \
             --FlushType flush \
+            --Area mainland
+          tccli cdn PurgeUrlsCache \
+            --secretId "${TENCENT_SECRET_ID}" \
+            --secretKey "${TENCENT_SECRET_KEY}" \
+            --region "${COS_REGION}" \
+            --Urls "[\"${INSTALLER_URL}\",\"${INSTALLER_URL}.sha256\",\"${CDN_URL}sw.js\",\"${CDN_URL}manifest.webmanifest\"]" \
             --Area mainland
 
       - name: Verify deployment
@@ -110,3 +215,34 @@ jobs:
           done
           grep -F "${expected_asset}" <<< "${deployed_html}"
           curl -fsSI --retry 5 --retry-delay 3 "${CDN_URL}${expected_asset}" > /dev/null
+          expected_size="$(stat -c%s ./desktop-release/CosStage-Setup-x64.exe)"
+          deployed_size="$(
+            curl -fsSI --retry 5 --retry-delay 3 "${INSTALLER_URL}?deploy=${GITHUB_SHA}" |
+              tr -d '\r' |
+              awk 'tolower($1) == "content-length:" { print $2 }' |
+              tail -n 1
+          )"
+          test "${deployed_size}" = "${expected_size}"
+          curl -fsSL --retry 5 --retry-delay 3 "${INSTALLER_URL}.sha256?deploy=${GITHUB_SHA}" |
+            grep -Fq 'CosStage-Setup-x64.exe'
+          wait_until_unreachable() {
+            local url="$1"
+            local label="$2"
+            for attempt in $(seq 1 24); do
+              status="$(
+                curl -sS -o /dev/null -w '%{http_code}' -I \
+                  "${url}?deploy=${GITHUB_SHA}&legacy-check=${attempt}" || true
+              )"
+              if [ "${status}" = "000" ] || [ "${status}" = "403" ] || [ "${status}" = "404" ]; then
+                echo "${label} is no longer reachable (status=${status})"
+                return 0
+              fi
+              echo "Waiting for ${label} to disappear (${attempt}/24), status=${status}"
+              sleep 5
+            done
+            echo "${label} is still reachable after CDN purge wait"
+            return 1
+          }
+
+          wait_until_unreachable "${CDN_URL}sw.js" "Legacy sw.js"
+          wait_until_unreachable "${CDN_URL}manifest.webmanifest" "Legacy manifest.webmanifest"

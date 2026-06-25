@@ -33,7 +33,7 @@ interface StageProps {
   onPositionChange: (updates: { id: string; pos: Position }[]) => void;
   onTransitionControlPointChange?: (index: number, pos: Position) => void;
   onDragStart?: (ids: string[]) => void;
-  onDragEnd?: (ids: string[]) => void;
+  onDragEnd?: (ids: string[], finalUpdates?: { id: string; pos: Position }[]) => void;
   onUpdatePerformer?: (id: string, updates: Partial<Performer>) => void;
   readonly?: boolean;
   mode?: ToolMode;
@@ -131,6 +131,23 @@ export const Stage: React.FC<StageProps> = ({
     () => createCenteredStageGridMarks(totalStageWidth, gridScale),
     [gridScale, totalStageWidth],
   );
+
+  const getDragUpdates = (clientX: number, clientY: number, state: DragState): { id: string; pos: Position }[] => {
+    if (!stageRef.current) return [];
+    const rect = stageRef.current.getBoundingClientRect();
+    const deltaXPx = clientX - state.startX;
+    const deltaYPx = clientY - state.startY;
+    const deltaX = (deltaXPx / rect.width) * (stageXBounds.max - stageXBounds.min);
+    const deltaY = (deltaYPx / rect.height) * 100;
+
+    return Object.entries(state.initialPositions).map(([id, initialPos]) => ({
+      id,
+      pos: {
+        x: Math.max(stageXBounds.min, Math.min(stageXBounds.max, initialPos.x + deltaX)),
+        y: Math.max(0, Math.min(100, initialPos.y + deltaY)),
+      },
+    }));
+  };
   const leftMainEdge = stageXToViewPercent(0, stageConfig);
   const rightMainEdge = stageXToViewPercent(100, stageConfig);
   const visualAspectRatio = totalStageWidth / stageConfig.depth;
@@ -331,26 +348,7 @@ export const Stage: React.FC<StageProps> = ({
     }
 
     if (dragState && stageRef.current) {
-      // Calculate delta in percentage
-      const rect = stageRef.current.getBoundingClientRect();
-      const deltaXPx = e.clientX - dragState.startX;
-      const deltaYPx = e.clientY - dragState.startY;
-
-      const deltaX = (deltaXPx / rect.width) * (stageXBounds.max - stageXBounds.min);
-      const deltaY = (deltaYPx / rect.height) * 100;
-
-      const updates: { id: string; pos: Position }[] = [];
-
-      Object.entries(dragState.initialPositions).forEach(([id, rawPos]) => {
-        const initialPos = rawPos as Position;
-        updates.push({
-          id,
-          pos: {
-            x: Math.max(stageXBounds.min, Math.min(stageXBounds.max, initialPos.x + deltaX)),
-            y: Math.max(0, Math.min(100, initialPos.y + deltaY)),
-          }
-        });
-      });
+      const updates = getDragUpdates(e.clientX, e.clientY, dragState);
 
       if (updates.length > 0) {
         onPositionChange(updates);
@@ -368,12 +366,16 @@ export const Stage: React.FC<StageProps> = ({
     }
 
     if (readonly) return;
+    const finalDragUpdates = dragState ? getDragUpdates(e.clientX, e.clientY, dragState) : [];
     const draggedIds = dragState ? Object.keys(dragState.initialPositions) : [];
     setResizeState(null);
     setDragState(null);
     setSelectionBox(null);
     if (draggedIds.length > 0) {
-      onDragEnd?.(draggedIds);
+      if (finalDragUpdates.length > 0) {
+        onPositionChange(finalDragUpdates);
+      }
+      onDragEnd?.(draggedIds, finalDragUpdates);
     }
 
     // Context for selection box logic... (retained but moved logic out of if block to be safe, or just keep it)

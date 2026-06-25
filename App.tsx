@@ -32,7 +32,7 @@ import {
   normalizeStageGridSpacing,
   STAGE_THIRD_POSITIONS,
 } from './utils/stage-grid';
-import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, Maximize2, ChevronDown, ChevronUp, Menu, X, Download, GripHorizontal, SlidersHorizontal, BookOpen } from 'lucide-react';
+import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, ChevronDown, ChevronUp, PanelLeftClose, PanelLeftOpen, X, GripHorizontal, SlidersHorizontal, BookOpen, MessageCircle } from 'lucide-react';
 import { StageConfig } from './types';
 import {
   evaluateSceneStateAtTime,
@@ -106,11 +106,6 @@ type PasteFrameUndoAction = {
 };
 
 type UndoAction = MovePerformersUndoAction | PastePerformersUndoAction | PasteFrameUndoAction;
-
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
-}
 
 const getSupportedVideoEncoderConfig = async (
   width: number,
@@ -225,7 +220,7 @@ const App: React.FC = () => {
   const [gridScale, setGridScale] = useState(DEFAULT_STAGE_GRID_SPACING);
   const [showHelp, setShowHelp] = useState(false);
   const [showProductGuide, setShowProductGuide] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.matchMedia('(max-width: 1100px)').matches);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [stageToolbarCollapsed, setStageToolbarCollapsed] = useState(() => window.matchMedia('(max-width: 1100px)').matches);
   const [sidebarWidth, setSidebarWidth] = useState<number>(320);
   const [timelineHeight, setTimelineHeight] = useState<number>(() => (
@@ -234,7 +229,6 @@ const App: React.FC = () => {
   const [timelineCollapsed, setTimelineCollapsed] = useState(false);
   const previousTimelineHeightRef = useRef(180);
   const [isCompactLayout, setIsCompactLayout] = useState(() => window.matchMedia('(max-width: 1100px)').matches);
-  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [undoStack, setUndoStack] = useState<UndoAction[]>([]);
   const [redoStack, setRedoStack] = useState<UndoAction[]>([]);
   const pendingMoveUndoRef = useRef<{
@@ -248,7 +242,6 @@ const App: React.FC = () => {
     const syncLayout = () => {
       setIsCompactLayout(media.matches);
       if (media.matches) {
-        setSidebarCollapsed(true);
         setTimelineHeight((height) => height === 180 ? 132 : Math.min(height, 320));
         setStageToolbarCollapsed(true);
       }
@@ -257,27 +250,6 @@ const App: React.FC = () => {
     media.addEventListener('change', syncLayout);
     return () => media.removeEventListener('change', syncLayout);
   }, []);
-
-  useEffect(() => {
-    const handleBeforeInstallPrompt = (event: Event) => {
-      event.preventDefault();
-      setInstallPrompt(event as BeforeInstallPromptEvent);
-    };
-    const handleInstalled = () => setInstallPrompt(null);
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    window.addEventListener('appinstalled', handleInstalled);
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-      window.removeEventListener('appinstalled', handleInstalled);
-    };
-  }, []);
-
-  const handleInstallPwa = async () => {
-    if (!installPrompt) return;
-    await installPrompt.prompt();
-    await installPrompt.userChoice;
-    setInstallPrompt(null);
-  };
 
   // 新增：3D 模式相关状态
   const [viewMode, setViewMode] = useState<'2d' | '3d'>('2d');
@@ -1314,17 +1286,18 @@ const App: React.FC = () => {
       : null;
   }, [currentFrameId, frames]);
 
-  const handleStageDragEnd = useCallback((performerIds: string[]) => {
+  const handleStageDragEnd = useCallback((performerIds: string[], finalUpdates?: { id: string; pos: Position }[]) => {
     const snapshot = pendingMoveUndoRef.current;
     pendingMoveUndoRef.current = null;
     if (!snapshot || snapshot.frameId !== currentFrameId) return;
     const currentFrame = frames.find((frame) => frame.id === snapshot.frameId);
     if (!currentFrame) return;
     const relevantIds = snapshot.performerIds.filter((id) => performerIds.length === 0 || performerIds.includes(id));
+    const finalPositionById = new Map((finalUpdates ?? []).map((update) => [update.id, update.pos]));
     const after = clonePositionMap(
       Object.fromEntries(
         relevantIds
-          .map((id) => [id, currentFrame.positions[id]] as const)
+          .map((id) => [id, finalPositionById.get(id) ?? currentFrame.positions[id]] as const)
           .filter((entry): entry is [string, Position] => entry[1] !== undefined)
       )
     );
@@ -1356,21 +1329,44 @@ const App: React.FC = () => {
     if (effectiveTargets.length === 0) return;
 
     const limit = Math.min(effectiveTargets.length, coords.length);
+    const presetUpdates = effectiveTargets.slice(0, limit).map((performerId, index) => {
+      let { x, y } = coords[index];
+      x = Math.max(2, Math.min(98, x));
+      y = Math.max(2, Math.min(98, y));
+      return { performerId, pos: { x, y } };
+    });
+    const before: Record<string, Position> = {};
+    const after: Record<string, Position> = {};
+
+    presetUpdates.forEach((update) => {
+      const previous = frame.positions[update.performerId];
+      if (previous && !positionsEqual(previous, update.pos)) {
+        before[update.performerId] = { ...previous };
+        after[update.performerId] = { ...update.pos };
+      }
+    });
 
     setFrames(prev => prev.map(f => {
       if (f.id === currentFrameId) {
         const newPositions = { ...f.positions };
-        for (let i = 0; i < limit; i++) {
-          // Clamp coordinates to stage bounds (2% to 98%)
-          let { x, y } = coords[i];
-          x = Math.max(2, Math.min(98, x));
-          y = Math.max(2, Math.min(98, y));
-          newPositions[effectiveTargets[i]] = { x, y };
-        }
+        presetUpdates.forEach((update) => {
+          newPositions[update.performerId] = { ...update.pos };
+        });
         return { ...f, positions: newPositions };
       }
       return f;
     }));
+
+    const changedIds = Object.keys(before);
+    if (changedIds.length > 0) {
+      pushUndoAction({
+        type: 'move-performers',
+        frameId: currentFrameId,
+        performerIds: changedIds,
+        before: clonePositionMap(before),
+        after: clonePositionMap(after),
+      });
+    }
   };
 
   const handleApplyAIPlan = (plan: AIChoreoPlan) => {
@@ -3218,7 +3214,7 @@ const App: React.FC = () => {
             className={`compact-only touch-target -ml-2 items-center justify-center rounded-lg ${theme === 'dark' ? 'text-slate-300 hover:bg-slate-800' : 'text-gray-700 hover:bg-gray-100'}`}
             aria-label={sidebarCollapsed ? '打开侧栏' : '关闭侧栏'}
           >
-            {sidebarCollapsed ? <Menu size={22} /> : <X size={22} />}
+            {sidebarCollapsed ? <PanelLeftOpen size={22} /> : <PanelLeftClose size={22} />}
           </button>
           <div className="flex items-center gap-2">
             <img src="./icons/icon-192.png" alt="CosStage" className="w-6 h-6" />
@@ -3235,16 +3231,18 @@ const App: React.FC = () => {
             <BookOpen size={19} />
             <span className="desktop-only">产品指南</span>
           </button>
-          {installPrompt && (
-            <button
-              onClick={handleInstallPwa}
-              className="touch-target flex items-center justify-center gap-1.5 rounded-lg px-2 text-xs text-blue-300 hover:bg-slate-800 hover:text-blue-200"
-              title="安装 CosStage"
-            >
-              <Download size={18} />
-              <span className="desktop-only">安装</span>
-            </button>
-          )}
+          <div
+            className={`flex h-9 items-center gap-1.5 rounded-lg px-2 text-xs font-medium ${
+              theme === 'dark'
+                ? 'border border-slate-700 bg-slate-800/70 text-slate-300'
+                : 'border border-gray-200 bg-gray-100 text-gray-700'
+            }`}
+            title="使用反馈 QQ群：1016629275"
+          >
+            <MessageCircle size={17} />
+            <span className="desktop-only">反馈QQ群</span>
+            <span className="font-mono text-blue-400">1016629275</span>
+          </div>
           <button
             onClick={() => setShowHelp(true)}
             className={`touch-target flex items-center justify-center rounded-lg transition-colors ${theme === 'dark' ? 'hover:bg-slate-800 text-slate-400 hover:text-blue-400' : 'hover:bg-gray-100 text-gray-600 hover:text-blue-600'}`}
@@ -3264,14 +3262,6 @@ const App: React.FC = () => {
           >
             {viewMode === '2d' ? '🎲' : '🔲'}
           </button>
-          <button
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            className={`desktop-only touch-target flex items-center justify-center rounded-lg transition-colors ${theme === 'dark' ? 'hover:bg-slate-800 text-slate-400 hover:text-green-400' : 'hover:bg-gray-100 text-gray-600 hover:text-green-600'}`}
-            title={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
-          >
-            <Maximize2 size={20} />
-          </button>
-
         </div>
       </div>
 
@@ -3370,7 +3360,32 @@ const App: React.FC = () => {
 
         <div className={`min-w-0 flex-1 flex flex-col relative ${theme === 'dark' ? 'bg-black' : 'bg-gray-100'}`}>
           <div className="min-h-0 flex-1 flex flex-col relative">
-          <div className="stage-status absolute top-4 left-4 z-10 pointer-events-none">
+          {!isCompactLayout && (
+            <button
+              type="button"
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              className={`desktop-only group absolute left-3 top-3 z-30 flex h-10 w-10 items-center justify-center rounded-lg border text-xs font-semibold shadow-lg transition-all ${
+                theme === 'dark'
+                  ? 'border-blue-500/50 bg-blue-500/15 text-blue-100 hover:border-blue-400 hover:bg-blue-500/25'
+                  : 'border-blue-300 bg-blue-50 text-blue-700 hover:border-blue-400 hover:bg-blue-100'
+              }`}
+              title={sidebarCollapsed ? '打开左侧栏' : '收起左侧栏'}
+              aria-label={sidebarCollapsed ? '打开左侧栏' : '收起左侧栏'}
+            >
+              {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+              <span
+                className={`pointer-events-none absolute left-full ml-2 whitespace-nowrap rounded-md border px-2 py-1 text-[11px] font-medium opacity-0 shadow-lg transition-opacity group-hover:opacity-100 ${
+                  theme === 'dark'
+                    ? 'border-slate-700 bg-slate-900 text-slate-100'
+                    : 'border-gray-200 bg-white text-gray-700'
+                }`}
+              >
+                {sidebarCollapsed ? '打开侧栏' : '收起侧栏'}
+              </span>
+            </button>
+          )}
+
+          <div className={`stage-status absolute top-4 z-10 pointer-events-none ${isCompactLayout ? 'left-4' : 'left-16'}`}>
             <div className={`backdrop-blur px-4 py-2 rounded-lg border text-sm shadow-xl ${theme === 'dark' ? 'bg-slate-900/90 border-slate-700 text-slate-400' : 'bg-white/90 border-gray-300 text-gray-700'}`}>
               正在编辑：<span className="text-blue-400 font-bold ml-1">{selectedTransitionLabel || frames.find(f => f.id === currentFrameId)?.name || '过渡/GAP'}</span>
               <div className={`text-[10px] mt-1 ${theme === 'dark' ? 'text-slate-500' : 'text-gray-500'}`}>{selectedPerformerIds.length} 人已选中</div>

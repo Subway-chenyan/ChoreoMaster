@@ -292,6 +292,60 @@ When a hook uses an `id` to manage state, assume the state resets on `id` change
 
 ---
 
+## Pointer-End Undo Payloads
+
+**Problem**: A parent component can read stale state when a child calls `setState` and then immediately reports `onDragEnd` in the same pointer event.
+
+```tsx
+// Bad - parent infers "after" from state that may not include the final drag update.
+onPointerMove={(event) => onPositionChange(getUpdates(event))}
+onPointerUp={() => onDragEnd(ids)}
+```
+
+```tsx
+// Good - pass the final payload through the end event.
+const finalUpdates = getUpdates(event);
+onPositionChange(finalUpdates);
+onDragEnd(ids, finalUpdates);
+```
+
+**Rule**: When building undo/redo history for pointer gestures, capture `before` at gesture start and pass the final `after` payload from the gesture end event. Do not infer `after` solely from parent state inside the same event turn.
+
+**Symptoms of this bug**:
+
+- Ctrl/Cmd+Z appears to do nothing immediately after dragging.
+- Undo starts working only after another click or selection change causes a render.
+- Undo actions are missing because `before` and inferred `after` look equal.
+
+---
+
+## Numeric Inputs Need Draft Strings
+
+**Problem**: Controlled number inputs that store only a number cannot represent an empty in-progress value.
+
+```tsx
+// Bad - Number('') becomes 0, so users cannot clear the field before typing.
+<input type="number" value={width} onChange={(event) => setWidth(Number(event.target.value))} />
+```
+
+```tsx
+// Good - keep a draft string and commit only finite numeric values.
+const [draft, setDraft] = useState(String(width));
+<input
+  type="number"
+  value={draft}
+  onChange={(event) => {
+    setDraft(event.target.value);
+    const next = Number(event.target.value);
+    if (event.target.value.trim() && Number.isFinite(next)) setWidth(next);
+  }}
+/>;
+```
+
+**Rule**: For user-editable numeric fields, keep local string state while focused. Allow `''` as a temporary draft, commit only finite numbers, and restore the formatted current value on blur.
+
+---
+
 ## Summary: Quick Reference
 
 | Pitfall                       | Symptom                                       | Fix                            |
@@ -301,6 +355,8 @@ When a hook uses an `id` to manage state, assume the state resets on `id` change
 | State in unmounting component | State lost on navigation                      | Lift state to parent           |
 | Loading on every fetch        | UI flickers                                   | Distinguish initial vs refetch |
 | Hook ID change                | State cleared, race conditions                | Use ref + useEffect            |
+| Pointer-end undo payloads     | Undo missing immediately after drag           | Pass final updates from pointer end |
+| Numeric input draft values    | Empty input becomes 0 or creates odd edits    | Keep draft string while focused |
 
 ---
 

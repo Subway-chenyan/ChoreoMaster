@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { ChevronDown, Minus, Plus } from 'lucide-react';
 
 interface SelectOption<T extends string> {
@@ -25,11 +25,73 @@ interface StepperNumberFieldProps {
   unit?: string;
 }
 
+interface EditableNumberInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type' | 'value' | 'onChange'> {
+  value: number;
+  onChange: (value: number) => void;
+  formatValue?: (value: number) => string;
+  fallbackValue?: number;
+}
+
 function clampValue(value: number, min?: number, max?: number): number {
   let next = value;
   if (typeof min === 'number') next = Math.max(min, next);
   if (typeof max === 'number') next = Math.min(max, next);
   return next;
+}
+
+export function EditableNumberInput({
+  value,
+  onChange,
+  formatValue,
+  fallbackValue = 0,
+  onFocus,
+  onBlur,
+  ...inputProps
+}: EditableNumberInputProps) {
+  const format = (next: number): string => {
+    const finiteValue = Number.isFinite(next) ? next : fallbackValue;
+    return formatValue ? formatValue(finiteValue) : String(finiteValue);
+  };
+  const [draft, setDraft] = useState(format(value));
+  const [isEditing, setIsEditing] = useState(false);
+
+  useEffect(() => {
+    if (!isEditing) {
+      setDraft(format(value));
+    }
+  }, [value, isEditing]);
+
+  return (
+    <input
+      {...inputProps}
+      type="number"
+      value={draft}
+      onFocus={(event) => {
+        setIsEditing(true);
+        onFocus?.(event);
+      }}
+      onChange={(event) => {
+        const nextDraft = event.target.value;
+        setDraft(nextDraft);
+        if (!nextDraft.trim()) return;
+        const nextValue = Number(nextDraft);
+        if (Number.isFinite(nextValue)) {
+          onChange(nextValue);
+        }
+      }}
+      onBlur={(event) => {
+        setIsEditing(false);
+        const nextValue = Number(event.target.value);
+        if (event.target.value.trim() && Number.isFinite(nextValue)) {
+          onChange(nextValue);
+          setDraft(format(nextValue));
+        } else {
+          setDraft(format(value));
+        }
+        onBlur?.(event);
+      }}
+    />
+  );
 }
 
 export function SelectField<T extends string>({
@@ -111,14 +173,14 @@ export function StepperNumberField({
         >
           <Minus size={14} />
         </button>
-        <input
-          type="number"
+        <EditableNumberInput
           min={min}
           max={max}
           step={step}
           inputMode="decimal"
           value={Number.isFinite(value) ? value : min}
-          onChange={(e) => updateValue(parseFloat(e.target.value))}
+          onChange={updateValue}
+          formatValue={(next) => String(Number(next.toFixed(2)))}
           className="min-w-[72px] w-full rounded-lg border border-slate-600 bg-slate-950/70 px-2 py-2.5 text-center text-base font-semibold text-white outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
         />
         <button
