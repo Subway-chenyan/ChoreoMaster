@@ -6,6 +6,7 @@ import { Performer, Position, ExtrudedTextures, StageConfig } from '../types';
 import { mapTo3D, mapTo2D, degToRad, getTotalStageWidth } from '../utils/coordinates';
 import { useDragContext } from './Scene3D';
 import { denormalizePoints } from '../components/prop-editor/PolygonUtils';
+import { getPropCenterFromAnchor } from '../utils/prop-pivot';
 
 function createFaceMaterial(faceTexture?: { dataUrl?: string }, fallbackColor: string = '#475569'): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial({ color: fallbackColor, transparent: true, opacity: 1, side: THREE.FrontSide });
@@ -21,6 +22,7 @@ function createFaceMaterial(faceTexture?: { dataUrl?: string }, fallbackColor: s
 interface Prop3DProps {
   performer: Performer;
   position: Position;
+  rotationDeg?: number;
   platformLift?: number;
   isSelected: boolean;
   onSelect: (id: string) => void;
@@ -33,6 +35,7 @@ interface Prop3DProps {
 const Prop3D: React.FC<Prop3DProps> = ({
   performer,
   position,
+  rotationDeg = 0,
   platformLift = 0,
   isSelected,
   onSelect,
@@ -127,10 +130,12 @@ const Prop3D: React.FC<Prop3DProps> = ({
   }, [isExtruded, extrudeGeometry, dims.width, dims.height, dims.depth]);
 
   // Initialize position on mount or when position changes significantly
+  const centerPosition = getPropCenterFromAnchor(position, rotationDeg, performer, stageConfig);
+
   useEffect(() => {
     const [targetX, targetY, targetZ] = mapTo3D({
-      ...position,
-      z: (position.z || 0) + platformLift,
+      ...centerPosition,
+      z: (centerPosition.z || 0) + platformLift,
     }, stageConfig);
     // Only jump if this is a large change (not smooth animation)
     const current = currentPositionRef.current;
@@ -142,11 +147,11 @@ const Prop3D: React.FC<Prop3DProps> = ({
         meshRef.current.position.copy(targetWithHeight);
       }
     }
-  }, [performer.id, position, platformLift, stageConfig, dims.height]);
+  }, [performer.id, centerPosition.x, centerPosition.y, centerPosition.z, platformLift, stageConfig, dims.height]);
 
   const [targetX, targetY, targetZ] = mapTo3D({
-    ...position,
-    z: (position.z || 0) + platformLift,
+    ...centerPosition,
+    z: (centerPosition.z || 0) + platformLift,
   }, stageConfig);
 
   useFrame(() => {
@@ -157,7 +162,7 @@ const Prop3D: React.FC<Prop3DProps> = ({
       meshRef.current.position.copy(currentPositionRef.current);
 
       // Smoothly interpolate rotation
-      const targetRotation = new THREE.Euler(0, -degToRad(performer.rotation || 0), 0);
+      const targetRotation = new THREE.Euler(0, -degToRad(rotationDeg), 0);
       const targetQ = new THREE.Quaternion().setFromEuler(targetRotation);
       currentRotationRef.current.slerp(targetQ, 0.1);
       meshRef.current.quaternion.copy(currentRotationRef.current);

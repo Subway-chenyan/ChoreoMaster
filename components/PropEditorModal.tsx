@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Box as BoxIcon, Pentagon } from 'lucide-react';
-import { Performer, PropGeometryType, PropCategory, BoxTextures, FaceTexture, ExtrudedTextures } from '../types';
+import { Performer, PropGeometryType, PropCategory, PropRotationPivot, BoxTextures, FaceTexture, ExtrudedTextures } from '../types';
 import { Point } from './prop-editor/PolygonUtils';
 import { ShapeEditor2D } from './prop-editor/ShapeEditor2D';
 import { BoxTextureEditor } from './prop-editor/BoxTextureEditor';
@@ -40,6 +40,7 @@ export const PropEditorModal: React.FC<PropEditorModalProps> = ({
   const [rotation, setRotation] = useState(0);
   const [geometryType, setGeometryType] = useState<PropGeometryType>('box');
   const [propCategory, setPropCategory] = useState<PropCategory>('prop');
+  const [rotationPivot, setRotationPivot] = useState<PropRotationPivot>('center');
 
   // ── Box state ─────────────────────────────────────────────────────────────
 
@@ -70,6 +71,7 @@ export const PropEditorModal: React.FC<PropEditorModalProps> = ({
       setRotation(performer.rotation || 0);
       setGeometryType(performer.propGeometryType || 'box');
       setPropCategory(performer.propCategory || 'prop');
+      setRotationPivot(performer.propCategory === 'platform' ? 'center' : performer.rotationPivot || 'center');
 
       if (performer.propGeometryType === 'extruded') {
         setBoxWidth(1);
@@ -101,6 +103,7 @@ export const PropEditorModal: React.FC<PropEditorModalProps> = ({
       setRotation(0);
       setGeometryType('box');
       setPropCategory('prop');
+      setRotationPivot('center');
       setBoxWidth(1);
       setBoxDepth(1);
       setBoxHeight(1);
@@ -138,6 +141,7 @@ export const PropEditorModal: React.FC<PropEditorModalProps> = ({
       rotation,
       propGeometryType: geometryType,
       propCategory,
+      rotationPivot: propCategory === 'platform' ? 'center' : rotationPivot,
     };
 
     if (geometryType === 'box') {
@@ -162,7 +166,7 @@ export const PropEditorModal: React.FC<PropEditorModalProps> = ({
 
     onSave(updates);
   }, [
-    name, color, rotation, geometryType,
+    name, color, rotation, geometryType, propCategory, rotationPivot,
     boxWidth, boxDepth, boxHeight, boxTextures,
     extWidth, extDepth, extHeight, polygonPoints,
     sideTexture, topTexture, bottomTexture,
@@ -262,6 +266,21 @@ export const PropEditorModal: React.FC<PropEditorModalProps> = ({
                     helperTone={propCategory === 'platform' ? 'accent' : 'default'}
                   />
                 </div>
+                {propCategory === 'prop' && (
+                  <div className="mb-3">
+                    <SelectField<PropRotationPivot>
+                      label="旋转轴"
+                      value={rotationPivot}
+                      onChange={setRotationPivot}
+                      options={[
+                        { value: 'center', label: '中心' },
+                        { value: 'left', label: '左侧铰链' },
+                        { value: 'right', label: '右侧铰链' },
+                      ]}
+                      helperText="左右轴以道具自身方向为准；切换后所有队形和路径会自动换算"
+                    />
+                  </div>
+                )}
                 <div className={`mb-2 grid gap-2 ${useSingleColumnFields ? 'grid-cols-1' : 'grid-cols-2'}`}>
                   <StepperNumberField
                     label="长度"

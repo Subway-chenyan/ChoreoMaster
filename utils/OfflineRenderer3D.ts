@@ -3,6 +3,7 @@ import type { Performer, Position, StageConfig, LEDContent } from '../types';
 import { mapTo3D, degToRad, getTotalStageWidth, getWingWidth } from './coordinates';
 import { denormalizePoints } from '../components/prop-editor/PolygonUtils';
 import { buildPlatformOccupancy, isPlatformProp } from './platforms';
+import { getPropCenterFromAnchor } from './prop-pivot';
 import { createCenteredStageGridMarks, STAGE_THIRD_POSITIONS } from './stage-grid';
 
 export type CameraAngle = 'judge' | 'overhead';
@@ -11,7 +12,12 @@ interface OfflineSceneResult {
   renderer: THREE.WebGLRenderer;
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
-  updateAtTime: (timeMs: number, positions: Record<string, Position>, hiddenGroupIds?: string[]) => void;
+  updateAtTime: (
+    timeMs: number,
+    positions: Record<string, Position>,
+    rotations?: Record<string, number>,
+    hiddenGroupIds?: string[],
+  ) => void;
   /** Pre-capture LED video frames for fast offline export. Call before the render loop. */
   prerenderLEDVideo: (inPointMs: number, outPointMs: number, fps?: number) => Promise<void>;
   dispose: () => void;
@@ -506,7 +512,12 @@ export function createOfflineScene(
    * Positions are set directly (no lerp interpolation) for deterministic frame output.
    * If frame cache exists, uses cached frames (fast). Otherwise falls back to direct seek.
    */
-  function updateAtTime(timeMs: number, positions: Record<string, Position>, hiddenGroupIds: string[] = []): void {
+  function updateAtTime(
+    timeMs: number,
+    positions: Record<string, Position>,
+    rotations: Record<string, number> = {},
+    hiddenGroupIds: string[] = [],
+  ): void {
     const visiblePerformers = performers.filter((p) => !p.groupId || !hiddenGroupIds.includes(p.groupId));
     const platformOccupancy = buildPlatformOccupancy(visiblePerformers, positions, stageConfig);
 
@@ -521,9 +532,13 @@ export function createOfflineScene(
       }
 
       mesh.visible = true;
+      const rotation = rotations[p.id] ?? p.rotation ?? 0;
+      const renderPosition = p.type === 'prop'
+        ? getPropCenterFromAnchor(pos, rotation, p, stageConfig)
+        : pos;
       const [x3d, y3d, z3d] = mapTo3D({
-        ...pos,
-        z: (pos.z || 0) + (platformOccupancy.entityLiftById[p.id] ?? 0),
+        ...renderPosition,
+        z: (renderPosition.z || 0) + (platformOccupancy.entityLiftById[p.id] ?? 0),
       }, stageConfig);
 
       if (p.type === 'prop') {
@@ -534,7 +549,7 @@ export function createOfflineScene(
       }
 
       // Rotation
-      mesh.rotation.y = -degToRad(p.rotation || 0);
+      mesh.rotation.y = -degToRad(rotation);
     });
 
     // Update LED image texture

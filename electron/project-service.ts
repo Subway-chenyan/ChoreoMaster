@@ -3,6 +3,7 @@ import * as path from 'path';
 import { pipeline } from 'stream/promises';
 import * as archiver from 'archiver';
 import unzipper from 'unzipper';
+import { normalizeFrames, normalizePerformers, normalizeTransitions } from './project-contract.js';
 import type {
   AudioMarker,
   FaceTexture,
@@ -104,11 +105,12 @@ function parseProjectDocument(value: unknown, fallbackName: string): ProjectDocu
     updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : undefined,
     musicName: typeof value.musicName === 'string' ? value.musicName : null,
     musicAsset: typeof value.musicAsset === 'string' ? value.musicAsset : null,
-    performers: value.performers as Performer[],
+    performers: normalizePerformers(value.performers),
     performerGroups: Array.isArray(value.performerGroups)
       ? value.performerGroups as ProjectDocument['performerGroups']
       : [],
-    frames: value.frames as ProjectDocument['frames'],
+    frames: normalizeFrames(value.frames),
+    transitions: normalizeTransitions(value.transitions),
     audioMarkers: parseAudioMarkers(value.audioMarkers),
     stageConfig,
   };

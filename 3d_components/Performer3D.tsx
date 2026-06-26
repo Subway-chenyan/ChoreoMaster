@@ -9,6 +9,7 @@ import { useDragContext } from './Scene3D';
 interface Performer3DProps {
   performer: Performer;
   position: Position;
+  rotationDeg?: number;
   platformLift?: number;
   isSelected: boolean;
   onSelect: (id: string) => void;
@@ -21,6 +22,7 @@ interface Performer3DProps {
 const Performer3D: React.FC<Performer3DProps> = ({
   performer,
   position,
+  rotationDeg = 0,
   platformLift = 0,
   isSelected,
   onSelect,
@@ -77,7 +79,7 @@ const Performer3D: React.FC<Performer3DProps> = ({
       meshRef.current.position.copy(currentPositionRef.current);
 
       // Smoothly interpolate rotation
-      const targetRotation = new THREE.Euler(0, -degToRad(performer.rotation || 0), 0);
+      const targetRotation = new THREE.Euler(0, -degToRad(rotationDeg), 0);
       const targetQ = new THREE.Quaternion().setFromEuler(targetRotation);
       currentRotationRef.current.slerp(targetQ, 0.1);
       meshRef.current.quaternion.copy(currentRotationRef.current);

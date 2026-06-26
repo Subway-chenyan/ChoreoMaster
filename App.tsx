@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   AudioMarker,
   Frame,
+  MotionControlPoint,
   Performer,
   Position,
   PerformerShape,
@@ -9,13 +10,20 @@ import {
   PerformerType,
   AIConfig,
   AIChoreoPlan,
+  ObjectMotion,
   ProjectDocument,
   ProjectLoadResult,
+  PropRotationPivot,
+  TransitionSegment,
+  normalizeFrames,
+  normalizePerformers,
+  normalizeTransitions,
 } from './types';
 import { Sidebar } from './components/Sidebar';
 import { Stage } from './components/Stage';
 import Stage3D from './components/Stage3D';
 import { Timeline } from './components/Timeline';
+import { EditableNumberInput } from './components/FormControls';
 import { HelpModal } from './components/HelpModal';
 import { ProductGuide } from './components/ProductGuide';
 import { useTheme } from './contexts/ThemeContext';
@@ -32,13 +40,22 @@ import {
 } from './utils/stage-grid';
 import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, ChevronDown, ChevronUp, PanelLeftClose, PanelLeftOpen, X, GripHorizontal, SlidersHorizontal, BookOpen, MessageCircle } from 'lucide-react';
 import { StageConfig } from './types';
+import {
+  evaluateSceneStateAtTime,
+  getGapSegments,
+  getGapSelectionId,
+  getDefaultBezierControlPoints,
+  getSortedFrames,
+} from './utils/transitions';
+import { getPropCenterFromAnchor, migratePropAnchor } from './utils/prop-pivot';
 
 const DEFAULT_FRAME: Frame = {
   id: 'start-frame',
   name: 'Opening',
   startTime: 0,
   duration: 2000,
-  positions: {}
+  positions: {},
+  rotations: {},
 };
 
 const WINDOWS_DESKTOP_DOWNLOAD_URL = 'https://beat.cosdrama.cn/downloads/CosStage-Setup-x64.exe';
@@ -100,7 +117,15 @@ type PasteFrameUndoAction = {
   previousCurrentFrameId: string | null;
 };
 
-type UndoAction = MovePerformersUndoAction | PastePerformersUndoAction | PasteFrameUndoAction;
+type RotatePerformerUndoAction = {
+  type: 'rotate-performer';
+  frameId: string;
+  performerId: string;
+  before: number;
+  after: number;
+};
+
+type UndoAction = MovePerformersUndoAction | PastePerformersUndoAction | PasteFrameUndoAction | RotatePerformerUndoAction;
 
 const getSupportedVideoEncoderConfig = async (
   width: number,
@@ -145,42 +170,82 @@ type MediaRecorderExportFormat = {
   description: string;
 };
 
-const getMediaRecorderExportFormat = (): MediaRecorderExportFormat => {
-  const candidates: MediaRecorderExportFormat[] = [
-    {
-      mimeType: 'video/mp4;codecs=avc1.42001E,mp4a.40.2',
-      extension: 'mp4',
-      description: 'MP4 video',
-    },
-    {
-      mimeType: 'video/mp4;codecs=avc1.42001E',
-      extension: 'mp4',
-      description: 'MP4 video',
-    },
-    {
-      mimeType: 'video/mp4',
-      extension: 'mp4',
-      description: 'MP4 video',
-    },
-    {
-      mimeType: 'video/webm;codecs=vp9,opus',
-      extension: 'webm',
-      description: 'WebM video',
-    },
-    {
-      mimeType: 'video/webm;codecs=vp8,opus',
-      extension: 'webm',
-      description: 'WebM video',
-    },
-    {
-      mimeType: 'video/webm',
-      extension: 'webm',
-      description: 'WebM video',
-    },
-  ];
+const MEDIA_RECORDER_EXPORT_FORMATS: MediaRecorderExportFormat[] = [
+  {
+    mimeType: 'video/mp4;codecs=avc1.42001E,mp4a.40.2',
+    extension: 'mp4',
+    description: 'MP4 video',
+  },
+  {
+    mimeType: 'video/mp4;codecs=avc1.42001E',
+    extension: 'mp4',
+    description: 'MP4 video',
+  },
+  {
+    mimeType: 'video/mp4',
+    extension: 'mp4',
+    description: 'MP4 video',
+  },
+  {
+    mimeType: 'video/webm;codecs=vp9,opus',
+    extension: 'webm',
+    description: 'WebM video',
+  },
+  {
+    mimeType: 'video/webm;codecs=vp8,opus',
+    extension: 'webm',
+    description: 'WebM video',
+  },
+  {
+    mimeType: 'video/webm',
+    extension: 'webm',
+    description: 'WebM video',
+  },
+];
 
-  return candidates.find(({ mimeType }) => MediaRecorder.isTypeSupported(mimeType))
-    ?? candidates[candidates.length - 1];
+const getMediaRecorderExportFormats = (): MediaRecorderExportFormat[] => {
+  const supportedFormats = MEDIA_RECORDER_EXPORT_FORMATS.filter(({ mimeType }) => MediaRecorder.isTypeSupported(mimeType));
+  return supportedFormats.length > 0
+    ? supportedFormats
+    : [MEDIA_RECORDER_EXPORT_FORMATS[MEDIA_RECORDER_EXPORT_FORMATS.length - 1]];
+};
+
+const getMediaRecorderExportFormat = (): MediaRecorderExportFormat => {
+  return getMediaRecorderExportFormats()[0];
+};
+
+type StartedMediaRecorder = {
+  recorder: MediaRecorder;
+  format: MediaRecorderExportFormat;
+};
+
+const startMediaRecorderWithFallback = (
+  stream: MediaStream,
+  formats: MediaRecorderExportFormat[],
+  timesliceMs: number,
+): StartedMediaRecorder => {
+  let lastError: unknown = null;
+  const bitrateOptions: Array<number | undefined> = [5_000_000, 2_500_000, undefined];
+
+  for (const format of formats) {
+    for (const videoBitsPerSecond of bitrateOptions) {
+      try {
+        const options: MediaRecorderOptions = videoBitsPerSecond == null
+          ? { mimeType: format.mimeType }
+          : { mimeType: format.mimeType, videoBitsPerSecond };
+        const recorder = new MediaRecorder(stream, options);
+        recorder.start(timesliceMs);
+        return { recorder, format };
+      } catch (error) {
+        lastError = error;
+        console.warn('MediaRecorder configuration failed:', { mimeType: format.mimeType, videoBitsPerSecond, error });
+      }
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error('MediaRecorder 没有可用的录制编码配置');
 };
 
 const App: React.FC = () => {
@@ -188,7 +253,10 @@ const App: React.FC = () => {
   const [performers, setPerformers] = useState<Performer[]>([]);
   const [performerGroups, setPerformerGroups] = useState<PerformerGroup[]>([]);
   const [frames, setFrames] = useState<Frame[]>([DEFAULT_FRAME]);
+  const [transitions, setTransitions] = useState<TransitionSegment[]>([]);
   const [currentFrameId, setCurrentFrameId] = useState<string>(DEFAULT_FRAME.id);
+  const [selectedTransitionId, setSelectedTransitionId] = useState<string | null>(null);
+  const [selectedTransitionPerformerId, setSelectedTransitionPerformerId] = useState<string | null>(null);
   const [selectedPerformerIds, setSelectedPerformerIds] = useState<string[]>([]);
   const [musicUrl, setMusicUrl] = useState<string | null>(null);
   const [audioBuffer, setAudioBuffer] = useState<AudioBuffer | null>(null);
@@ -228,6 +296,11 @@ const App: React.FC = () => {
     frameId: string;
     performerIds: string[];
     before: Record<string, Position>;
+  } | null>(null);
+  const pendingRotationUndoRef = useRef<{
+    frameId: string;
+    performerId: string;
+    before: number;
   } | null>(null);
 
   useEffect(() => {
@@ -314,6 +387,28 @@ const App: React.FC = () => {
     };
   };
 
+  const buildProjectDocument = useCallback((name: string = ''): ProjectDocument => ({
+    version: '3.0',
+    name,
+    performers,
+    performerGroups,
+    frames,
+    transitions,
+    audioMarkers,
+    stageConfig,
+    musicName,
+    musicAsset,
+  }), [
+    performers,
+    performerGroups,
+    frames,
+    transitions,
+    audioMarkers,
+    stageConfig,
+    musicName,
+    musicAsset,
+  ]);
+
   // Initialize Audio Context
   useEffect(() => {
     audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -327,135 +422,19 @@ const App: React.FC = () => {
     isPlayingRef.current = isPlaying;
   }, [isPlaying]);
 
-  // Sort frames by start time helper
-  const getSortedFrames = useCallback((currentFrames: Frame[]) => {
-    return [...currentFrames].sort((a, b) => a.startTime - b.startTime);
-  }, []);
+  const computeSceneStateAtTime = useCallback((timeMs: number) => (
+    evaluateSceneStateAtTime(timeMs, frames, performers, transitions)
+  ), [frames, performers, transitions]);
 
-  // Calculated: Interpolated Positions for Current Time
-  const currentPositions = useCallback(() => {
-    const sortedFrames = getSortedFrames(frames);
+  const currentSceneState = useMemo(() => (
+    computeSceneStateAtTime(currentTime)
+  ), [computeSceneStateAtTime, currentTime]);
 
-    // 1. Check if we are inside a specific frame (HOLD phase)
-    const activeFrame = sortedFrames.find(f => currentTime >= f.startTime && currentTime < f.startTime + f.duration);
+  const activeHiddenGroupIds = currentSceneState.hiddenGroupIds;
 
-    if (activeFrame) {
-      return activeFrame.positions;
-    }
-
-    // 2. If not in a frame, we are in a GAP (TRANSITION phase)
-    // Find the frame just before current time and the frame just after
-    const prevFrame = [...sortedFrames].reverse().find(f => f.startTime + f.duration <= currentTime);
-    const nextFrame = sortedFrames.find(f => f.startTime > currentTime);
-
-    if (prevFrame && nextFrame) {
-      // Interpolate between prev and next
-      const gapStart = prevFrame.startTime + prevFrame.duration;
-      const gapEnd = nextFrame.startTime;
-      const totalGap = gapEnd - gapStart;
-
-      if (totalGap <= 0) return prevFrame.positions;
-
-      const progress = (currentTime - gapStart) / totalGap;
-      // Ease in-out
-      const ease = progress < .5 ? 2 * progress * progress : -1 + (4 - 2 * progress) * progress;
-
-      const interpolated: Record<string, Position> = {};
-      performers.forEach(p => {
-        // Only interpolate if performer exists in BOTH frames (Entrance/Exit logic)
-        const start = prevFrame.positions[p.id];
-        const end = nextFrame.positions[p.id];
-
-        if (start && end) {
-          const includeZ = start.z !== undefined || end.z !== undefined;
-          const interpolatedZ = (start.z ?? 0) + ((end.z ?? 0) - (start.z ?? 0)) * ease;
-          interpolated[p.id] = {
-            x: start.x + (end.x - start.x) * ease,
-            y: start.y + (end.y - start.y) * ease,
-            ...(includeZ ? { z: interpolatedZ } : {}),
-          };
-        }
-        // If in one but not other, they do not exist during transition (clean cut)
-      });
-      return interpolated;
-    }
-
-    // 3. Before first frame or after last frame
-    if (sortedFrames.length > 0) {
-      if (currentTime < sortedFrames[0].startTime) {
-        // Before first frame: Show first frame positions (static)
-        return sortedFrames[0].positions;
-      }
-      // After last frame
-      return sortedFrames[sortedFrames.length - 1].positions;
-    }
-
-    return {};
-
-  }, [currentTime, frames, performers, getSortedFrames]);
-
-  // Calculate Active Hidden Groups based on Current Time (for playback syncing)
-  const activeHiddenGroupIds = useMemo(() => {
-    const sortedFrames = getSortedFrames(frames);
-
-    // 1. Inside a frame
-    const activeFrame = sortedFrames.find(f => currentTime >= f.startTime && currentTime < f.startTime + f.duration);
-    if (activeFrame) {
-      return activeFrame.hiddenGroupIds || [];
-    }
-
-    // 2. In a GAP (Transition) -> Use Previous Frame's settings
-    const prevFrame = [...sortedFrames].reverse().find(f => f.startTime + f.duration <= currentTime);
-    if (prevFrame) {
-      return prevFrame.hiddenGroupIds || [];
-    }
-
-    // 3. Before first frame -> Use first frame's settings (if exists) 
-    // This is optional, but keeps consistency if waiting to start
-    if (sortedFrames.length > 0 && currentTime < sortedFrames[0].startTime) {
-      return sortedFrames[0].hiddenGroupIds || [];
-    }
-
-    return [];
-  }, [currentTime, frames, getSortedFrames]);
-
-  const computePositionsAtTime = useCallback((timeMs: number) => {
-    const sortedFrames = getSortedFrames(frames);
-    const activeFrame = sortedFrames.find(f => timeMs >= f.startTime && timeMs < f.startTime + f.duration);
-    if (activeFrame) {
-      return activeFrame.positions;
-    }
-    const prevFrame = [...sortedFrames].reverse().find(f => f.startTime + f.duration <= timeMs);
-    const nextFrame = sortedFrames.find(f => f.startTime > timeMs);
-    if (prevFrame && nextFrame) {
-      const gapStart = prevFrame.startTime + prevFrame.duration;
-      const gapEnd = nextFrame.startTime;
-      const totalGap = gapEnd - gapStart;
-      if (totalGap <= 0) return prevFrame.positions;
-      const progress = (timeMs - gapStart) / totalGap;
-      const ease = progress < .5 ? 2 * progress * progress : -1 + (4 - 2 * progress) * progress;
-      const interpolated: Record<string, Position> = {};
-      performers.forEach(p => {
-        const start = prevFrame.positions[p.id];
-        const end = nextFrame.positions[p.id];
-        if (start && end) {
-          const includeZ = start.z !== undefined || end.z !== undefined;
-          const interpolatedZ = (start.z ?? 0) + ((end.z ?? 0) - (start.z ?? 0)) * ease;
-          interpolated[p.id] = {
-            x: start.x + (end.x - start.x) * ease,
-            y: start.y + (end.y - start.y) * ease,
-            ...(includeZ ? { z: interpolatedZ } : {}),
-          };
-        }
-      });
-      return interpolated;
-    }
-    if (sortedFrames.length > 0) {
-      if (timeMs < sortedFrames[0].startTime) return sortedFrames[0].positions;
-      return sortedFrames[sortedFrames.length - 1].positions;
-    }
-    return {};
-  }, [frames, performers, getSortedFrames]);
+  const computePositionsAtTime = useCallback((timeMs: number) => (
+    computeSceneStateAtTime(timeMs).positions
+  ), [computeSceneStateAtTime]);
 
   const clonePositionMap = (positionsMap: Record<string, Position>): Record<string, Position> => (
     Object.fromEntries(
@@ -477,13 +456,15 @@ const App: React.FC = () => {
     setFrames((prev) => prev.map((frame) => {
       let changed = false;
       const nextPositions = { ...frame.positions } as Record<string, Position>;
+      const nextRotations = { ...(frame.rotations ?? {}) };
       Object.keys(nextPositions).forEach((performerId) => {
         if (idSet.has(performerId)) {
           delete nextPositions[performerId];
+          delete nextRotations[performerId];
           changed = true;
         }
       });
-      return changed ? { ...frame, positions: nextPositions } : frame;
+      return changed ? { ...frame, positions: nextPositions, rotations: nextRotations } : frame;
     }));
   }, []);
 
@@ -504,7 +485,8 @@ const App: React.FC = () => {
     name: overrides?.name ?? source.name,
     startTime: overrides?.startTime ?? source.startTime,
     duration: overrides?.duration ?? source.duration,
-    positions: JSON.parse(JSON.stringify(overrides?.positions ?? source.positions))
+    positions: JSON.parse(JSON.stringify(overrides?.positions ?? source.positions)),
+    rotations: { ...(overrides?.rotations ?? source.rotations ?? {}) },
   }), []);
 
   const writeBlobToElectronPath = useCallback(async (filePath: string, blob: Blob) => {
@@ -676,7 +658,8 @@ const App: React.FC = () => {
       }
       return {
         ...f,
-        positions: { ...f.positions, [newPerformer.id]: { x: 50, y: 50 } }
+        positions: { ...f.positions, [newPerformer.id]: { x: 50, y: 50 } },
+        rotations: { ...(f.rotations ?? {}), [newPerformer.id]: newPerformer.rotation ?? 0 },
       };
     }));
   };
@@ -684,10 +667,60 @@ const App: React.FC = () => {
   const handleRemovePerformer = (id: string) => {
     setPerformers(performers.filter(p => p.id !== id));
     setSelectedPerformerIds(selectedPerformerIds.filter(pid => pid !== id));
+    setTransitions((prev) => prev.map((transition) => {
+      if (!transition.objectMotions[id]) return transition;
+      const nextObjectMotions = { ...transition.objectMotions };
+      delete nextObjectMotions[id];
+      return { ...transition, objectMotions: nextObjectMotions };
+    }));
   };
 
   const handleUpdatePerformer = (id: string, updates: Partial<Performer>) => {
-    setPerformers(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
+    const performer = performers.find((item) => item.id === id);
+    if (!performer) return;
+    const oldPivot = performer.rotationPivot ?? 'center';
+    const requestedPivot = updates.rotationPivot ?? oldPivot;
+    const newPivot: PropRotationPivot = performer.propCategory === 'platform' || updates.propCategory === 'platform'
+      ? 'center'
+      : requestedPivot;
+
+    if (oldPivot !== newPivot && performer.type === 'prop') {
+      const nextPerformer = { ...performer, ...updates, rotationPivot: newPivot };
+      const frameById = new Map(frames.map((frame) => [frame.id, frame]));
+      setFrames((previousFrames) => previousFrames.map((frame) => {
+        const position = frame.positions[id];
+        if (!position) return frame;
+        const rotation = frame.rotations?.[id] ?? performer.rotation ?? 0;
+        return {
+          ...frame,
+          positions: {
+            ...frame.positions,
+            [id]: migratePropAnchor(position, rotation, nextPerformer, oldPivot, newPivot, stageConfig),
+          },
+        };
+      }));
+      setTransitions((previousTransitions) => previousTransitions.map((transition) => {
+        const motion = transition.objectMotions[id];
+        if (!motion?.controlPoints?.length) return transition;
+        const fromFrame = frameById.get(transition.fromFrameId);
+        const toFrame = frameById.get(transition.toFrameId);
+        const startRotation = fromFrame?.rotations?.[id] ?? performer.rotation ?? 0;
+        const endRotation = toFrame?.rotations?.[id] ?? performer.rotation ?? 0;
+        const controlPoints = motion.controlPoints.map((point, index, points) => {
+          const progress = (index + 1) / (points.length + 1);
+          const rotation = startRotation + ((endRotation - startRotation) * progress);
+          return migratePropAnchor(point, rotation, nextPerformer, oldPivot, newPivot, stageConfig);
+        });
+        return {
+          ...transition,
+          objectMotions: {
+            ...transition.objectMotions,
+            [id]: { ...motion, controlPoints },
+          },
+        };
+      }));
+    }
+    setPerformers(prev => prev.map(p => p.id === id ? { ...p, ...updates, rotationPivot: newPivot } : p));
   };
 
   // --- Group Management ---
@@ -840,6 +873,7 @@ const App: React.FC = () => {
     setPerformers(data.performers);
     setPerformerGroups(data.performerGroups);
     setFrames(data.frames);
+    setTransitions(data.transitions || []);
     setAudioMarkers(data.audioMarkers || []);
     setMusicName(data.musicName || null);
     setMusicAsset(data.musicAsset || null);
@@ -849,6 +883,8 @@ const App: React.FC = () => {
     setAudioBuffer(null);
     setMusicUrl(audioUrl);
     setSelectedPerformerIds([]);
+    setSelectedTransitionId(null);
+    setSelectedTransitionPerformerId(null);
     if (data.frames.length > 0) {
       setCurrentFrameId(data.frames[0].id);
     }
@@ -869,6 +905,7 @@ const App: React.FC = () => {
       performers: data.performers,
       performerGroups: data.performerGroups,
       frames: data.frames,
+      transitions: data.transitions || [],
       audioMarkers: data.audioMarkers || [],
       stageConfig: data.stageConfig,
       musicName: data.musicName || null,
@@ -884,12 +921,13 @@ const App: React.FC = () => {
       performers,
       performerGroups,
       frames,
+      transitions,
       audioMarkers,
       stageConfig,
       musicName,
       musicAsset,
     });
-  }, [performers, performerGroups, frames, audioMarkers, stageConfig, musicName, musicAsset]);
+  }, [performers, performerGroups, frames, transitions, audioMarkers, stageConfig, musicName, musicAsset]);
 
   // Track changes to project
   useEffect(() => {
@@ -897,7 +935,7 @@ const App: React.FC = () => {
       const currentState = getProjectStateString();
       setProjectHasChanges(currentState !== lastSavedState);
     }
-  }, [performers, performerGroups, frames, audioMarkers, stageConfig, musicName, musicAsset, currentProjectId, lastSavedState, getProjectStateString]);
+  }, [performers, performerGroups, frames, transitions, audioMarkers, stageConfig, musicName, musicAsset, currentProjectId, lastSavedState, getProjectStateString]);
 
   // Create a new project
   const handleCreateProject = async (name: string): Promise<string> => {
@@ -906,17 +944,7 @@ const App: React.FC = () => {
     // Auto-save current project before creating new one
     if (currentProjectId && projectHasChanges) {
       try {
-        const projectData: ProjectDocument = {
-          version: '3.0',
-          name: '',
-          performers,
-          performerGroups,
-          frames,
-          audioMarkers,
-          stageConfig,
-          musicName,
-          musicAsset,
-        };
+        const projectData = buildProjectDocument();
         await window.electronAPI.project.save(currentProjectId, projectData);
         console.log('Auto-saved current project before creating new');
       } catch (error) {
@@ -939,13 +967,17 @@ const App: React.FC = () => {
         startTime: 0,
         duration: 2000,
         positions: {},
+        rotations: {},
       }];
       const newStageConfig = createDefaultStageConfig();
       setPerformers([]);
       setPerformerGroups([]);
       setFrames(newFrames);
+      setTransitions([]);
       setAudioMarkers([]);
       setCurrentFrameId(newFrameId);
+      setSelectedTransitionId(null);
+      setSelectedTransitionPerformerId(null);
       setStageConfig(newStageConfig);
       setMediaCache({});
       setMusicName(null);
@@ -960,6 +992,7 @@ const App: React.FC = () => {
         performers: [],
         performerGroups: [],
         frames: newFrames,
+        transitions: [],
         audioMarkers: [],
         stageConfig: newStageConfig,
         musicName: null,
@@ -980,17 +1013,7 @@ const App: React.FC = () => {
     // Auto-save current project before switching
     if (currentProjectId && projectHasChanges) {
       try {
-        const projectData: ProjectDocument = {
-          version: '3.0',
-          name: '',
-          performers,
-          performerGroups,
-          frames,
-          audioMarkers,
-          stageConfig,
-          musicName,
-          musicAsset,
-        };
+        const projectData = buildProjectDocument();
         await window.electronAPI.project.save(currentProjectId, projectData);
       } catch (error) {
         console.error('Failed to auto-save before creating template project:', error);
@@ -1007,9 +1030,10 @@ const App: React.FC = () => {
       const saveData: ProjectDocument = {
         version: '3.0',
         name: '',
-        performers: templateData.performers || [],
+        performers: normalizePerformers(templateData.performers),
         performerGroups: templateData.performerGroups || [],
-        frames: templateData.frames || [],
+        frames: normalizeFrames(templateData.frames),
+        transitions: normalizeTransitions(templateData.transitions),
         audioMarkers: normalizeAudioMarkers(templateData.audioMarkers),
         stageConfig: templateData.stageConfig || stageConfig,
         musicName: null,
@@ -1024,9 +1048,12 @@ const App: React.FC = () => {
       setPerformers(saveData.performers);
       setPerformerGroups(saveData.performerGroups);
       setFrames(saveData.frames);
+      setTransitions(saveData.transitions || []);
       setAudioMarkers(saveData.audioMarkers || []);
       setStageConfig(saveData.stageConfig);
       setCurrentFrameId(saveData.frames[0]?.id || '');
+      setSelectedTransitionId(null);
+      setSelectedTransitionPerformerId(null);
       setMusicName(null);
       setMusicAsset(null);
       setAudioBuffer(null);
@@ -1038,6 +1065,7 @@ const App: React.FC = () => {
         performers: saveData.performers,
         performerGroups: saveData.performerGroups,
         frames: saveData.frames,
+        transitions: saveData.transitions || [],
         audioMarkers: saveData.audioMarkers || [],
         stageConfig: saveData.stageConfig,
         musicName: null,
@@ -1053,17 +1081,21 @@ const App: React.FC = () => {
   };
 
   const handleLoadTemplate = (templateData: any) => {
-    const performers = templateData.performers || [];
+    const performers = normalizePerformers(templateData.performers);
     const groups = templateData.performerGroups || [];
-    const frames = templateData.frames || [];
+    const frames = normalizeFrames(templateData.frames);
+    const transitions = normalizeTransitions(templateData.transitions);
     const config = templateData.stageConfig || stageConfig;
 
     setPerformers(performers);
     setPerformerGroups(groups);
     setFrames(frames);
+    setTransitions(transitions);
     setAudioMarkers(normalizeAudioMarkers(templateData.audioMarkers));
     setStageConfig(config);
     setCurrentFrameId(frames[0]?.id || '');
+    setSelectedTransitionId(null);
+    setSelectedTransitionPerformerId(null);
     setMusicName(null);
     setMusicAsset(null);
     setAudioBuffer(null);
@@ -1080,17 +1112,7 @@ const App: React.FC = () => {
     // Auto-save current project before switching
     if (currentProjectId && projectHasChanges) {
       try {
-        const projectData: ProjectDocument = {
-          version: '3.0',
-          name: '',
-          performers,
-          performerGroups,
-          frames,
-          audioMarkers,
-          stageConfig,
-          musicName,
-          musicAsset,
-        };
+        const projectData = buildProjectDocument();
         await window.electronAPI.project.save(currentProjectId, projectData);
         console.log('Auto-saved current project before switching');
       } catch (error) {
@@ -1110,30 +1132,22 @@ const App: React.FC = () => {
   };
 
   // Save current project
-  const handleSaveProject = async (): Promise<boolean> => {
+  const handleSaveProject = useCallback(async (): Promise<boolean> => {
     if (!window.electronAPI?.isElectron || !currentProjectId) return false;
     
     try {
-      const projectData: ProjectDocument = {
-        version: '3.0',
-        name: '', // Will be preserved from existing project.json
-        performers,
-        performerGroups,
-        frames,
-        audioMarkers,
-        stageConfig,
-        musicName,
-        musicAsset,
-      };
+      const projectData = buildProjectDocument();
       
       const saved = await window.electronAPI.project.save(currentProjectId, projectData);
       setPerformers(saved.data.performers);
+      setTransitions(saved.data.transitions || []);
       setAudioMarkers(saved.data.audioMarkers || []);
       setMediaCache(saved.mediaUrls);
       setLastSavedState(JSON.stringify({
         performers: saved.data.performers,
         performerGroups: saved.data.performerGroups,
         frames: saved.data.frames,
+        transitions: saved.data.transitions || [],
         audioMarkers: saved.data.audioMarkers || [],
         stageConfig: saved.data.stageConfig,
         musicName: saved.data.musicName || null,
@@ -1146,7 +1160,7 @@ const App: React.FC = () => {
       setProjectMessages(['项目保存失败，请检查磁盘空间和目录权限']);
       return false;
     }
-  };
+  }, [buildProjectDocument, currentProjectId]);
 
   const handleImportProjectPackage = async () => {
     if (!window.electronAPI?.isElectron) return;
@@ -1209,8 +1223,10 @@ const App: React.FC = () => {
     setFrames(prev => prev.map(f => {
       if (f.id !== currentFrameId) return f;
       const newPositions = { ...f.positions } as Record<string, Position>;
+      const newRotations = { ...(f.rotations ?? {}) };
       Object.keys(newPositions).forEach(pid => { if (ids.has(pid)) delete (newPositions as any)[pid]; });
-      return { ...f, positions: newPositions };
+      ids.forEach((id) => delete newRotations[id]);
+      return { ...f, positions: newPositions, rotations: newRotations };
     }));
     setSelectedPerformerIds([]);
   };
@@ -1221,9 +1237,11 @@ const App: React.FC = () => {
       return prevFrames.map(f => {
         if (f.id === currentFrameId) {
           const newPositions = { ...f.positions };
+          const newRotations = { ...(f.rotations ?? {}) };
           if (newPositions[performerId]) {
             // Remove from this frame
             delete newPositions[performerId];
+            delete newRotations[performerId];
           } else {
             // Add to this frame. Try to find previous frame's position for continuity, or default.
             const sorted = getSortedFrames(prevFrames);
@@ -1231,8 +1249,10 @@ const App: React.FC = () => {
 
             const initialPos = prevFrame?.positions[performerId] || { x: 50, y: 50 };
             newPositions[performerId] = initialPos;
+            const performer = performers.find((item) => item.id === performerId);
+            newRotations[performerId] = prevFrame?.rotations?.[performerId] ?? performer?.rotation ?? 0;
           }
-          return { ...f, positions: newPositions };
+          return { ...f, positions: newPositions, rotations: newRotations };
         }
         return f;
       });
@@ -1256,6 +1276,292 @@ const App: React.FC = () => {
       return f;
     }));
   };
+
+  const selectedTransition = useMemo(() => {
+    if (!selectedTransitionId) return null;
+    const existing = transitions.find((transition) => transition.id === selectedTransitionId);
+    if (existing) return existing;
+    const gap = getGapSegments(frames, transitions)
+      .find((item) => getGapSelectionId(item) === selectedTransitionId);
+    if (!gap?.prevId) return null;
+    return {
+      id: gap.id,
+      fromFrameId: gap.prevId,
+      toFrameId: gap.nextId,
+      duration: gap.duration,
+      objectMotions: {},
+    };
+  }, [frames, selectedTransitionId, transitions]);
+
+  const selectedTransitionFrames = useMemo(() => {
+    if (!selectedTransition) return null;
+    const fromFrame = frames.find((frame) => frame.id === selectedTransition.fromFrameId);
+    const toFrame = frames.find((frame) => frame.id === selectedTransition.toFrameId);
+    if (!fromFrame || !toFrame) return null;
+    return { fromFrame, toFrame };
+  }, [frames, selectedTransition]);
+
+  const transitionSelectablePerformers = useMemo(() => {
+    if (!selectedTransitionFrames) return [];
+    return performers.filter((performer) => (
+      selectedTransitionFrames.fromFrame.positions[performer.id] !== undefined
+      && selectedTransitionFrames.toFrame.positions[performer.id] !== undefined
+    ));
+  }, [performers, selectedTransitionFrames]);
+
+  useEffect(() => {
+    if (transitionSelectablePerformers.length === 0) {
+      setSelectedTransitionPerformerId(null);
+      return;
+    }
+    setSelectedTransitionPerformerId((current) => (
+      current && transitionSelectablePerformers.some((performer) => performer.id === current)
+        ? current
+        : transitionSelectablePerformers[0].id
+    ));
+  }, [transitionSelectablePerformers]);
+
+  const selectedTransitionPaths = useMemo(() => {
+    if (!selectedTransition || !selectedTransitionFrames) return [];
+    return transitionSelectablePerformers.flatMap((performer) => {
+      const start = selectedTransitionFrames.fromFrame.positions[performer.id];
+      const end = selectedTransitionFrames.toFrame.positions[performer.id];
+      if (!start || !end) return [];
+      const motion = selectedTransition.objectMotions[performer.id] || {};
+      const controlPoints: MotionControlPoint[] = motion.controlPoints || getDefaultBezierControlPoints(start, end);
+      return [{
+        performerId: performer.id,
+        color: performer.color,
+        start,
+        end,
+        pathType: motion.pathType || 'linear' as const,
+        controlPoints,
+        isSelected: performer.id === selectedTransitionPerformerId,
+      }];
+    });
+  }, [
+    selectedTransition,
+    selectedTransitionFrames,
+    selectedTransitionPerformerId,
+    transitionSelectablePerformers,
+  ]);
+
+  const handleSelectTransition = useCallback((transitionId: string | null) => {
+    setSelectedTransitionId(transitionId);
+    setSelectedTransitionPerformerId(null);
+    setSelectedPerformerIds([]);
+  }, []);
+
+  const handleTransitionUpdate = useCallback((nextTransition: TransitionSegment) => {
+    setTransitions((prev) => {
+      const existingIndex = prev.findIndex((transition) => transition.id === nextTransition.id);
+      if (existingIndex === -1) {
+        return [...prev, nextTransition];
+      }
+      return prev.map((transition) => (
+        transition.id === nextTransition.id ? nextTransition : transition
+      ));
+    });
+    setSelectedTransitionId(nextTransition.id);
+  }, []);
+
+  const handleTransitionDelete = useCallback((transitionId: string) => {
+    setTransitions((prev) => prev.filter((transition) => transition.id !== transitionId));
+    setSelectedTransitionId((current) => current === transitionId ? null : current);
+    setSelectedTransitionPerformerId((current) => (
+      selectedTransitionId === transitionId ? null : current
+    ));
+  }, [selectedTransitionId]);
+
+  const handleTransitionControlPointChange = useCallback((controlPointIndex: number, nextPosition: Position) => {
+    if (!selectedTransition || !selectedTransitionPerformerId || !selectedTransitionFrames) return;
+    const start = selectedTransitionFrames.fromFrame.positions[selectedTransitionPerformerId];
+    const end = selectedTransitionFrames.toFrame.positions[selectedTransitionPerformerId];
+    if (!start || !end) return;
+
+    const motion = selectedTransition.objectMotions[selectedTransitionPerformerId] || {};
+    const controlPoints = [...(motion.controlPoints || getDefaultBezierControlPoints(start, end))];
+    controlPoints[controlPointIndex] = {
+      ...controlPoints[controlPointIndex],
+      x: nextPosition.x,
+      y: nextPosition.y,
+      ...(nextPosition.z !== undefined ? { z: nextPosition.z } : {}),
+    };
+
+    handleTransitionUpdate({
+      ...selectedTransition,
+      objectMotions: {
+        ...selectedTransition.objectMotions,
+        [selectedTransitionPerformerId]: {
+          ...motion,
+          pathType: 'bezier',
+          controlPoints,
+        },
+      },
+    });
+  }, [
+    handleTransitionUpdate,
+    selectedTransition,
+    selectedTransitionFrames,
+    selectedTransitionPerformerId,
+  ]);
+
+  const handleTransitionStartPointChange = useCallback((nextPosition: Position) => {
+    if (!selectedTransitionPerformerId || !selectedTransitionFrames) return;
+    setFrames((previousFrames) => previousFrames.map((frame) => {
+      if (frame.id !== selectedTransitionFrames.fromFrame.id) return frame;
+      const previousPosition = frame.positions[selectedTransitionPerformerId];
+      return {
+        ...frame,
+        positions: {
+          ...frame.positions,
+          [selectedTransitionPerformerId]: {
+            x: nextPosition.x,
+            y: nextPosition.y,
+            ...(nextPosition.z !== undefined
+              ? { z: nextPosition.z }
+              : previousPosition?.z !== undefined
+                ? { z: previousPosition.z }
+                : {}),
+          },
+        },
+      };
+    }));
+  }, [selectedTransitionFrames, selectedTransitionPerformerId]);
+
+  const selectedTransitionPerformer = useMemo(() => (
+    selectedTransitionPerformerId
+      ? transitionSelectablePerformers.find((performer) => performer.id === selectedTransitionPerformerId) ?? null
+      : null
+  ), [selectedTransitionPerformerId, transitionSelectablePerformers]);
+
+  const selectedTransitionMotion = useMemo<ObjectMotion>(() => {
+    if (!selectedTransition || !selectedTransitionPerformerId) return {};
+    return selectedTransition.objectMotions[selectedTransitionPerformerId] || {};
+  }, [selectedTransition, selectedTransitionPerformerId]);
+
+  const canEditSelectedTransitionRotation = selectedTransitionPerformer?.type === 'prop';
+
+  const updateSelectedTransitionMotion = useCallback((updates: Partial<ObjectMotion>) => {
+    if (!selectedTransition || !selectedTransitionPerformerId) return;
+    const nextMotion: ObjectMotion = {
+      ...selectedTransitionMotion,
+      ...updates,
+    };
+    handleTransitionUpdate({
+      ...selectedTransition,
+      objectMotions: {
+        ...selectedTransition.objectMotions,
+        [selectedTransitionPerformerId]: nextMotion,
+      },
+    });
+  }, [
+    handleTransitionUpdate,
+    selectedTransition,
+    selectedTransitionMotion,
+    selectedTransitionPerformerId,
+  ]);
+
+  const resetSelectedTransitionMotion = useCallback(() => {
+    if (!selectedTransition || !selectedTransitionPerformerId) return;
+    const nextObjectMotions = { ...selectedTransition.objectMotions };
+    delete nextObjectMotions[selectedTransitionPerformerId];
+    if (Object.keys(nextObjectMotions).length === 0) {
+      handleTransitionDelete(selectedTransition.id);
+      return;
+    }
+    handleTransitionUpdate({
+      ...selectedTransition,
+      objectMotions: nextObjectMotions,
+    });
+  }, [
+    handleTransitionDelete,
+    handleTransitionUpdate,
+    selectedTransition,
+    selectedTransitionPerformerId,
+  ]);
+
+  const handleTransitionMotionControlPointChange = useCallback((index: number, axis: keyof MotionControlPoint, value: number) => {
+    if (!selectedTransition || !selectedTransitionPerformerId || !selectedTransitionFrames) return;
+    const start = selectedTransitionFrames.fromFrame.positions[selectedTransitionPerformerId];
+    const end = selectedTransitionFrames.toFrame.positions[selectedTransitionPerformerId];
+    if (!start || !end) return;
+    const defaults = getDefaultBezierControlPoints(start, end);
+    const nextControlPoints = [...(selectedTransitionMotion.controlPoints || defaults)];
+    nextControlPoints[index] = {
+      ...nextControlPoints[index],
+      [axis]: value,
+    };
+    updateSelectedTransitionMotion({ controlPoints: nextControlPoints });
+  }, [
+    selectedTransition,
+    selectedTransitionFrames,
+    selectedTransitionMotion,
+    selectedTransitionPerformerId,
+    updateSelectedTransitionMotion,
+  ]);
+
+  const getRotationTargetFrameId = useCallback((): string | null => (
+    selectedTransitionFrames?.toFrame.id ?? currentFrameId ?? null
+  ), [currentFrameId, selectedTransitionFrames]);
+
+  const handleRotationStart = useCallback((performerId: string) => {
+    const frameId = getRotationTargetFrameId();
+    if (!frameId) return;
+    const frame = frames.find((item) => item.id === frameId);
+    const performer = performers.find((item) => item.id === performerId);
+    if (!frame || !performer) return;
+    pendingRotationUndoRef.current = {
+      frameId,
+      performerId,
+      before: frame.rotations?.[performerId] ?? performer.rotation ?? 0,
+    };
+  }, [frames, getRotationTargetFrameId, performers]);
+
+  const handleRotationChange = useCallback((performerId: string, rotation: number) => {
+    const frameId = getRotationTargetFrameId();
+    if (!frameId || !Number.isFinite(rotation)) return;
+    setFrames((previousFrames) => previousFrames.map((frame) => (
+      frame.id === frameId
+        ? { ...frame, rotations: { ...(frame.rotations ?? {}), [performerId]: rotation } }
+        : frame
+    )));
+  }, [getRotationTargetFrameId]);
+
+  const handleFrameRotationChange = useCallback((frameId: string, performerId: string, rotation: number) => {
+    if (!Number.isFinite(rotation)) return;
+    const frame = frames.find((item) => item.id === frameId);
+    const performer = performers.find((item) => item.id === performerId);
+    if (!frame || !performer) return;
+    const before = frame.rotations?.[performerId] ?? performer.rotation ?? 0;
+    if (Math.abs(before - rotation) < 0.01) return;
+    setFrames((previousFrames) => previousFrames.map((frame) => (
+      frame.id === frameId
+        ? { ...frame, rotations: { ...(frame.rotations ?? {}), [performerId]: rotation } }
+        : frame
+    )));
+    pushUndoAction({
+      type: 'rotate-performer',
+      frameId,
+      performerId,
+      before,
+      after: rotation,
+    });
+  }, [frames, performers, pushUndoAction]);
+
+  const handleRotationEnd = useCallback((performerId: string, rotation: number) => {
+    handleRotationChange(performerId, rotation);
+    const pending = pendingRotationUndoRef.current;
+    pendingRotationUndoRef.current = null;
+    if (!pending || pending.performerId !== performerId || Math.abs(pending.before - rotation) < 0.01) return;
+    pushUndoAction({
+      type: 'rotate-performer',
+      frameId: pending.frameId,
+      performerId,
+      before: pending.before,
+      after: rotation,
+    });
+  }, [handleRotationChange, pushUndoAction]);
 
   const handleStageDragStart = useCallback((performerIds: string[]) => {
     if (!currentFrameId || performerIds.length === 0) {
@@ -1478,14 +1784,15 @@ const App: React.FC = () => {
       newStart = Math.max(0, currentTime);
     }
 
-    const currentPos = currentPositions();
+    const currentPos = currentSceneState.positions;
 
     const newFrame: Frame = {
       id: generateId(),
       name: `Formation ${frames.length + 1}`,
       startTime: newStart,
       duration: 2000,
-      positions: JSON.parse(JSON.stringify(currentPos)) // Deep copy current positions
+      positions: JSON.parse(JSON.stringify(currentPos)),
+      rotations: { ...currentSceneState.rotations },
     };
 
     const newFrames = [...frames, newFrame];
@@ -1493,15 +1800,28 @@ const App: React.FC = () => {
 
     setFrames(newFrames);
     setCurrentFrameId(newFrame.id);
+    setSelectedTransitionId(null);
+    setSelectedTransitionPerformerId(null);
   };
 
   const handleDeleteFrame = (id: string) => {
     if (frames.length <= 0) return;
     if (isPlaying) handlePlayPause();
     const filtered = frames.filter(f => f.id !== id);
+    setTransitions((prev) => prev.filter((transition) => (
+      transition.fromFrameId !== id && transition.toFrameId !== id
+    )));
+    if (selectedTransitionId && transitions.some((transition) => (
+      transition.id === selectedTransitionId
+      && (transition.fromFrameId === id || transition.toFrameId === id)
+    ))) {
+      setSelectedTransitionId(null);
+      setSelectedTransitionPerformerId(null);
+    }
     if (filtered.length === 0) {
-      const nf: Frame = { id: generateId(), name: 'Opening', startTime: 0, duration: 2000, positions: {} };
+      const nf: Frame = { id: generateId(), name: 'Opening', startTime: 0, duration: 2000, positions: {}, rotations: {} };
       setFrames([nf]);
+      setTransitions([]);
       setCurrentFrameId(nf.id);
       return;
     }
@@ -1524,6 +1844,12 @@ const App: React.FC = () => {
         };
       }));
       setSelectedPerformerIds(last.performerIds);
+    } else if (last.type === 'rotate-performer') {
+      setFrames((prev) => prev.map((frame) => (
+        frame.id === last.frameId
+          ? { ...frame, rotations: { ...(frame.rotations ?? {}), [last.performerId]: last.before } }
+          : frame
+      )));
     } else if (last.type === 'paste-performers') {
       const pastedIds = last.performers.map((performer) => performer.id);
       setPerformers((prev) => prev.filter((performer) => !pastedIds.includes(performer.id)));
@@ -1551,6 +1877,12 @@ const App: React.FC = () => {
         };
       }));
       setSelectedPerformerIds(last.performerIds);
+    } else if (last.type === 'rotate-performer') {
+      setFrames((prev) => prev.map((frame) => (
+        frame.id === last.frameId
+          ? { ...frame, rotations: { ...(frame.rotations ?? {}), [last.performerId]: last.after } }
+          : frame
+      )));
     } else if (last.type === 'paste-performers') {
       setPerformers((prev) => [...prev, ...last.performers.map((performer) => ({ ...performer }))]);
       restoreFrameUpdates(last.frameUpdates);
@@ -1577,6 +1909,8 @@ const App: React.FC = () => {
     newFrames.sort((a, b) => a.startTime - b.startTime);
     setFrames(newFrames);
     setCurrentFrameId(newFrame.id);
+    setSelectedTransitionId(null);
+    setSelectedTransitionPerformerId(null);
     pushUndoAction({
       type: 'paste-frame',
       frame: createFrameCopy(newFrame, { id: newFrame.id }),
@@ -1595,6 +1929,7 @@ const App: React.FC = () => {
       performers,
       performerGroups,
       frames,
+      transitions,
       audioMarkers,
       stageConfig,
     };
@@ -1648,15 +1983,19 @@ const App: React.FC = () => {
     const newFrameId = generateId();
     setPerformers([]);
     setPerformerGroups([]);
+    setTransitions([]);
     setFrames([{
       id: newFrameId,
       name: 'Opening',
       startTime: 0,
       duration: 2000,
-      positions: {}
+      positions: {},
+      rotations: {},
     }]);
     setAudioMarkers([]);
     setCurrentFrameId(newFrameId);
+    setSelectedTransitionId(null);
+    setSelectedTransitionPerformerId(null);
     setMusicName(null);
     setAudioBuffer(null);
     setMusicUrl(null);
@@ -1681,9 +2020,10 @@ const App: React.FC = () => {
           if (!json.performers || !Array.isArray(json.performers)) throw new Error("Invalid project file: missing performers");
           if (!json.frames || !Array.isArray(json.frames)) throw new Error("Invalid project file: missing frames");
 
-          setPerformers(json.performers);
+          setPerformers(normalizePerformers(json.performers));
           setPerformerGroups(json.performerGroups || []);
-          setFrames(json.frames);
+          setFrames(normalizeFrames(json.frames));
+          setTransitions(normalizeTransitions(json.transitions));
           setAudioMarkers(normalizeAudioMarkers(json.audioMarkers));
           setMusicName(json.musicName || null);
 
@@ -1700,6 +2040,8 @@ const App: React.FC = () => {
           setAudioBuffer(null);
           setMusicUrl(null);
           setSelectedPerformerIds([]);
+          setSelectedTransitionId(null);
+          setSelectedTransitionPerformerId(null);
 
           if (json.frames.length > 0) {
             setCurrentFrameId(json.frames[0].id);
@@ -1726,9 +2068,10 @@ const App: React.FC = () => {
         if (!json.performers || !Array.isArray(json.performers)) throw new Error("Invalid project file: missing performers");
         if (!json.frames || !Array.isArray(json.frames)) throw new Error("Invalid project file: missing frames");
 
-        setPerformers(json.performers);
+        setPerformers(normalizePerformers(json.performers));
         setPerformerGroups(json.performerGroups || []);
-        setFrames(json.frames);
+        setFrames(normalizeFrames(json.frames));
+        setTransitions(normalizeTransitions(json.transitions));
         setAudioMarkers(normalizeAudioMarkers(json.audioMarkers));
         setMusicName(json.musicName || null);
 
@@ -1745,6 +2088,8 @@ const App: React.FC = () => {
         setAudioBuffer(null);
         setMusicUrl(null);
         setSelectedPerformerIds([]);
+        setSelectedTransitionId(null);
+        setSelectedTransitionPerformerId(null);
 
         if (json.frames.length > 0) {
           setCurrentFrameId(json.frames[0].id);
@@ -2133,13 +2478,10 @@ const App: React.FC = () => {
       ctx.globalAlpha = 1;
     }
 
-    // Compute hidden groups at this time
-    const sortedFrames = [...frames].sort((a, b) => a.startTime - b.startTime);
-    const frame = sortedFrames.find(f => timeMs >= f.startTime && timeMs < f.startTime + f.duration)
-      || [...sortedFrames].reverse().find(f => f.startTime + f.duration <= timeMs);
-    const hiddenGroupIds = frame?.hiddenGroupIds || [];
-
-    const positions = computePositionsAtTime(timeMs);
+    const sceneState = computeSceneStateAtTime(timeMs);
+    const hiddenGroupIds = sceneState.hiddenGroupIds;
+    const positions = sceneState.positions;
+    const rotations = sceneState.rotations;
     const platformOccupancy = buildPlatformOccupancy(performers, positions, stageConfig);
 
     ctx.fillStyle = 'rgba(2,6,23,0.55)';
@@ -2176,14 +2518,18 @@ const App: React.FC = () => {
       if (p.groupId && hiddenGroupIds.includes(p.groupId)) return;
       const pos = positions[p.id];
       if (!pos) return;
-      const cx = renderX + (stageXToViewPercent(pos.x, stageConfig) / 100) * renderW;
-      const cy = renderY + (pos.y / 100) * renderH;
+      const rotation = rotations[p.id] ?? p.rotation ?? 0;
+      const renderPosition = p.type === 'prop'
+        ? getPropCenterFromAnchor(pos, rotation, p, stageConfig)
+        : pos;
+      const cx = renderX + (stageXToViewPercent(renderPosition.x, stageConfig) / 100) * renderW;
+      const cy = renderY + (renderPosition.y / 100) * renderH;
 
       if (p.type === 'prop') {
         const propLift = platformOccupancy.entityLiftById[p.id] ?? 0;
         const propW = (p.width || 1) / totalStageW * renderW;
         const propD = (p.depth || 1) / stageD * renderH;
-        const rot = (p.rotation || 0) * Math.PI / 180;
+        const rot = rotation * Math.PI / 180;
 
         ctx.save();
         ctx.translate(cx, cy);
@@ -2591,8 +2937,40 @@ const App: React.FC = () => {
       stream = new MediaStream([...streamV.getVideoTracks(), ...dest.stream.getAudioTracks()]);
     }
 
-    const mime = realtimeFormat.mimeType;
-    const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 5000000 });
+    let activeRealtimeFormat = realtimeFormat;
+    let recorder: MediaRecorder;
+    try {
+      const recorderFormats = realtimeWritable
+        ? getMediaRecorderExportFormats().filter((format) => format.extension === realtimeFormat.extension)
+        : getMediaRecorderExportFormats();
+      const startedRecorder = startMediaRecorderWithFallback(stream, recorderFormats, 100);
+      recorder = startedRecorder.recorder;
+      activeRealtimeFormat = startedRecorder.format;
+    } catch (err) {
+      stream.getTracks().forEach((track) => track.stop());
+      if (realtimeWritable) {
+        try { await realtimeWritable.abort?.(); } catch { }
+      }
+      ledRenderer?.dispose();
+      setIsExporting(false);
+      alert('实时录制导出失败：' + (err instanceof Error ? err.message : String(err)));
+      return;
+    }
+
+    if (desktopExportPath && activeRealtimeFormat.extension !== realtimeFormat.extension) {
+      recorder.stop();
+      const updatedPath = await requestElectronExportPath(downloadBaseName, activeRealtimeFormat.extension);
+      if (!updatedPath) {
+        stream.getTracks().forEach((track) => track.stop());
+        ledRenderer?.dispose();
+        setIsExporting(false);
+        return;
+      }
+      desktopExportPath = updatedPath;
+      recorder = startMediaRecorderWithFallback(stream, [activeRealtimeFormat], 100).recorder;
+    }
+
+    const mime = activeRealtimeFormat.mimeType;
     const chunks: Blob[] = [];
     let realtimeWriteChain = Promise.resolve();
     recorder.ondataavailable = (e: any) => {
@@ -2604,7 +2982,6 @@ const App: React.FC = () => {
       }
     };
 
-    recorder.start(100);
     if (source) source.start(0, inPointMs / 1000);
 
     const recordStart = performance.now();
@@ -2667,7 +3044,7 @@ const App: React.FC = () => {
       if (desktopExportPath) {
         await writeBlobToElectronPath(desktopExportPath, blob);
       } else {
-        downloadBlob(blob, `${downloadBaseName}.${realtimeFormat.extension}`);
+        downloadBlob(blob, `${downloadBaseName}.${activeRealtimeFormat.extension}`);
       }
     }
   };
@@ -2745,14 +3122,6 @@ const App: React.FC = () => {
       console.warn('3D LED pre-render timed out, continuing without cache:', err);
     }
     setExportProgress(0.12);
-
-    // Helper: compute hidden groups at a given time
-    const getHiddenGroups = (timeMs: number): string[] => {
-      const sortedFrames = [...frames].sort((a, b) => a.startTime - b.startTime);
-      const frame = sortedFrames.find(f => timeMs >= f.startTime && timeMs < f.startTime + f.duration)
-        || [...sortedFrames].reverse().find(f => f.startTime + f.duration <= timeMs);
-      return frame?.hiddenGroupIds || [];
-    };
 
     // Canvas for capturing WebGL output
     const tmpCanvas = document.createElement('canvas');
@@ -2837,11 +3206,10 @@ const App: React.FC = () => {
           ensureVideoEncoderOpen();
           const t = inPointMs + i * stepMs;
           const clampedT = Math.min(t, outPointMs);
-          const positions = computePositionsAtTime(clampedT);
-          const hiddenGroupIds = getHiddenGroups(clampedT);
+          const sceneState = computeSceneStateAtTime(clampedT);
 
           // Update scene and render (await LED video seek if present)
-          offline.updateAtTime(clampedT, positions, hiddenGroupIds);
+          offline.updateAtTime(clampedT, sceneState.positions, sceneState.rotations, sceneState.hiddenGroupIds);
           offline.renderer.render(offline.scene, offline.camera);
 
           // Copy WebGL canvas to tmpCanvas for VideoFrame
@@ -3012,8 +3380,40 @@ const App: React.FC = () => {
       stream = new MediaStream([...streamV.getVideoTracks(), ...dest.stream.getAudioTracks()]);
     }
 
-    const mime = realtimeFormat.mimeType;
-    const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 5000000 });
+    let activeRealtimeFormat = realtimeFormat;
+    let recorder: MediaRecorder;
+    try {
+      const recorderFormats = realtimeWritable
+        ? getMediaRecorderExportFormats().filter((format) => format.extension === realtimeFormat.extension)
+        : getMediaRecorderExportFormats();
+      const startedRecorder = startMediaRecorderWithFallback(stream, recorderFormats, 100);
+      recorder = startedRecorder.recorder;
+      activeRealtimeFormat = startedRecorder.format;
+    } catch (err) {
+      stream.getTracks().forEach((track) => track.stop());
+      if (realtimeWritable) {
+        try { await realtimeWritable.abort?.(); } catch { }
+      }
+      offline.dispose();
+      setIsExporting(false);
+      alert('实时录制导出失败：' + (err instanceof Error ? err.message : String(err)));
+      return;
+    }
+
+    if (desktopExportPath && activeRealtimeFormat.extension !== realtimeFormat.extension) {
+      recorder.stop();
+      const updatedPath = await requestElectronExportPath(downloadBaseName, activeRealtimeFormat.extension);
+      if (!updatedPath) {
+        stream.getTracks().forEach((track) => track.stop());
+        offline.dispose();
+        setIsExporting(false);
+        return;
+      }
+      desktopExportPath = updatedPath;
+      recorder = startMediaRecorderWithFallback(stream, [activeRealtimeFormat], 100).recorder;
+    }
+
+    const mime = activeRealtimeFormat.mimeType;
     const chunks: Blob[] = [];
     let realtimeWriteChain = Promise.resolve();
     recorder.ondataavailable = (e: any) => {
@@ -3025,7 +3425,6 @@ const App: React.FC = () => {
       }
     };
 
-    recorder.start(100);
     if (source) source.start(0, inPointMs / 1000);
 
     const recordStart = performance.now();
@@ -3033,10 +3432,9 @@ const App: React.FC = () => {
       const elapsed = performance.now() - recordStart;
       const currentFrameIdx = Math.min(Math.floor(elapsed / stepMs), totalFrames);
       const t = Math.min(inPointMs + currentFrameIdx * stepMs, outPointMs);
-      const positions = computePositionsAtTime(t);
-      const hiddenGroupIds = getHiddenGroups(t);
+      const sceneState = computeSceneStateAtTime(t);
 
-      offline.updateAtTime(t, positions, hiddenGroupIds);
+      offline.updateAtTime(t, sceneState.positions, sceneState.rotations, sceneState.hiddenGroupIds);
       offline.renderer.render(offline.scene, offline.camera);
 
       setExportProgress(0.7 + Math.min(0.3, (currentFrameIdx / totalFrames) * 0.3));
@@ -3089,7 +3487,7 @@ const App: React.FC = () => {
       if (desktopExportPath) {
         await writeBlobToElectronPath(desktopExportPath, blob);
       } else {
-        downloadBlob(blob, `${downloadBaseName}.${realtimeFormat.extension}`);
+        downloadBlob(blob, `${downloadBaseName}.${activeRealtimeFormat.extension}`);
       }
     }
   };
@@ -3122,6 +3520,8 @@ const App: React.FC = () => {
 
   const handleSelectFrame = (id: string) => {
     setSelectedPerformerIds([]);
+    setSelectedTransitionId(null);
+    setSelectedTransitionPerformerId(null);
     setCurrentFrameId(id);
     const f = frames.find(fr => fr.id === id);
     if (f) {
@@ -3167,8 +3567,11 @@ const App: React.FC = () => {
     });
   };
 
-  // Always use currentPositions() to ensure scrubbing shows real-time interpolation
-  const displayedPositions = currentPositions();
+  const displayedPositions = currentSceneState.positions;
+  const displayedRotations = currentSceneState.rotations;
+  const selectedTransitionLabel = selectedTransition
+    ? `${frames.find((frame) => frame.id === selectedTransition.fromFrameId)?.name || '起点'} -> ${frames.find((frame) => frame.id === selectedTransition.toFrameId)?.name || '终点'}`
+    : null;
 
   // Determine total duration for Timeline rendering
   const totalDuration = frames.reduce(
@@ -3433,7 +3836,7 @@ const App: React.FC = () => {
 
           <div className={`stage-status absolute top-4 z-10 pointer-events-none ${isCompactLayout ? 'left-4' : 'left-16'}`}>
             <div className={`backdrop-blur px-4 py-2 rounded-lg border text-sm shadow-xl ${theme === 'dark' ? 'bg-slate-900/90 border-slate-700 text-slate-400' : 'bg-white/90 border-gray-300 text-gray-700'}`}>
-              正在编辑队形：<span className="text-blue-400 font-bold ml-1">{frames.find(f => f.id === currentFrameId)?.name || '过渡/GAP'}</span>
+              正在编辑：<span className="text-blue-400 font-bold ml-1">{selectedTransitionLabel || frames.find(f => f.id === currentFrameId)?.name || '过渡/GAP'}</span>
               <div className={`text-[10px] mt-1 ${theme === 'dark' ? 'text-slate-500' : 'text-gray-500'}`}>{selectedPerformerIds.length} 人已选中</div>
             </div>
           </div>
@@ -3444,9 +3847,17 @@ const App: React.FC = () => {
               performerGroups={performerGroups}
               hiddenGroupIds={activeHiddenGroupIds}
               positions={displayedPositions}
+              rotations={displayedRotations}
+              transitionPaths={selectedTransitionPaths}
               selectedPerformerIds={selectedPerformerIds}
               onSelectionChange={setSelectedPerformerIds}
               onPositionChange={handlePositionChange}
+              onTransitionControlPointChange={handleTransitionControlPointChange}
+              onTransitionStartPointChange={handleTransitionStartPointChange}
+              onTransitionObjectSelect={setSelectedTransitionPerformerId}
+              onRotationStart={handleRotationStart}
+              onRotationChange={handleRotationChange}
+              onRotationEnd={handleRotationEnd}
               onDragStart={handleStageDragStart}
               onDragEnd={handleStageDragEnd}
               onUpdatePerformer={handleUpdatePerformer}
@@ -3460,6 +3871,7 @@ const App: React.FC = () => {
             <Stage3D
               performers={performers}
               positions={displayedPositions}
+              rotations={displayedRotations}
               selectedIds={selectedPerformerIds}
               onSelect={setSelectedPerformerIds}
               hiddenGroupIds={activeHiddenGroupIds}
@@ -3475,6 +3887,159 @@ const App: React.FC = () => {
               gridScale={gridScale}
               readonly={isPlaying}
             />
+          )}
+
+          {selectedTransition && selectedTransitionFrames && (
+            <div
+              className="absolute right-4 z-40 w-[min(380px,calc(100vw-2rem))] rounded-xl border border-slate-700 bg-slate-900/95 p-3 text-slate-100 shadow-2xl backdrop-blur"
+              style={{
+                top: isCompactLayout ? 12 : 16,
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold">过渡参数</div>
+                  <div className="mt-0.5 truncate text-[11px] text-slate-400">
+                    {selectedTransitionFrames.fromFrame.name} → {selectedTransitionFrames.toFrame.name}
+                    <span className="ml-2">{(selectedTransition.duration / 1000).toFixed(1)} 秒</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleSelectTransition(null)}
+                  className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-white"
+                  aria-label="关闭过渡参数"
+                >
+                  <X size={15} />
+                </button>
+              </div>
+
+              {transitionSelectablePerformers.length === 0 ? (
+                <div className="rounded-lg border border-slate-800 bg-slate-950/80 px-3 py-2 text-xs text-slate-400">
+                  当前过渡没有同时存在于前后队形的对象，无法配置路径。
+                </div>
+              ) : (
+                <>
+                  <div className="mb-3 rounded-lg border border-slate-800 bg-slate-950/70 p-1.5">
+                    <div className="grid grid-cols-2 gap-1">
+                      {transitionSelectablePerformers.map((performer) => {
+                        const motion = selectedTransition.objectMotions[performer.id];
+                        const selected = performer.id === selectedTransitionPerformerId;
+                        return (
+                          <button
+                            key={performer.id}
+                            type="button"
+                            onClick={() => setSelectedTransitionPerformerId(performer.id)}
+                            className={`flex items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-[11px] ${selected ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'}`}
+                          >
+                            <span className="truncate">{performer.name}</span>
+                            <span className="shrink-0 text-[9px] opacity-75">
+                              {motion?.pathType === 'bezier' ? '曲线' : '直线'}
+                              {performer.type === 'prop' ? ` · ${motion?.rotationMode === 'fixed' ? '固定' : '旋转'}` : ''}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className={`grid gap-2 ${canEditSelectedTransitionRotation ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                    <label className="text-[10px] text-slate-400">
+                      路径
+                      <select
+                        value={selectedTransitionMotion.pathType || 'linear'}
+                        onChange={(event) => updateSelectedTransitionMotion({
+                          pathType: event.target.value as 'linear' | 'bezier',
+                          controlPoints: event.target.value === 'bezier' ? (selectedTransitionMotion.controlPoints || undefined) : undefined,
+                        })}
+                        className="mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 text-xs text-slate-100 outline-none focus:border-blue-500"
+                      >
+                        <option value="linear">直线</option>
+                        <option value="bezier">Bezier 曲线</option>
+                      </select>
+                    </label>
+
+                    {canEditSelectedTransitionRotation && (
+                      <label className="text-[10px] text-slate-400">
+                        旋转模式
+                        <select
+                          value={selectedTransitionMotion.rotationMode || 'lerp'}
+                          onChange={(event) => updateSelectedTransitionMotion({ rotationMode: event.target.value as 'fixed' | 'lerp' })}
+                          className="mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 text-xs text-slate-100 outline-none focus:border-blue-500"
+                        >
+                          <option value="lerp">旋转插值</option>
+                          <option value="fixed">固定朝向</option>
+                        </select>
+                      </label>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={resetSelectedTransitionMotion}
+                    disabled={!selectedTransitionPerformerId || !selectedTransition.objectMotions[selectedTransitionPerformerId]}
+                    className="mt-2 h-9 w-full rounded-md border border-slate-700 text-xs text-slate-300 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    重置当前对象
+                  </button>
+
+                  {canEditSelectedTransitionRotation && selectedTransitionPerformerId && (
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <label className="text-[10px] text-slate-400">
+                        起始队形角度
+                        <EditableNumberInput
+                          step={1}
+                          value={selectedTransitionFrames.fromFrame.rotations?.[selectedTransitionPerformerId]
+                            ?? selectedTransitionPerformer?.rotation
+                            ?? 0}
+                          onChange={(value) => {
+                            handleFrameRotationChange(selectedTransitionFrames.fromFrame.id, selectedTransitionPerformerId, value);
+                          }}
+                          className="mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 font-mono text-xs text-slate-100 outline-none focus:border-blue-500"
+                        />
+                      </label>
+                      <label className="text-[10px] text-slate-400">
+                        目标队形角度
+                        <EditableNumberInput
+                          step={1}
+                          value={selectedTransitionFrames.toFrame.rotations?.[selectedTransitionPerformerId]
+                            ?? selectedTransitionPerformer?.rotation
+                            ?? 0}
+                          onChange={(value) => {
+                            handleFrameRotationChange(selectedTransitionFrames.toFrame.id, selectedTransitionPerformerId, value);
+                          }}
+                          className="mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 font-mono text-xs text-slate-100 outline-none focus:border-blue-500"
+                        />
+                      </label>
+                    </div>
+                  )}
+
+                  {(selectedTransitionMotion.pathType || 'linear') === 'bezier' && (
+                    <div className="mt-3 grid grid-cols-2 gap-3">
+                      {[0, 1].map((index) => (
+                        <div key={index} className="rounded-lg border border-slate-800 bg-slate-950/80 p-2">
+                          <div className="mb-2 text-[10px] font-medium text-slate-300">控制点 {index + 1}</div>
+                          <div className="grid grid-cols-3 gap-2">
+                            {(['x', 'y', 'z'] as const).map((axis) => (
+                              <label key={axis} className="text-[10px] text-slate-500">
+                                {axis.toUpperCase()}
+                                <EditableNumberInput
+                                  step={0.1}
+                                  value={selectedTransitionMotion.controlPoints?.[index]?.[axis] ?? 0}
+                                  onChange={(value) => handleTransitionMotionControlPointChange(index, axis, value)}
+                                  className="mt-1 h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 font-mono text-[11px] text-slate-100 outline-none focus:border-blue-500"
+                                />
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
           )}
 
           <div
@@ -3575,7 +4140,9 @@ const App: React.FC = () => {
           </div>
 
           {!timelineCollapsed && <Timeline
+            performers={performers}
             frames={frames}
+            transitions={transitions}
             duration={Math.max(
               totalDuration + 10000,
               audioBuffer ? audioBuffer.duration * 1000 : 0,
@@ -3591,6 +4158,13 @@ const App: React.FC = () => {
             onAddFrame={handleAddFrame}
             onSelectFrame={handleSelectFrame}
             selectedFrameId={selectedPerformerIds.length > 0 ? null : currentFrameId}
+            selectedTransitionId={selectedTransitionId}
+            onSelectTransition={handleSelectTransition}
+            selectedMotionPerformerId={selectedTransitionPerformerId}
+            onSelectedMotionPerformerChange={setSelectedTransitionPerformerId}
+            onTransitionUpdate={handleTransitionUpdate}
+            onTransitionDelete={handleTransitionDelete}
+            onFrameRotationChange={handleFrameRotationChange}
             audioMarkers={audioMarkers}
             onAudioMarkersChange={setAudioMarkers}
             heightPx={timelineHeight}

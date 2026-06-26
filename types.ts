@@ -6,6 +6,9 @@ export type {
   FaceTexture,
   Frame,
   LEDContent,
+  MotionControlPoint,
+  MotionPathType,
+  ObjectMotion,
   Performer,
   PerformerGroup,
   PerformerShape,
@@ -19,18 +22,32 @@ export type {
   ProjectWarning,
   PropCategory,
   PropGeometryType,
+  PropRotationPivot,
+  RotationMode,
+  SceneState,
   StageConfig,
+  TransitionSegment,
+} from './electron/project-contract';
+
+export {
+  normalizeFrames,
+  normalizePerformers,
+  normalizeTransitions,
 } from './electron/project-contract';
 
 import type {
   Frame,
+  MotionControlPoint,
+  ObjectMotion,
   Performer,
   PerformerGroup,
   PerformerShape,
   Position,
   PropCategory,
   PropGeometryType,
+  SceneState,
   StageConfig,
+  TransitionSegment,
 } from './electron/project-contract';
 
 export interface Project {
@@ -38,6 +55,7 @@ export interface Project {
   performers: Performer[];
   groups: PerformerGroup[];
   frames: Frame[];
+  transitions?: TransitionSegment[];
   musicUrl: string | null;
   audioBuffer: AudioBuffer | null;
 }
@@ -78,6 +96,7 @@ export interface AIProjectSnapshot {
   performers: Performer[];
   performerGroups: PerformerGroup[];
   frames: Frame[];
+  transitions?: TransitionSegment[];
   stageConfig: StageConfig;
 }
 
@@ -135,6 +154,37 @@ export interface AIChoreoPlan {
   framesToCreate: AIFrameCreate[];
   positionUpdates: AIPositionUpdate[];
   warnings: string[];
+}
+
+export interface GapSegment {
+  id: string;
+  start: number;
+  end: number;
+  duration: number;
+  prevId: string | null;
+  nextId: string;
+  transition: TransitionSegment | null;
+}
+
+export interface TransitionSelection {
+  transitionId: string;
+  performerId: string | null;
+}
+
+export interface TransitionFrameContext {
+  fromFrame: Frame;
+  toFrame: Frame;
+  motion: ObjectMotion;
+}
+
+export interface TransitionPathDisplay {
+  performerId: string;
+  color: string;
+  start: Position;
+  end: Position;
+  pathType: 'linear' | 'bezier';
+  controlPoints: MotionControlPoint[];
+  isSelected: boolean;
 }
 
 export interface ChoreoTimedInsight {

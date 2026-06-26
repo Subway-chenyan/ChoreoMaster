@@ -62,7 +62,8 @@ test('video export probes mobile-safe codecs and stops feeding a closed encoder'
   assert.match(app, /VideoEncoder\.isConfigSupported\(config\)/);
   assert.match(app, /mimeType: 'video\/mp4;codecs=avc1\.42001E,mp4a\.40\.2'/);
   assert.match(app, /const realtimeFormat = getMediaRecorderExportFormat\(\)/g);
-  assert.match(app, /downloadBlob\(blob, `\$\{downloadBaseName\}\.\$\{realtimeFormat\.extension\}`\)/g);
+  assert.match(app, /startMediaRecorderWithFallback\(stream, recorderFormats, 100\)/g);
+  assert.match(app, /downloadBlob\(blob, `\$\{downloadBaseName\}\.\$\{activeRealtimeFormat\.extension\}`\)/g);
   assert.match(app, /const canFastExport = videoEncoderConfig != null/g);
   assert.match(app, /if \(videoEncoderError\) throw videoEncoderError/g);
   assert.match(app, /if \(videoEncoder\?\.state === 'closed'\)/g);

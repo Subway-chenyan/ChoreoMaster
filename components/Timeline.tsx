@@ -1,10 +1,14 @@
 
 import React, { useEffect, useRef, useMemo, useState } from 'react';
-import { AudioMarker, Frame } from '../types';
+import { AudioMarker, Frame, MotionControlPoint, ObjectMotion, Performer, TransitionSegment } from '../types';
 import { Flag, Pause, Play, PlusCircle, SkipBack, Trash2, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { EditableNumberInput } from './FormControls';
+import { createTransitionId, getDefaultBezierControlPoints, getGapSelectionId } from '../utils/transitions';
 
 interface TimelineProps {
+    performers: Performer[];
     frames: Frame[];
+    transitions: TransitionSegment[];
     duration: number; // Total duration in ms
     currentTime: number;
     audioBuffer: AudioBuffer | null;
@@ -15,6 +19,13 @@ interface TimelineProps {
     onAddFrame: () => void;
     onSelectFrame: (frameId: string) => void;
     selectedFrameId: string | null;
+    selectedTransitionId: string | null;
+    onSelectTransition: (transitionId: string | null) => void;
+    selectedMotionPerformerId: string | null;
+    onSelectedMotionPerformerChange: (performerId: string | null) => void;
+    onTransitionUpdate: (transition: TransitionSegment) => void;
+    onTransitionDelete: (transitionId: string) => void;
+    onFrameRotationChange: (frameId: string, performerId: string, rotation: number) => void;
     audioMarkers: AudioMarker[];
     onAudioMarkersChange: (markers: AudioMarker[]) => void;
     onRenameFrame?: (frameId: string) => void;
@@ -24,10 +35,13 @@ interface TimelineProps {
     onExportVideo?: () => void;
     isExporting?: boolean;
     exportProgress?: number;
+    showTransitionEditor?: boolean;
 }
 
 export const Timeline: React.FC<TimelineProps> = ({
+    performers,
     frames,
+    transitions,
     duration,
     currentTime,
     audioBuffer,
@@ -38,6 +52,13 @@ export const Timeline: React.FC<TimelineProps> = ({
     onAddFrame,
     onSelectFrame,
     selectedFrameId,
+    selectedTransitionId,
+    onSelectTransition,
+    selectedMotionPerformerId,
+    onSelectedMotionPerformerChange,
+    onTransitionUpdate,
+    onTransitionDelete,
+    onFrameRotationChange,
     audioMarkers,
     onAudioMarkersChange,
     onRenameFrame,
@@ -46,7 +67,8 @@ export const Timeline: React.FC<TimelineProps> = ({
     outPointMs,
     onExportVideo,
     isExporting,
-    exportProgress
+    exportProgress,
+    showTransitionEditor = false
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -155,26 +177,80 @@ export const Timeline: React.FC<TimelineProps> = ({
 
             if (gapEnd > gapStart) {
                 gaps.push({
+                    id: createTransitionId(current.id, next.id),
                     start: gapStart,
                     end: gapEnd,
                     duration: gapEnd - gapStart,
                     prevId: current.id,
-                    nextId: next.id
+                    nextId: next.id,
+                    transition: transitions.find((transition) => transition.fromFrameId === current.id && transition.toFrameId === next.id) || null,
                 });
             }
         }
         // Initial gap if first frame doesn't start at 0
         if (sorted.length > 0 && sorted[0].startTime > 0) {
             gaps.push({
+                id: `transition-start-${sorted[0].id}`,
                 start: 0,
                 end: sorted[0].startTime,
                 duration: sorted[0].startTime,
                 prevId: null,
-                nextId: sorted[0].id
+                nextId: sorted[0].id,
+                transition: null,
             });
         }
         return gaps;
-    }, [frames]);
+    }, [frames, transitions]);
+
+    const selectedGap = useMemo(
+        () => gapSegments.find((gap) => getGapSelectionId(gap) === selectedTransitionId) || null,
+        [gapSegments, selectedTransitionId],
+    );
+
+    const selectedGapFrames = useMemo(() => {
+        if (!selectedGap?.prevId) return null;
+        const fromFrame = frames.find((frame) => frame.id === selectedGap.prevId);
+        const toFrame = frames.find((frame) => frame.id === selectedGap.nextId);
+        if (!fromFrame || !toFrame) return null;
+        return { fromFrame, toFrame };
+    }, [frames, selectedGap]);
+
+    const selectableMotionPerformers = useMemo(() => {
+        if (!selectedGapFrames) return [];
+        return performers.filter((performer) => (
+            selectedGapFrames.fromFrame.positions[performer.id] !== undefined
+            && selectedGapFrames.toFrame.positions[performer.id] !== undefined
+        ));
+    }, [performers, selectedGapFrames]);
+
+    useEffect(() => {
+        if (selectableMotionPerformers.length === 0) {
+            onSelectedMotionPerformerChange(null);
+            return;
+        }
+        const nextPerformerId = selectedMotionPerformerId && selectableMotionPerformers.some((performer) => performer.id === selectedMotionPerformerId)
+            ? selectedMotionPerformerId
+            : selectableMotionPerformers[0].id;
+        if (nextPerformerId !== selectedMotionPerformerId) {
+            onSelectedMotionPerformerChange(nextPerformerId);
+        }
+    }, [onSelectedMotionPerformerChange, selectableMotionPerformers, selectedMotionPerformerId]);
+
+    const selectedTransition = useMemo(() => {
+        if (!selectedGap?.prevId) return null;
+        return selectedGap.transition || {
+            id: createTransitionId(selectedGap.prevId, selectedGap.nextId),
+            fromFrameId: selectedGap.prevId,
+            toFrameId: selectedGap.nextId,
+            duration: selectedGap.duration,
+            objectMotions: {},
+        };
+    }, [selectedGap]);
+
+    const selectedMotion = useMemo<ObjectMotion>(() => {
+        if (!selectedTransition || !selectedMotionPerformerId) return {};
+        return selectedTransition.objectMotions[selectedMotionPerformerId] || {};
+    }, [selectedMotionPerformerId, selectedTransition]);
 
     const formatTime = (ms: number) => {
         const totalSec = Math.floor(ms / 1000);
@@ -210,6 +286,50 @@ export const Timeline: React.FC<TimelineProps> = ({
         setSelectedMarkerId(null);
     };
 
+    const updateSelectedMotion = (updates: Partial<ObjectMotion>) => {
+        if (!selectedTransition || !selectedMotionPerformerId) return;
+        const nextMotion: ObjectMotion = {
+            ...selectedMotion,
+            ...updates,
+        };
+        onTransitionUpdate({
+            ...selectedTransition,
+            duration: selectedGap?.transition?.duration ?? selectedGap?.duration,
+            objectMotions: {
+                ...selectedTransition.objectMotions,
+                [selectedMotionPerformerId]: nextMotion,
+            },
+        });
+    };
+
+    const updateControlPoint = (index: number, axis: keyof MotionControlPoint, value: number) => {
+        if (!selectedTransition || !selectedMotionPerformerId || !selectedGapFrames) return;
+        const start = selectedGapFrames.fromFrame.positions[selectedMotionPerformerId];
+        const end = selectedGapFrames.toFrame.positions[selectedMotionPerformerId];
+        if (!start || !end) return;
+        const defaults: MotionControlPoint[] = getDefaultBezierControlPoints(start, end);
+        const nextControlPoints = [...(selectedMotion.controlPoints || defaults)];
+        nextControlPoints[index] = {
+            ...nextControlPoints[index],
+            [axis]: value,
+        };
+        updateSelectedMotion({ controlPoints: nextControlPoints });
+    };
+
+    const resetSelectedMotion = () => {
+        if (!selectedGap?.transition || !selectedMotionPerformerId) return;
+        const nextObjectMotions = { ...selectedGap.transition.objectMotions };
+        delete nextObjectMotions[selectedMotionPerformerId];
+        if (Object.keys(nextObjectMotions).length === 0) {
+            onTransitionDelete(selectedGap.transition.id);
+            return;
+        }
+        onTransitionUpdate({
+            ...selectedGap.transition,
+            objectMotions: nextObjectMotions,
+        });
+    };
+
     const rulerIntervalSeconds = useMemo(() => {
         const minimumLabelSpacing = 56;
         const candidates = [1, 2, 5, 10, 15, 30, 60, 120, 300];
@@ -237,6 +357,7 @@ export const Timeline: React.FC<TimelineProps> = ({
         if (editingId === frame.id) return; // prevent drag while editing
         e.currentTarget.setPointerCapture(e.pointerId);
         // Select frame on drag start
+        onSelectTransition(null);
         onSelectFrame(frame.id);
 
         setDraggingState({
@@ -441,25 +562,33 @@ export const Timeline: React.FC<TimelineProps> = ({
 
                         {/* Render Gaps (Transitions) */}
                         {gapSegments.map((gap, i) => (
-                            <div
+                            <button
                                 key={`gap-${i}`}
-                                className="absolute top-0 flex items-center justify-center overflow-hidden pointer-events-none"
+                                type="button"
+                                onPointerDown={(event) => event.stopPropagation()}
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    if (!gap.prevId) return;
+                                    onSeek(gap.start + (gap.duration / 2));
+                                    onSelectTransition(getGapSelectionId(gap));
+                                }}
+                                className={`absolute top-0 flex items-center justify-center overflow-hidden border transition-colors ${gap.prevId ? 'cursor-pointer' : 'cursor-not-allowed'} ${selectedTransitionId === getGapSelectionId(gap) ? 'border-blue-400 bg-blue-500/10' : gap.transition ? 'border-emerald-500/40 bg-emerald-500/5 hover:bg-emerald-500/10' : 'border-slate-700/50 bg-transparent hover:bg-slate-800/30'}`}
                                 style={{
                                     left: (gap.start / 1000) * zoom,
                                     width: (gap.duration / 1000) * zoom,
                                     height: clipHeight,
                                 }}
                             >
-                                <div className="w-full h-full relative opacity-30">
+                                <div className="w-full h-full relative opacity-30 pointer-events-none">
                                     <svg className="absolute inset-0 w-full h-full text-slate-500" preserveAspectRatio="none">
                                         <line x1="0" y1="0" x2="100%" y2="100%" stroke="currentColor" strokeWidth="1" />
                                         <line x1="0" y1="100%" x2="100%" y2="0" stroke="currentColor" strokeWidth="1" />
                                     </svg>
                                 </div>
-                                <div className="absolute text-[9px] font-mono text-slate-500 bg-slate-950/50 px-1 rounded">
-                                    {(gap.duration / 1000).toFixed(1)}秒
+                                <div className="absolute text-[9px] font-mono text-slate-500 bg-slate-950/50 px-1 rounded pointer-events-none">
+                                    {gap.transition ? '过渡' : '默认'} {(gap.duration / 1000).toFixed(1)}秒
                                 </div>
-                            </div>
+                            </button>
                         ))}
 
                         {/* Render Frames */}
@@ -474,7 +603,10 @@ export const Timeline: React.FC<TimelineProps> = ({
                             >
                                 <div
                                         onPointerDown={(e) => handleFrameDragStart(e, frame, 'move')}
-                                        onClick={() => onSelectFrame(frame.id)}
+                                        onClick={() => {
+                                            onSelectTransition(null);
+                                            onSelectFrame(frame.id);
+                                        }}
                                         className={`timeline-clip relative h-full rounded-lg flex flex-col items-center justify-center cursor-grab active:cursor-grabbing overflow-hidden transition-all border select-none shadow-lg
                                 ${selectedFrameId === frame.id
                                             ? 'bg-slate-700 border-blue-400 shadow-blue-900/20 z-20'
@@ -532,6 +664,164 @@ export const Timeline: React.FC<TimelineProps> = ({
                     </div>
                 </div>
             </div>
+            {showTransitionEditor && selectedGap && selectedTransition && selectedGapFrames && (
+                <div
+                    className="absolute bottom-3 right-3 z-[70] w-[min(420px,calc(100vw-1.5rem))] rounded-xl border border-slate-700 bg-slate-900/98 p-3 shadow-2xl"
+                    onPointerDown={(event) => event.stopPropagation()}
+                >
+                    <div className="mb-3 flex items-center justify-between">
+                        <div>
+                            <div className="text-sm font-semibold text-slate-100">
+                                过渡编辑
+                            </div>
+                            <div className="text-[11px] text-slate-400">
+                                {selectedGapFrames.fromFrame.name} {'->'} {selectedGapFrames.toFrame.name} · {(selectedGap.duration / 1000).toFixed(1)} 秒
+                            </div>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => onSelectTransition(null)}
+                            className="rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-white"
+                            aria-label="关闭过渡编辑"
+                        >
+                            <X size={15} />
+                        </button>
+                    </div>
+                    {selectableMotionPerformers.length === 0 ? (
+                        <div className="rounded-lg border border-slate-800 bg-slate-950/80 px-3 py-2 text-xs text-slate-400">
+                            当前过渡没有同时存在于前后队形的对象，无法配置路径和旋转。
+                        </div>
+                    ) : (
+                        <>
+                            <div className="mb-3 max-h-24 overflow-y-auto rounded-lg border border-slate-800 bg-slate-950/70 p-1.5">
+                                <div className="grid grid-cols-2 gap-1">
+                                    {selectableMotionPerformers.map((performer) => {
+                                        const motion = selectedTransition.objectMotions[performer.id];
+                                        const selected = performer.id === selectedMotionPerformerId;
+                                        return (
+                                            <button
+                                                key={performer.id}
+                                                type="button"
+                                                data-motion-id={performer.id}
+                                                onPointerDown={(event) => {
+                                                    event.stopPropagation();
+                                                    onSelectedMotionPerformerChange(event.currentTarget.dataset.motionId || performer.id);
+                                                }}
+                                                onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    onSelectedMotionPerformerChange(event.currentTarget.dataset.motionId || performer.id);
+                                                }}
+                                                className={`flex items-center justify-between rounded px-2 py-1.5 text-left text-[11px] ${selected ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'}`}
+                                            >
+                                                <span className="truncate">{performer.name}</span>
+                                                <span className="ml-2 shrink-0 text-[9px] opacity-75">
+                                                    {motion?.pathType === 'bezier' ? '曲线' : '直线'}
+                                                    {performer.type === 'prop' ? ` · ${motion?.rotationMode === 'fixed' ? '固定' : '旋转'}` : ''}
+                                                </span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                                <label className="text-[10px] text-slate-400">
+                                    路径
+                                    <select
+                                        value={selectedMotion.pathType || 'linear'}
+                                        onChange={(event) => updateSelectedMotion({
+                                            pathType: event.target.value as 'linear' | 'bezier',
+                                            controlPoints: event.target.value === 'bezier' ? (selectedMotion.controlPoints || undefined) : undefined,
+                                        })}
+                                        className="mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 text-xs text-slate-100 outline-none focus:border-blue-500"
+                                    >
+                                        <option value="linear">直线</option>
+                                        <option value="bezier">Bezier</option>
+                                    </select>
+                                </label>
+                                <label className="text-[10px] text-slate-400">
+                                    旋转模式
+                                    <select
+                                        value={selectedMotion.rotationMode || 'lerp'}
+                                        onChange={(event) => updateSelectedMotion({ rotationMode: event.target.value as 'fixed' | 'lerp' })}
+                                        className="mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 text-xs text-slate-100 outline-none focus:border-blue-500"
+                                    >
+                                        <option value="lerp">旋转插值</option>
+                                        <option value="fixed">固定朝向</option>
+                                    </select>
+                                </label>
+                                <div className="flex items-end">
+                                    <button
+                                        type="button"
+                                        onClick={resetSelectedMotion}
+                                        disabled={!selectedGap.transition || !selectedMotionPerformerId || !selectedGap.transition.objectMotions[selectedMotionPerformerId]}
+                                        className="h-9 w-full rounded-md border border-slate-700 text-xs text-slate-300 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+                                    >
+                                        重置当前对象
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="mt-3 grid grid-cols-2 gap-2">
+                                <label className="text-[10px] text-slate-400">
+                                    起始队形角度
+                                    <EditableNumberInput
+                                        step={1}
+                                        value={selectedMotionPerformerId
+                                            ? selectedGapFrames.fromFrame.rotations?.[selectedMotionPerformerId]
+                                                ?? selectableMotionPerformers.find((item) => item.id === selectedMotionPerformerId)?.rotation
+                                                ?? 0
+                                            : 0}
+                                        onChange={(value) => {
+                                            if (selectedMotionPerformerId) {
+                                                onFrameRotationChange(selectedGapFrames.fromFrame.id, selectedMotionPerformerId, value);
+                                            }
+                                        }}
+                                        className="mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 font-mono text-xs text-slate-100 outline-none focus:border-blue-500"
+                                    />
+                                </label>
+                                <label className="text-[10px] text-slate-400">
+                                    目标队形角度
+                                    <EditableNumberInput
+                                        step={1}
+                                        value={selectedMotionPerformerId
+                                            ? selectedGapFrames.toFrame.rotations?.[selectedMotionPerformerId]
+                                                ?? selectableMotionPerformers.find((item) => item.id === selectedMotionPerformerId)?.rotation
+                                                ?? 0
+                                            : 0}
+                                        onChange={(value) => {
+                                            if (selectedMotionPerformerId) {
+                                                onFrameRotationChange(selectedGapFrames.toFrame.id, selectedMotionPerformerId, value);
+                                            }
+                                        }}
+                                        className="mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 font-mono text-xs text-slate-100 outline-none focus:border-blue-500"
+                                    />
+                                </label>
+                            </div>
+                            {(selectedMotion.pathType || 'linear') === 'bezier' && (
+                                <div className="mt-3 grid grid-cols-2 gap-3">
+                                    {[0, 1].map((index) => (
+                                        <div key={index} className="rounded-lg border border-slate-800 bg-slate-950/80 p-2">
+                                            <div className="mb-2 text-[10px] font-medium text-slate-300">控制点 {index + 1}</div>
+                                            <div className="grid grid-cols-3 gap-2">
+                                                {(['x', 'y', 'z'] as const).map((axis) => (
+                                                    <label key={axis} className="text-[10px] text-slate-500">
+                                                        {axis.toUpperCase()}
+                                                        <EditableNumberInput
+                                                            step={0.1}
+                                                            value={selectedMotion.controlPoints?.[index]?.[axis] ?? 0}
+                                                            onChange={(value) => updateControlPoint(index, axis, value)}
+                                                            className="mt-1 h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 font-mono text-[11px] text-slate-100 outline-none focus:border-blue-500"
+                                                        />
+                                                    </label>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </>
+                    )}
+                </div>
+            )}
             {selectedMarker && (
                 <div
                     className="absolute bottom-3 left-1/2 z-[70] w-[min(360px,calc(100vw-1.5rem))] -translate-x-1/2 rounded-xl border border-slate-700 bg-slate-900/98 p-3 shadow-2xl"

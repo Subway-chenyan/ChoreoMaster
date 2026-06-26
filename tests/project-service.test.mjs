@@ -154,6 +154,93 @@ test('normalizes audio markers and persists them in project.json', async () => {
   });
 });
 
+test('persists transition segments and motion settings in project.json', async () => {
+  await withTempDir(async (storagePath) => {
+    const created = await createManagedProject(storagePath, 'Transition Project');
+    await saveManagedProject(storagePath, created.id, {
+      ...projectDocument('Transition Project'),
+      frames: [
+        {
+          id: 'frame-1',
+          name: 'Opening',
+          startTime: 0,
+          duration: 2000,
+          positions: { 'prop-1': { x: 20, y: 30 } },
+        },
+        {
+          id: 'frame-2',
+          name: 'Ending',
+          startTime: 5000,
+          duration: 2000,
+          positions: { 'prop-1': { x: 80, y: 70 } },
+        },
+      ],
+      transitions: [{
+        id: 'transition-frame-1-frame-2',
+        fromFrameId: 'frame-1',
+        toFrameId: 'frame-2',
+        duration: 3000,
+        objectMotions: {
+          'prop-1': {
+            pathType: 'bezier',
+            controlPoints: [
+              { x: 30, y: 20 },
+              { x: 70, y: 80, z: 1.5 },
+            ],
+            rotationMode: 'lerp',
+            startRotation: 0,
+            endRotation: 135,
+          },
+        },
+      }],
+    });
+
+    const saved = JSON.parse(await readFile(path.join(created.path, 'project.json'), 'utf8'));
+    assert.equal(saved.transitions.length, 1);
+    assert.equal(saved.transitions[0].objectMotions['prop-1'].pathType, 'bezier');
+    assert.equal(saved.transitions[0].objectMotions['prop-1'].endRotation, 135);
+
+    const loaded = await loadManagedProject(storagePath, created.id);
+    assert.equal(loaded.data.transitions.length, 1);
+    assert.equal(loaded.data.transitions[0].objectMotions['prop-1'].rotationMode, 'lerp');
+    assert.deepEqual(loaded.data.transitions[0].objectMotions['prop-1'].controlPoints[1], { x: 70, y: 80, z: 1.5 });
+  });
+});
+
+test('persists frame rotations and prop pivot settings', async () => {
+  await withTempDir(async (storagePath) => {
+    const created = await createManagedProject(storagePath, 'Pivot Project');
+    const document = projectDocument('Pivot Project');
+    document.performers = [{
+      id: 'door',
+      name: 'Door',
+      color: '#334155',
+      label: 'D',
+      shape: 'square',
+      type: 'prop',
+      propCategory: 'prop',
+      width: 2,
+      height: 3,
+      depth: 0.2,
+      rotationPivot: 'left',
+    }];
+    document.frames = [{
+      id: 'frame-1',
+      name: 'Open',
+      startTime: 0,
+      duration: 2000,
+      positions: { door: { x: 25, y: 50 } },
+      rotations: { door: 75 },
+    }];
+
+    await saveManagedProject(storagePath, created.id, document);
+    const loaded = await loadManagedProject(storagePath, created.id);
+
+    assert.equal(loaded.data.performers[0].rotationPivot, 'left');
+    assert.equal(loaded.data.frames[0].rotations.door, 75);
+  });
+});
+
 test('exports and imports a complete project as a new managed project', async () => {
   await withTempDir(async (storagePath) => {
     const created = await createManagedProject(storagePath, 'Portable Project');
