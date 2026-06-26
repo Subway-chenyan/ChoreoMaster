@@ -41,6 +41,8 @@ const DEFAULT_FRAME: Frame = {
   positions: {}
 };
 
+const WINDOWS_DESKTOP_DOWNLOAD_URL = 'https://beat.cosdrama.cn/downloads/CosStage-Setup-x64.exe';
+
 const createDefaultStageConfig = (): StageConfig => ({
   width: 20,
   depth: 20 / (16 / 9),
@@ -210,6 +212,7 @@ const App: React.FC = () => {
   const [gridScale, setGridScale] = useState(DEFAULT_STAGE_GRID_SPACING);
   const [showHelp, setShowHelp] = useState(false);
   const [showProductGuide, setShowProductGuide] = useState(false);
+  const [showWebSaveReminder, setShowWebSaveReminder] = useState(() => !window.electronAPI?.isElectron);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [stageToolbarCollapsed, setStageToolbarCollapsed] = useState(() => window.matchMedia('(max-width: 1100px)').matches);
   const [sidebarWidth, setSidebarWidth] = useState<number>(320);
@@ -3177,6 +3180,76 @@ const App: React.FC = () => {
     <div className={`min-h-[100dvh] h-[100dvh] w-screen flex flex-col safe-top safe-bottom ${theme === 'dark' ? 'bg-slate-950 text-slate-200' : 'bg-gray-50 text-gray-900'} overflow-hidden`}>
       {/* Help Modal */}
       <HelpModal isOpen={showHelp} onClose={() => setShowHelp(false)} />
+      {showWebSaveReminder && (
+        <div className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="web-save-reminder-title"
+            className={`w-full max-w-lg rounded-2xl border p-6 shadow-2xl ${
+              theme === 'dark' ? 'border-slate-700 bg-slate-900 text-slate-100' : 'border-gray-200 bg-white text-gray-900'
+            }`}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-400">Web 端保存提醒</p>
+                <h2 id="web-save-reminder-title" className="mt-2 text-xl font-semibold">
+                  请及时导出项目 JSON
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowWebSaveReminder(false)}
+                className={`rounded-lg p-2 transition-colors ${
+                  theme === 'dark' ? 'text-slate-400 hover:bg-slate-800 hover:text-white' : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900'
+                }`}
+                aria-label="关闭 Web 端保存提醒"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="mt-5 space-y-4 text-sm leading-6">
+              <p className={theme === 'dark' ? 'text-slate-300' : 'text-gray-600'}>
+                当前 Web 端更适合临时编辑与体验。为了避免项目进度丢失，请在左侧侧边栏进入“项目管理”，并及时点击“导出项目 (JSON)”保存到本地。
+              </p>
+
+              <div className={`rounded-xl border p-4 ${
+                theme === 'dark' ? 'border-blue-500/30 bg-blue-500/10' : 'border-blue-200 bg-blue-50'
+              }`}>
+                <p className="font-medium text-blue-500">想要更好的保存体验，建议下载 Windows 桌面端。</p>
+                <p className={`mt-2 ${
+                  theme === 'dark' ? 'text-slate-300' : 'text-gray-600'
+                }`}>
+                  桌面端支持更完整的本地项目管理与保存流程，更适合作为正式项目的长期工作环境。
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setShowWebSaveReminder(false)}
+                className={`rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${
+                  theme === 'dark'
+                    ? 'border-slate-700 text-slate-200 hover:bg-slate-800'
+                    : 'border-gray-200 text-gray-700 hover:bg-gray-100'
+                }`}
+              >
+                我知道了
+              </button>
+              <a
+                href={WINDOWS_DESKTOP_DOWNLOAD_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-500"
+              >
+                下载 Windows 桌面端
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
       {showProductGuide && <ProductGuide onClose={() => setShowProductGuide(false)} />}
 
       {/* Top Bar */}
