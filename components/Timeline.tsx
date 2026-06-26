@@ -35,6 +35,7 @@ interface TimelineProps {
     onExportVideo?: () => void;
     isExporting?: boolean;
     exportProgress?: number;
+    showTransitionEditor?: boolean;
 }
 
 export const Timeline: React.FC<TimelineProps> = ({
@@ -66,7 +67,8 @@ export const Timeline: React.FC<TimelineProps> = ({
     outPointMs,
     onExportVideo,
     isExporting,
-    exportProgress
+    exportProgress,
+    showTransitionEditor = false
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -662,7 +664,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                     </div>
                 </div>
             </div>
-            {selectedGap && selectedTransition && selectedGapFrames && (
+            {showTransitionEditor && selectedGap && selectedTransition && selectedGapFrames && (
                 <div
                     className="absolute bottom-3 right-3 z-[70] w-[min(420px,calc(100vw-1.5rem))] rounded-xl border border-slate-700 bg-slate-900/98 p-3 shadow-2xl"
                     onPointerDown={(event) => event.stopPropagation()}

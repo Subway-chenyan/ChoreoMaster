@@ -272,6 +272,12 @@ encoder.encode(frame);
 - Preserve resources needed by the `MediaRecorder` fallback until fallback completes.
 - For real-time fallback, probe `MediaRecorder.isTypeSupported()` in this order:
   H.264/AAC MP4, H.264 MP4, generic MP4, then WebM.
+- Treat `MediaRecorder.isTypeSupported()` as a weak hint only. Windows/Electron can
+  report a MIME type as supported and still throw synchronously from
+  `new MediaRecorder(...)` or `recorder.start(...)` with an encoder
+  configuration error. Real-time export must attempt to start each candidate
+  format, fall through to lower bitrates / later MIME types on failure, and only
+  bind the final file extension to the format that actually started.
 - The selected recorder MIME type, save-picker accept type, Blob type, and file
   extension must come from the same format result. Never rename WebM bytes to `.mp4`.
 - Browsers without native MP4 recording require server-side or WASM transcoding

@@ -10,6 +10,7 @@ import {
   PerformerType,
   AIConfig,
   AIChoreoPlan,
+  ObjectMotion,
   ProjectDocument,
   ProjectLoadResult,
   PropRotationPivot,
@@ -22,6 +23,7 @@ import { Sidebar } from './components/Sidebar';
 import { Stage } from './components/Stage';
 import Stage3D from './components/Stage3D';
 import { Timeline } from './components/Timeline';
+import { EditableNumberInput } from './components/FormControls';
 import { HelpModal } from './components/HelpModal';
 import { ProductGuide } from './components/ProductGuide';
 import { useTheme } from './contexts/ThemeContext';
@@ -166,42 +168,82 @@ type MediaRecorderExportFormat = {
   description: string;
 };
 
-const getMediaRecorderExportFormat = (): MediaRecorderExportFormat => {
-  const candidates: MediaRecorderExportFormat[] = [
-    {
-      mimeType: 'video/mp4;codecs=avc1.42001E,mp4a.40.2',
-      extension: 'mp4',
-      description: 'MP4 video',
-    },
-    {
-      mimeType: 'video/mp4;codecs=avc1.42001E',
-      extension: 'mp4',
-      description: 'MP4 video',
-    },
-    {
-      mimeType: 'video/mp4',
-      extension: 'mp4',
-      description: 'MP4 video',
-    },
-    {
-      mimeType: 'video/webm;codecs=vp9,opus',
-      extension: 'webm',
-      description: 'WebM video',
-    },
-    {
-      mimeType: 'video/webm;codecs=vp8,opus',
-      extension: 'webm',
-      description: 'WebM video',
-    },
-    {
-      mimeType: 'video/webm',
-      extension: 'webm',
-      description: 'WebM video',
-    },
-  ];
+const MEDIA_RECORDER_EXPORT_FORMATS: MediaRecorderExportFormat[] = [
+  {
+    mimeType: 'video/mp4;codecs=avc1.42001E,mp4a.40.2',
+    extension: 'mp4',
+    description: 'MP4 video',
+  },
+  {
+    mimeType: 'video/mp4;codecs=avc1.42001E',
+    extension: 'mp4',
+    description: 'MP4 video',
+  },
+  {
+    mimeType: 'video/mp4',
+    extension: 'mp4',
+    description: 'MP4 video',
+  },
+  {
+    mimeType: 'video/webm;codecs=vp9,opus',
+    extension: 'webm',
+    description: 'WebM video',
+  },
+  {
+    mimeType: 'video/webm;codecs=vp8,opus',
+    extension: 'webm',
+    description: 'WebM video',
+  },
+  {
+    mimeType: 'video/webm',
+    extension: 'webm',
+    description: 'WebM video',
+  },
+];
 
-  return candidates.find(({ mimeType }) => MediaRecorder.isTypeSupported(mimeType))
-    ?? candidates[candidates.length - 1];
+const getMediaRecorderExportFormats = (): MediaRecorderExportFormat[] => {
+  const supportedFormats = MEDIA_RECORDER_EXPORT_FORMATS.filter(({ mimeType }) => MediaRecorder.isTypeSupported(mimeType));
+  return supportedFormats.length > 0
+    ? supportedFormats
+    : [MEDIA_RECORDER_EXPORT_FORMATS[MEDIA_RECORDER_EXPORT_FORMATS.length - 1]];
+};
+
+const getMediaRecorderExportFormat = (): MediaRecorderExportFormat => {
+  return getMediaRecorderExportFormats()[0];
+};
+
+type StartedMediaRecorder = {
+  recorder: MediaRecorder;
+  format: MediaRecorderExportFormat;
+};
+
+const startMediaRecorderWithFallback = (
+  stream: MediaStream,
+  formats: MediaRecorderExportFormat[],
+  timesliceMs: number,
+): StartedMediaRecorder => {
+  let lastError: unknown = null;
+  const bitrateOptions: Array<number | undefined> = [5_000_000, 2_500_000, undefined];
+
+  for (const format of formats) {
+    for (const videoBitsPerSecond of bitrateOptions) {
+      try {
+        const options: MediaRecorderOptions = videoBitsPerSecond == null
+          ? { mimeType: format.mimeType }
+          : { mimeType: format.mimeType, videoBitsPerSecond };
+        const recorder = new MediaRecorder(stream, options);
+        recorder.start(timesliceMs);
+        return { recorder, format };
+      } catch (error) {
+        lastError = error;
+        console.warn('MediaRecorder configuration failed:', { mimeType: format.mimeType, videoBitsPerSecond, error });
+      }
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error('MediaRecorder 没有可用的录制编码配置');
 };
 
 const App: React.FC = () => {
@@ -1359,6 +1401,101 @@ const App: React.FC = () => {
     selectedTransition,
     selectedTransitionFrames,
     selectedTransitionPerformerId,
+  ]);
+
+  const handleTransitionStartPointChange = useCallback((nextPosition: Position) => {
+    if (!selectedTransitionPerformerId || !selectedTransitionFrames) return;
+    setFrames((previousFrames) => previousFrames.map((frame) => {
+      if (frame.id !== selectedTransitionFrames.fromFrame.id) return frame;
+      const previousPosition = frame.positions[selectedTransitionPerformerId];
+      return {
+        ...frame,
+        positions: {
+          ...frame.positions,
+          [selectedTransitionPerformerId]: {
+            x: nextPosition.x,
+            y: nextPosition.y,
+            ...(nextPosition.z !== undefined
+              ? { z: nextPosition.z }
+              : previousPosition?.z !== undefined
+                ? { z: previousPosition.z }
+                : {}),
+          },
+        },
+      };
+    }));
+  }, [selectedTransitionFrames, selectedTransitionPerformerId]);
+
+  const selectedTransitionPerformer = useMemo(() => (
+    selectedTransitionPerformerId
+      ? transitionSelectablePerformers.find((performer) => performer.id === selectedTransitionPerformerId) ?? null
+      : null
+  ), [selectedTransitionPerformerId, transitionSelectablePerformers]);
+
+  const selectedTransitionMotion = useMemo<ObjectMotion>(() => {
+    if (!selectedTransition || !selectedTransitionPerformerId) return {};
+    return selectedTransition.objectMotions[selectedTransitionPerformerId] || {};
+  }, [selectedTransition, selectedTransitionPerformerId]);
+
+  const canEditSelectedTransitionRotation = selectedTransitionPerformer?.type === 'prop';
+
+  const updateSelectedTransitionMotion = useCallback((updates: Partial<ObjectMotion>) => {
+    if (!selectedTransition || !selectedTransitionPerformerId) return;
+    const nextMotion: ObjectMotion = {
+      ...selectedTransitionMotion,
+      ...updates,
+    };
+    handleTransitionUpdate({
+      ...selectedTransition,
+      objectMotions: {
+        ...selectedTransition.objectMotions,
+        [selectedTransitionPerformerId]: nextMotion,
+      },
+    });
+  }, [
+    handleTransitionUpdate,
+    selectedTransition,
+    selectedTransitionMotion,
+    selectedTransitionPerformerId,
+  ]);
+
+  const resetSelectedTransitionMotion = useCallback(() => {
+    if (!selectedTransition || !selectedTransitionPerformerId) return;
+    const nextObjectMotions = { ...selectedTransition.objectMotions };
+    delete nextObjectMotions[selectedTransitionPerformerId];
+    if (Object.keys(nextObjectMotions).length === 0) {
+      handleTransitionDelete(selectedTransition.id);
+      return;
+    }
+    handleTransitionUpdate({
+      ...selectedTransition,
+      objectMotions: nextObjectMotions,
+    });
+  }, [
+    handleTransitionDelete,
+    handleTransitionUpdate,
+    selectedTransition,
+    selectedTransitionPerformerId,
+  ]);
+
+  const handleTransitionMotionControlPointChange = useCallback((index: number, axis: keyof MotionControlPoint, value: number) => {
+    if (!selectedTransition || !selectedTransitionPerformerId || !selectedTransitionFrames) return;
+    const start = selectedTransitionFrames.fromFrame.positions[selectedTransitionPerformerId];
+    const end = selectedTransitionFrames.toFrame.positions[selectedTransitionPerformerId];
+    if (!start || !end) return;
+    const defaults = getDefaultBezierControlPoints(start, end);
+    const nextControlPoints = [...(selectedTransitionMotion.controlPoints || defaults)];
+    nextControlPoints[index] = {
+      ...nextControlPoints[index],
+      [axis]: value,
+    };
+    updateSelectedTransitionMotion({ controlPoints: nextControlPoints });
+  }, [
+    selectedTransition,
+    selectedTransitionFrames,
+    selectedTransitionMotion,
+    selectedTransitionPerformerId,
+    updateSelectedTransitionMotion,
   ]);
 
   const getRotationTargetFrameId = useCallback((): string | null => (
@@ -2797,8 +2934,40 @@ const App: React.FC = () => {
       stream = new MediaStream([...streamV.getVideoTracks(), ...dest.stream.getAudioTracks()]);
     }
 
-    const mime = realtimeFormat.mimeType;
-    const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 5000000 });
+    let activeRealtimeFormat = realtimeFormat;
+    let recorder: MediaRecorder;
+    try {
+      const recorderFormats = realtimeWritable
+        ? getMediaRecorderExportFormats().filter((format) => format.extension === realtimeFormat.extension)
+        : getMediaRecorderExportFormats();
+      const startedRecorder = startMediaRecorderWithFallback(stream, recorderFormats, 100);
+      recorder = startedRecorder.recorder;
+      activeRealtimeFormat = startedRecorder.format;
+    } catch (err) {
+      stream.getTracks().forEach((track) => track.stop());
+      if (realtimeWritable) {
+        try { await realtimeWritable.abort?.(); } catch { }
+      }
+      ledRenderer?.dispose();
+      setIsExporting(false);
+      alert('实时录制导出失败：' + (err instanceof Error ? err.message : String(err)));
+      return;
+    }
+
+    if (desktopExportPath && activeRealtimeFormat.extension !== realtimeFormat.extension) {
+      recorder.stop();
+      const updatedPath = await requestElectronExportPath(downloadBaseName, activeRealtimeFormat.extension);
+      if (!updatedPath) {
+        stream.getTracks().forEach((track) => track.stop());
+        ledRenderer?.dispose();
+        setIsExporting(false);
+        return;
+      }
+      desktopExportPath = updatedPath;
+      recorder = startMediaRecorderWithFallback(stream, [activeRealtimeFormat], 100).recorder;
+    }
+
+    const mime = activeRealtimeFormat.mimeType;
     const chunks: Blob[] = [];
     let realtimeWriteChain = Promise.resolve();
     recorder.ondataavailable = (e: any) => {
@@ -2810,7 +2979,6 @@ const App: React.FC = () => {
       }
     };
 
-    recorder.start(100);
     if (source) source.start(0, inPointMs / 1000);
 
     const recordStart = performance.now();
@@ -2873,7 +3041,7 @@ const App: React.FC = () => {
       if (desktopExportPath) {
         await writeBlobToElectronPath(desktopExportPath, blob);
       } else {
-        downloadBlob(blob, `${downloadBaseName}.${realtimeFormat.extension}`);
+        downloadBlob(blob, `${downloadBaseName}.${activeRealtimeFormat.extension}`);
       }
     }
   };
@@ -3209,8 +3377,40 @@ const App: React.FC = () => {
       stream = new MediaStream([...streamV.getVideoTracks(), ...dest.stream.getAudioTracks()]);
     }
 
-    const mime = realtimeFormat.mimeType;
-    const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 5000000 });
+    let activeRealtimeFormat = realtimeFormat;
+    let recorder: MediaRecorder;
+    try {
+      const recorderFormats = realtimeWritable
+        ? getMediaRecorderExportFormats().filter((format) => format.extension === realtimeFormat.extension)
+        : getMediaRecorderExportFormats();
+      const startedRecorder = startMediaRecorderWithFallback(stream, recorderFormats, 100);
+      recorder = startedRecorder.recorder;
+      activeRealtimeFormat = startedRecorder.format;
+    } catch (err) {
+      stream.getTracks().forEach((track) => track.stop());
+      if (realtimeWritable) {
+        try { await realtimeWritable.abort?.(); } catch { }
+      }
+      offline.dispose();
+      setIsExporting(false);
+      alert('实时录制导出失败：' + (err instanceof Error ? err.message : String(err)));
+      return;
+    }
+
+    if (desktopExportPath && activeRealtimeFormat.extension !== realtimeFormat.extension) {
+      recorder.stop();
+      const updatedPath = await requestElectronExportPath(downloadBaseName, activeRealtimeFormat.extension);
+      if (!updatedPath) {
+        stream.getTracks().forEach((track) => track.stop());
+        offline.dispose();
+        setIsExporting(false);
+        return;
+      }
+      desktopExportPath = updatedPath;
+      recorder = startMediaRecorderWithFallback(stream, [activeRealtimeFormat], 100).recorder;
+    }
+
+    const mime = activeRealtimeFormat.mimeType;
     const chunks: Blob[] = [];
     let realtimeWriteChain = Promise.resolve();
     recorder.ondataavailable = (e: any) => {
@@ -3222,7 +3422,6 @@ const App: React.FC = () => {
       }
     };
 
-    recorder.start(100);
     if (source) source.start(0, inPointMs / 1000);
 
     const recordStart = performance.now();
@@ -3285,7 +3484,7 @@ const App: React.FC = () => {
       if (desktopExportPath) {
         await writeBlobToElectronPath(desktopExportPath, blob);
       } else {
-        downloadBlob(blob, `${downloadBaseName}.${realtimeFormat.extension}`);
+        downloadBlob(blob, `${downloadBaseName}.${activeRealtimeFormat.extension}`);
       }
     }
   };
@@ -3581,6 +3780,7 @@ const App: React.FC = () => {
               onSelectionChange={setSelectedPerformerIds}
               onPositionChange={handlePositionChange}
               onTransitionControlPointChange={handleTransitionControlPointChange}
+              onTransitionStartPointChange={handleTransitionStartPointChange}
               onTransitionObjectSelect={setSelectedTransitionPerformerId}
               onRotationStart={handleRotationStart}
               onRotationChange={handleRotationChange}
@@ -3614,6 +3814,159 @@ const App: React.FC = () => {
               gridScale={gridScale}
               readonly={isPlaying}
             />
+          )}
+
+          {selectedTransition && selectedTransitionFrames && (
+            <div
+              className="absolute right-4 z-40 w-[min(380px,calc(100vw-2rem))] rounded-xl border border-slate-700 bg-slate-900/95 p-3 text-slate-100 shadow-2xl backdrop-blur"
+              style={{
+                top: isCompactLayout ? 12 : 16,
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold">过渡参数</div>
+                  <div className="mt-0.5 truncate text-[11px] text-slate-400">
+                    {selectedTransitionFrames.fromFrame.name} → {selectedTransitionFrames.toFrame.name}
+                    <span className="ml-2">{(selectedTransition.duration / 1000).toFixed(1)} 秒</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleSelectTransition(null)}
+                  className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-white"
+                  aria-label="关闭过渡参数"
+                >
+                  <X size={15} />
+                </button>
+              </div>
+
+              {transitionSelectablePerformers.length === 0 ? (
+                <div className="rounded-lg border border-slate-800 bg-slate-950/80 px-3 py-2 text-xs text-slate-400">
+                  当前过渡没有同时存在于前后队形的对象，无法配置路径。
+                </div>
+              ) : (
+                <>
+                  <div className="mb-3 rounded-lg border border-slate-800 bg-slate-950/70 p-1.5">
+                    <div className="grid grid-cols-2 gap-1">
+                      {transitionSelectablePerformers.map((performer) => {
+                        const motion = selectedTransition.objectMotions[performer.id];
+                        const selected = performer.id === selectedTransitionPerformerId;
+                        return (
+                          <button
+                            key={performer.id}
+                            type="button"
+                            onClick={() => setSelectedTransitionPerformerId(performer.id)}
+                            className={`flex items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-[11px] ${selected ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'}`}
+                          >
+                            <span className="truncate">{performer.name}</span>
+                            <span className="shrink-0 text-[9px] opacity-75">
+                              {motion?.pathType === 'bezier' ? '曲线' : '直线'}
+                              {performer.type === 'prop' ? ` · ${motion?.rotationMode === 'fixed' ? '固定' : '旋转'}` : ''}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className={`grid gap-2 ${canEditSelectedTransitionRotation ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                    <label className="text-[10px] text-slate-400">
+                      路径
+                      <select
+                        value={selectedTransitionMotion.pathType || 'linear'}
+                        onChange={(event) => updateSelectedTransitionMotion({
+                          pathType: event.target.value as 'linear' | 'bezier',
+                          controlPoints: event.target.value === 'bezier' ? (selectedTransitionMotion.controlPoints || undefined) : undefined,
+                        })}
+                        className="mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 text-xs text-slate-100 outline-none focus:border-blue-500"
+                      >
+                        <option value="linear">直线</option>
+                        <option value="bezier">Bezier 曲线</option>
+                      </select>
+                    </label>
+
+                    {canEditSelectedTransitionRotation && (
+                      <label className="text-[10px] text-slate-400">
+                        旋转模式
+                        <select
+                          value={selectedTransitionMotion.rotationMode || 'lerp'}
+                          onChange={(event) => updateSelectedTransitionMotion({ rotationMode: event.target.value as 'fixed' | 'lerp' })}
+                          className="mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 text-xs text-slate-100 outline-none focus:border-blue-500"
+                        >
+                          <option value="lerp">旋转插值</option>
+                          <option value="fixed">固定朝向</option>
+                        </select>
+                      </label>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={resetSelectedTransitionMotion}
+                    disabled={!selectedTransitionPerformerId || !selectedTransition.objectMotions[selectedTransitionPerformerId]}
+                    className="mt-2 h-9 w-full rounded-md border border-slate-700 text-xs text-slate-300 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    重置当前对象
+                  </button>
+
+                  {canEditSelectedTransitionRotation && selectedTransitionPerformerId && (
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <label className="text-[10px] text-slate-400">
+                        起始队形角度
+                        <EditableNumberInput
+                          step={1}
+                          value={selectedTransitionFrames.fromFrame.rotations?.[selectedTransitionPerformerId]
+                            ?? selectedTransitionPerformer?.rotation
+                            ?? 0}
+                          onChange={(value) => {
+                            handleFrameRotationChange(selectedTransitionFrames.fromFrame.id, selectedTransitionPerformerId, value);
+                          }}
+                          className="mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 font-mono text-xs text-slate-100 outline-none focus:border-blue-500"
+                        />
+                      </label>
+                      <label className="text-[10px] text-slate-400">
+                        目标队形角度
+                        <EditableNumberInput
+                          step={1}
+                          value={selectedTransitionFrames.toFrame.rotations?.[selectedTransitionPerformerId]
+                            ?? selectedTransitionPerformer?.rotation
+                            ?? 0}
+                          onChange={(value) => {
+                            handleFrameRotationChange(selectedTransitionFrames.toFrame.id, selectedTransitionPerformerId, value);
+                          }}
+                          className="mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 font-mono text-xs text-slate-100 outline-none focus:border-blue-500"
+                        />
+                      </label>
+                    </div>
+                  )}
+
+                  {(selectedTransitionMotion.pathType || 'linear') === 'bezier' && (
+                    <div className="mt-3 grid grid-cols-2 gap-3">
+                      {[0, 1].map((index) => (
+                        <div key={index} className="rounded-lg border border-slate-800 bg-slate-950/80 p-2">
+                          <div className="mb-2 text-[10px] font-medium text-slate-300">控制点 {index + 1}</div>
+                          <div className="grid grid-cols-3 gap-2">
+                            {(['x', 'y', 'z'] as const).map((axis) => (
+                              <label key={axis} className="text-[10px] text-slate-500">
+                                {axis.toUpperCase()}
+                                <EditableNumberInput
+                                  step={0.1}
+                                  value={selectedTransitionMotion.controlPoints?.[index]?.[axis] ?? 0}
+                                  onChange={(value) => handleTransitionMotionControlPointChange(index, axis, value)}
+                                  className="mt-1 h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 font-mono text-[11px] text-slate-100 outline-none focus:border-blue-500"
+                                />
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
           )}
 
           <div

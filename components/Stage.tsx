@@ -27,6 +27,7 @@ interface StageProps {
   onSelectionChange: (ids: string[]) => void;
   onPositionChange: (updates: { id: string; pos: Position }[]) => void;
   onTransitionControlPointChange?: (index: number, pos: Position) => void;
+  onTransitionStartPointChange?: (pos: Position) => void;
   onTransitionObjectSelect?: (performerId: string) => void;
   onRotationStart?: (performerId: string) => void;
   onRotationChange?: (performerId: string, rotation: number) => void;
@@ -87,6 +88,12 @@ interface SelectionBoxStyle {
   height: number;
 }
 
+interface TransitionStartDragState {
+  startClientX: number;
+  startClientY: number;
+  initialPosition: Position;
+}
+
 function getPolygonClipPath(points: { x: number; y: number }[] | undefined): string | undefined {
   if (!points || points.length < 3) return undefined;
   return `polygon(${points.map(p =>
@@ -105,6 +112,7 @@ export const Stage: React.FC<StageProps> = ({
   onSelectionChange,
   onPositionChange,
   onTransitionControlPointChange,
+  onTransitionStartPointChange,
   onTransitionObjectSelect,
   onRotationStart,
   onRotationChange,
@@ -197,6 +205,7 @@ export const Stage: React.FC<StageProps> = ({
   }
   const [resizeState, setResizeState] = useState<ResizeState | null>(null);
   const [controlPointDragIndex, setControlPointDragIndex] = useState<number | null>(null);
+  const [startPointDragState, setStartPointDragState] = useState<TransitionStartDragState | null>(null);
   const [rotationDragId, setRotationDragId] = useState<string | null>(null);
   const selectedTransitionPath = transitionPaths.find((path) => path.isSelected) ?? null;
 
@@ -249,6 +258,47 @@ export const Stage: React.FC<StageProps> = ({
       window.removeEventListener('pointercancel', handlePointerUp);
     };
   }, [controlPointDragIndex, getPercentagePos, onTransitionControlPointChange, readonly, selectedTransitionPath, stageXBounds.max, stageXBounds.min]);
+
+  useEffect(() => {
+    if (!startPointDragState || !selectedTransitionPath || !onTransitionStartPointChange || readonly) {
+      return undefined;
+    }
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const movement = Math.hypot(
+        event.clientX - startPointDragState.startClientX,
+        event.clientY - startPointDragState.startClientY,
+      );
+      if (movement < 3) return;
+      const nextPos = getPercentagePos(event.clientX, event.clientY);
+      onTransitionStartPointChange({
+        x: Math.max(stageXBounds.min, Math.min(stageXBounds.max, nextPos.x)),
+        y: Math.max(0, Math.min(100, nextPos.y)),
+        ...(startPointDragState.initialPosition.z !== undefined ? { z: startPointDragState.initialPosition.z } : {}),
+      });
+    };
+
+    const handlePointerUp = () => {
+      setStartPointDragState(null);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
+    };
+  }, [
+    getPercentagePos,
+    onTransitionStartPointChange,
+    readonly,
+    selectedTransitionPath,
+    startPointDragState,
+    stageXBounds.max,
+    stageXBounds.min,
+  ]);
 
   useEffect(() => {
     if (!rotationDragId || readonly || !onRotationChange) return undefined;
@@ -460,6 +510,7 @@ export const Stage: React.FC<StageProps> = ({
     if (readonly) return;
     if (transitionPaths.length > 0) {
       onTransitionObjectSelect?.(id);
+      return;
     }
     e.currentTarget.setPointerCapture(e.pointerId);
 
@@ -675,14 +726,37 @@ export const Stage: React.FC<StageProps> = ({
                     }}
                   />
                   {overlay.isSelected && (
-                    <>
-                      <circle cx={overlay.startView.x} cy={overlay.startView.y} r="0.8" fill="#34d399" />
-                      <circle cx={overlay.endView.x} cy={overlay.endView.y} r="0.8" fill="#f59e0b" />
-                    </>
+                    <circle cx={overlay.endView.x} cy={overlay.endView.y} r="0.8" fill="#f59e0b" />
                   )}
                 </g>
               ))}
             </svg>
+            {transitionOverlays
+              .filter((overlay) => overlay.isSelected)
+              .map((overlay) => (
+              <button
+                key={`transition-start-${overlay.performerId}`}
+                type="button"
+                onPointerDown={(event) => {
+                  if (readonly) return;
+                  event.stopPropagation();
+                  event.preventDefault();
+                  onTransitionObjectSelect?.(overlay.performerId);
+                  setStartPointDragState({
+                    startClientX: event.clientX,
+                    startClientY: event.clientY,
+                    initialPosition: { ...overlay.start },
+                  });
+                }}
+                className={`absolute z-[17] h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 shadow-lg ring-2 ring-emerald-400/25 ${readonly ? 'cursor-default border-slate-300 bg-slate-600' : 'cursor-grab border-emerald-100 bg-emerald-500 active:cursor-grabbing'}`}
+                style={{
+                  left: `${overlay.startView.x}%`,
+                  top: `${overlay.startView.y}%`,
+                }}
+                title="拖动调整起始点"
+                aria-label="拖动调整过渡起始点"
+              />
+              ))}
             {transitionOverlays
               .filter((overlay) => overlay.isSelected && overlay.pathType === 'bezier')
               .flatMap((overlay) => overlay.controlPointsView.map((controlPoint, index) => (
