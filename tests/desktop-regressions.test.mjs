@@ -88,6 +88,18 @@ test('Electron build excludes the embedded Agent and FFmpeg', async () => {
   assert.doesNotMatch(agentService, /electronAPI\.agent|agent:getRuntime/);
 });
 
+test('COS deploy verification does not fail on reachable legacy PWA URLs', async () => {
+  const workflow = await read('.github/workflows/deploy-cos.yml');
+
+  assert.match(workflow, /Current build still references legacy PWA artifacts/);
+  assert.match(workflow, /grep -R -n -E 'sw\\.js\|manifest\\.webmanifest\|navigator\\.serviceWorker\|serviceWorker\\.register' dist/);
+  assert.match(workflow, /report_legacy_url\(\) \{/);
+  assert.match(workflow, /does not fail deploy because CDN\/static-site fallback can keep legacy URLs at 200/);
+  assert.match(workflow, /report_legacy_url "\$\{CDN_URL\}sw\.js" "Legacy sw\.js"/);
+  assert.doesNotMatch(workflow, /wait_until_unreachable/);
+  assert.doesNotMatch(workflow, /still reachable after CDN purge wait/);
+});
+
 test('packaged Electron uses the branded application icons', async () => {
   const [builder, main] = await Promise.all([
     read('electron-builder.config.cjs'),
