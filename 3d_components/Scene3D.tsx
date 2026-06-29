@@ -7,7 +7,7 @@ import Performer3D from './Performer3D';
 import Prop3D from './Prop3D';
 import LEDTV from '../components/LEDTV';
 import { Performer, Position, StageConfig } from '../types';
-import { getTotalStageWidth, getWingWidth, mapTo2D } from '../utils/coordinates';
+import { getTotalStageWidth, mapTo2D } from '../utils/coordinates';
 import { buildPlatformOccupancy } from '../utils/platforms';
 
 interface DragContextType {
@@ -33,6 +33,7 @@ interface Scene3DProps {
   isPlaying?: boolean;
   hiddenGroupIds?: string[];
   gridScale?: number;
+  showDirectionArrows?: boolean;
   onDragStart?: (ids: string[]) => void;
   onDragEnd?: (ids: string[]) => void;
   onPositionChange?: (updates: { id: string; pos: Position }[]) => void;
@@ -74,6 +75,7 @@ const Scene3D: React.FC<Scene3DProps> = ({
   isPlaying = false,
   hiddenGroupIds = [],
   gridScale = 1,
+  showDirectionArrows = true,
   onDragStart,
   onDragEnd,
   onPositionChange,
@@ -168,7 +170,7 @@ const Scene3D: React.FC<Scene3DProps> = ({
         currentTime={currentTime}
         isPlaying={isPlaying}
       />
-      <StageFloor width={stageConfig.width} depth={stageConfig.depth} wingWidth={getWingWidth(stageConfig)} gridScale={gridScale} />
+      <StageFloor stageConfig={stageConfig} mediaCache={mediaCache} gridScale={gridScale} />
       {visiblePerformers.map(p => {
         const pos = positions[p.id]; if (!pos) return null;
         const commonProps = {
@@ -179,6 +181,7 @@ const Scene3D: React.FC<Scene3DProps> = ({
           isSelected: selectedIds.includes(p.id),
           onSelect,
           stageConfig,
+          showDirectionArrows,
           onDragStart: handleHeightDragStart,
           onDragEnd: handleHeightDragEnd,
           onPositionChange: readonly ? undefined : (newPos: Position) => handlePositionChange(p.id, newPos)

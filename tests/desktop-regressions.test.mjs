@@ -88,6 +88,18 @@ test('Electron build excludes the embedded Agent and FFmpeg', async () => {
   assert.doesNotMatch(agentService, /electronAPI\.agent|agent:getRuntime/);
 });
 
+test('COS deploy verification does not fail on reachable legacy PWA URLs', async () => {
+  const workflow = await read('.github/workflows/deploy-cos.yml');
+
+  assert.match(workflow, /Current build still references legacy PWA artifacts/);
+  assert.match(workflow, /grep -R -n -E 'sw\\.js\|manifest\\.webmanifest\|navigator\\.serviceWorker\|serviceWorker\\.register' dist/);
+  assert.match(workflow, /report_legacy_url\(\) \{/);
+  assert.match(workflow, /does not fail deploy because CDN\/static-site fallback can keep legacy URLs at 200/);
+  assert.match(workflow, /report_legacy_url "\$\{CDN_URL\}sw\.js" "Legacy sw\.js"/);
+  assert.doesNotMatch(workflow, /wait_until_unreachable/);
+  assert.doesNotMatch(workflow, /still reachable after CDN purge wait/);
+});
+
 test('packaged Electron uses the branded application icons', async () => {
   const [builder, main] = await Promise.all([
     read('electron-builder.config.cjs'),
@@ -118,6 +130,99 @@ test('stage grid uses meter spacing, centered ruler marks, and third divisions',
   assert.match(stageFloor, /STAGE_THIRD_POSITIONS\.map/);
   assert.match(offline, /createCenteredStageGridMarks\(totalWidth, gridScale\)/);
   assert.match(app, /\{gridScale\.toFixed\(1\)\}m/);
+});
+
+test('stage background upload uses a custom width dialog and sidebar controls', async () => {
+  const [app, dialog, sidebar] = await Promise.all([
+    read('App.tsx'),
+    read('components/StageBackgroundDialog.tsx'),
+    read('components/Sidebar.tsx'),
+  ]);
+
+  assert.match(app, /StageBackgroundDialog/);
+  assert.match(app, /calculateStageDimensionsFromImage/);
+  assert.match(app, /setStageConfig\(saved\.data\.stageConfig\)/);
+  assert.match(dialog, /role="dialog"/);
+  assert.doesNotMatch(`${app}\n${dialog}`, /\bprompt\s*\(/);
+  assert.match(sidebar, /舞台底图/);
+  assert.match(sidebar, /舞台划线/);
+  assert.match(sidebar, /LED 距舞台后沿/);
+});
+
+test('2D stage renders background, LED marker, arrows, and actor rotation controls', async () => {
+  const stage = await read('components/Stage.tsx');
+  const app = await read('App.tsx');
+
+  assert.match(stage, /resolveStageBackgroundUrl/);
+  assert.match(stage, /getLedStageYPercent/);
+  assert.match(stage, /data-direction-arrow/);
+  assert.match(stage, /showDirectionArrows\?: boolean/);
+  assert.match(stage, /showDirectionArrows = true/);
+  assert.match(stage, /\{showDirectionArrows && <DirectionArrow \/>\}/);
+  assert.match(stage, /viewBox="0 0 32 44"/);
+  assert.match(stage, /bottom-\[-16px\] left-1\/2/);
+  assert.match(stage, /h-11 w-8/);
+  assert.match(stage, /strokeWidth="5"/);
+  assert.match(stage, /showDirectionArrows \? '-bottom-10' : '-bottom-6'/);
+  assert.match(stage, /\* 180 \/ Math\.PI\) - 90/);
+  assert.doesNotMatch(stage, /\* 180 \/ Math\.PI\) \+ 90/);
+  assert.match(stage, /data-performer-id=\{performer\.id\}/);
+  assert.match(stage, /onRotationStart\?\.\(performer\.id\)/);
+  assert.match(stage, /rotations\[performer\.id\] \?\? performer\.rotation \?\? 0/);
+  assert.match(app, /const \[showDirectionArrows, setShowDirectionArrows\] = useState\(true\)/);
+  assert.match(app, /setShowDirectionArrows\(!showDirectionArrows\)/);
+  assert.match(app, /showDirectionArrows \? <Eye size=\{18\} \/> : <EyeOff size=\{18\} \/>/);
+  assert.match(app, /showDirectionArrows=\{showDirectionArrows\}/);
+});
+
+test('2D export direction arrows default toward the stage front', async () => {
+  const app = await read('App.tsx');
+
+  assert.match(app, /const arrowSize = size \* 1\.35/);
+  assert.match(app, /ctx\.lineWidth = Math\.max\(4, 3 \* scale\)/);
+  assert.match(app, /ctx\.moveTo\(0, -arrowSize \* 0\.22\)/);
+  assert.match(app, /ctx\.lineTo\(0, arrowSize \* 0\.38\)/);
+  assert.match(app, /ctx\.moveTo\(0, arrowSize \* 0\.55\)/);
+  assert.match(app, /if \(showDirectionArrows\) \{\s*drawDirectionArrow/);
+  assert.match(app, /ctx\.rotate\(rot\)/);
+  assert.doesNotMatch(app, /ctx\.rotate\(-rot\)/);
+});
+
+test('live 3D stage uses the background, LED depth, and direction arrows', async () => {
+  const [scene, floor, led, performer, prop] = await Promise.all([
+    read('3d_components/Scene3D.tsx'),
+    read('3d_components/StageFloor.tsx'),
+    read('components/LEDTV.tsx'),
+    read('3d_components/Performer3D.tsx'),
+    read('3d_components/Prop3D.tsx'),
+  ]);
+
+  assert.match(scene, /stageConfig=\{stageConfig\}/);
+  assert.match(floor, /resolveStageBackgroundUrl/);
+  assert.match(floor, /showStageLines/);
+  assert.match(led, /getLedZPosition/);
+  assert.match(performer, /DirectionArrow3D/);
+  assert.match(prop, /DirectionArrow3D/);
+  assert.match(scene, /showDirectionArrows = true/);
+  assert.match(scene, /showDirectionArrows,/);
+  assert.match(performer, /\{showDirectionArrows && <DirectionArrow3D/);
+  assert.match(prop, /\{showDirectionArrows && <DirectionArrow3D/);
+  assert.match(await read('3d_components/DirectionArrow3D.tsx'), /0\.14, 0\.055, 0\.64/);
+  assert.match(await read('3d_components/DirectionArrow3D.tsx'), /0\.26, 0\.46, 16/);
+});
+
+test('offline 3D renderer includes stage background, LED depth, and arrows', async () => {
+  const offline = await read('utils/OfflineRenderer3D.ts');
+
+  assert.match(offline, /resolveStageBackgroundUrl/);
+  assert.match(offline, /getLedZPosition/);
+  assert.match(offline, /createDirectionArrow/);
+  assert.match(offline, /includeDirectionArrows: boolean = true/);
+  assert.match(offline, /createPropMesh\(p, includeDirectionArrows\)/);
+  assert.match(offline, /createPerformerMesh\(p\.color, includeDirectionArrows\)/);
+  assert.match(offline, /0\.14, 0\.055, 0\.64/);
+  assert.match(offline, /0\.26, 0\.46, 16/);
+  assert.match(offline, /showStageLines/);
 });
 
 test('stage selection box converts client pixels into transformed local coordinates', async () => {

@@ -25,6 +25,7 @@ export type {
   PropRotationPivot,
   RotationMode,
   SceneState,
+  StageBackground,
   StageConfig,
   TransitionSegment,
 } from './electron/project-contract';

@@ -1,16 +1,55 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import * as THREE from 'three';
+import type { StageConfig } from '../types';
+import { getWingWidth } from '../utils/coordinates';
 import { createCenteredStageGridMarks, STAGE_THIRD_POSITIONS } from '../utils/stage-grid';
+import { resolveStageBackgroundUrl } from '../utils/stage-config';
 
 interface StageFloorProps {
-  width: number;
-  depth: number;
-  wingWidth?: number;
+  stageConfig: StageConfig;
+  mediaCache?: Record<string, string>;
   gridScale?: number;
 }
 
-const StageFloor: React.FC<StageFloorProps> = ({ width, depth, wingWidth = 0, gridScale = 1 }) => {
+const StageFloor: React.FC<StageFloorProps> = ({ stageConfig, mediaCache = {}, gridScale = 1 }) => {
+  const { width, depth } = stageConfig;
+  const wingWidth = getWingWidth(stageConfig);
   const totalWidth = width + wingWidth * 2;
   const gridMarks = createCenteredStageGridMarks(totalWidth, gridScale);
+  const showStageLines = stageConfig.showStageLines !== false;
+  const backgroundUrl = resolveStageBackgroundUrl(stageConfig, mediaCache);
+  const [backgroundTexture, setBackgroundTexture] = useState<THREE.Texture | null>(null);
+
+  useEffect(() => {
+    setBackgroundTexture(null);
+    if (!backgroundUrl) {
+      return undefined;
+    }
+    let disposed = false;
+    let loadedTexture: THREE.Texture | null = null;
+    new THREE.TextureLoader().load(
+      backgroundUrl,
+      (texture) => {
+        if (disposed) {
+          texture.dispose();
+          return;
+        }
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.wrapS = THREE.ClampToEdgeWrapping;
+        texture.wrapT = THREE.ClampToEdgeWrapping;
+        texture.minFilter = THREE.LinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+        loadedTexture = texture;
+        setBackgroundTexture(texture);
+      },
+      undefined,
+      (error) => console.warn('舞台底图纹理加载失败：', error),
+    );
+    return () => {
+      disposed = true;
+      loadedTexture?.dispose();
+    };
+  }, [backgroundUrl]);
 
   return (
     <group>
@@ -31,6 +70,18 @@ const StageFloor: React.FC<StageFloorProps> = ({ width, depth, wingWidth = 0, gr
         </>
       )}
 
+      {backgroundTexture && (
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.005, 0]} receiveShadow>
+          <planeGeometry args={[totalWidth, depth]} />
+          <meshBasicMaterial
+            map={backgroundTexture}
+            transparent
+            opacity={stageConfig.background?.opacity ?? 0.5}
+            toneMapped={false}
+          />
+        </mesh>
+      )}
+
       {gridMarks.map((mark) => (
         <mesh key={`meter-${mark.offsetMeters}`} position={[mark.offsetMeters, 0.01, 0]}>
           <boxGeometry args={[mark.offsetMeters === 0 ? 0.035 : 0.02, 0.018, depth]} />
@@ -41,7 +92,7 @@ const StageFloor: React.FC<StageFloorProps> = ({ width, depth, wingWidth = 0, gr
           />
         </mesh>
       ))}
-      {STAGE_THIRD_POSITIONS.map((position) => (
+      {showStageLines && STAGE_THIRD_POSITIONS.map((position) => (
         <mesh
           key={`third-${position}`}
           position={[0, 0.025, -depth / 2 + position * depth]}
@@ -50,7 +101,7 @@ const StageFloor: React.FC<StageFloorProps> = ({ width, depth, wingWidth = 0, gr
           <meshBasicMaterial color="#38bdf8" transparent opacity={0.85} />
         </mesh>
       ))}
-      {wingWidth > 0 && (
+      {showStageLines && wingWidth > 0 && (
         <>
           <mesh position={[-width / 2, 0.025, 0]}>
             <boxGeometry args={[0.06, 0.05, depth]} />

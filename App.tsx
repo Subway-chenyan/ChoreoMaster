@@ -25,10 +25,11 @@ import Stage3D from './components/Stage3D';
 import { Timeline } from './components/Timeline';
 import { EditableNumberInput } from './components/FormControls';
 import { HelpModal } from './components/HelpModal';
+import { StageBackgroundDialog } from './components/StageBackgroundDialog';
 import { ProductGuide } from './components/ProductGuide';
 import { useTheme } from './contexts/ThemeContext';
 import { DEFAULT_COLORS, STAGE_ASPECT_RATIO } from './constants';
-import { createOfflineScene, preloadPropTextures, preloadLEDVideo, type CameraAngle } from './utils/OfflineRenderer3D';
+import { createOfflineScene, preloadPropTextures, preloadLEDVideo, preloadStageBackground, type CameraAngle } from './utils/OfflineRenderer3D';
 import { getTotalStageWidth, getWingWidth, stageXToViewPercent, getStageXBounds } from './utils/coordinates';
 import { buildPlatformOccupancy, isPlatformProp } from './utils/platforms';
 import {
@@ -38,7 +39,7 @@ import {
   normalizeStageGridSpacing,
   STAGE_THIRD_POSITIONS,
 } from './utils/stage-grid';
-import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, ChevronDown, ChevronUp, PanelLeftClose, PanelLeftOpen, X, GripHorizontal, SlidersHorizontal, BookOpen, MessageCircle } from 'lucide-react';
+import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, ChevronDown, ChevronUp, PanelLeftClose, PanelLeftOpen, X, GripHorizontal, SlidersHorizontal, BookOpen, MessageCircle, Eye, EyeOff } from 'lucide-react';
 import { StageConfig } from './types';
 import {
   evaluateSceneStateAtTime,
@@ -48,6 +49,13 @@ import {
   getSortedFrames,
 } from './utils/transitions';
 import { getPropCenterFromAnchor, migratePropAnchor } from './utils/prop-pivot';
+import {
+  calculateStageDimensionsFromImage,
+  clampStageBackgroundOpacity,
+  getLedDistanceFromBack,
+  getLedStageYPercent,
+  resolveStageBackgroundUrl,
+} from './utils/stage-config';
 
 const DEFAULT_FRAME: Frame = {
   id: 'start-frame',
@@ -67,7 +75,44 @@ const createDefaultStageConfig = (): StageConfig => ({
   ledWidth: 20,
   ledHeight: 6,
   ledContent: { type: 'none' },
+  showStageLines: true,
+  ledDistanceFromBack: 0,
 });
+
+interface PendingStageBackground {
+  value: string;
+  previewUrl: string;
+  fileName: string;
+  pixelWidth: number;
+  pixelHeight: number;
+  mediaUrl?: string;
+}
+
+function loadImageDimensions(url: string): Promise<{ width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+        resolve({ width: image.naturalWidth, height: image.naturalHeight });
+      } else {
+        reject(new Error('图片尺寸无效'));
+      }
+    };
+    image.onerror = () => reject(new Error('无法读取图片'));
+    image.src = url;
+  });
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => typeof reader.result === 'string'
+      ? resolve(reader.result)
+      : reject(new Error('无法读取图片'));
+    reader.onerror = () => reject(reader.error ?? new Error('无法读取图片'));
+    reader.readAsDataURL(file);
+  });
+}
 
 const normalizeAudioMarkers = (value: unknown): AudioMarker[] => {
   if (!Array.isArray(value)) return [];
@@ -277,6 +322,7 @@ const App: React.FC = () => {
 
   // Stage View State
   const [showLabels, setShowLabels] = useState(true);
+  const [showDirectionArrows, setShowDirectionArrows] = useState(true);
   const [gridScale, setGridScale] = useState(DEFAULT_STAGE_GRID_SPACING);
   const [showHelp, setShowHelp] = useState(false);
   const [showProductGuide, setShowProductGuide] = useState(false);
@@ -321,6 +367,7 @@ const App: React.FC = () => {
   const [viewMode, setViewMode] = useState<'2d' | '3d'>('2d');
   const [stageConfig, setStageConfig] = useState<StageConfig>(createDefaultStageConfig);
   const [mediaCache, setMediaCache] = useState<Record<string, string>>({});
+  const [pendingStageBackground, setPendingStageBackground] = useState<PendingStageBackground | null>(null);
   
   // Project storage state
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
@@ -631,6 +678,18 @@ const App: React.FC = () => {
     return null;
   }, [getExportVideoTime, mediaCache, stageConfig.ledContent]);
 
+  const create2DExportStageBackground = useCallback(async (): Promise<HTMLImageElement | null> => {
+    const url = resolveStageBackgroundUrl(stageConfig, mediaCache);
+    if (!url) return null;
+    const image = new Image();
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error('舞台底图加载失败'));
+      image.src = url;
+    });
+    return image;
+  }, [mediaCache, stageConfig]);
+
   // --- Actions ---
 
   const handleAddPerformer = (name: string, color: string, shape: PerformerShape, extra?: Partial<Performer>) => {
@@ -860,8 +919,109 @@ const App: React.FC = () => {
   };
 
   // 舞台配置更新
+  const handleStageBackgroundUpload = async (event?: React.ChangeEvent<HTMLInputElement>) => {
+    try {
+      if (window.electronAPI?.isElectron) {
+        if (!currentProjectId) {
+          setProjectMessages(['请先新建或打开一个项目，再导入舞台底图。']);
+          return;
+        }
+        const sourcePath = await window.electronAPI.openFile([
+          { name: '舞台底图', extensions: ['png', 'jpg', 'jpeg', 'webp'] },
+        ]);
+        if (!sourcePath) return;
+        const asset = await window.electronAPI.project.ingestAsset(currentProjectId, sourcePath, 'stage-background');
+        const dimensions = await loadImageDimensions(asset.url);
+        setPendingStageBackground({
+          value: asset.relativePath,
+          previewUrl: asset.url,
+          mediaUrl: asset.url,
+          fileName: asset.displayName,
+          pixelWidth: dimensions.width,
+          pixelHeight: dimensions.height,
+        });
+        return;
+      }
+
+      const file = event?.target.files?.[0];
+      if (!file) return;
+      if (!file.type.startsWith('image/')) throw new Error('请选择图片文件');
+      const dataUrl = await readFileAsDataUrl(file);
+      const dimensions = await loadImageDimensions(dataUrl);
+      setPendingStageBackground({
+        value: dataUrl,
+        previewUrl: dataUrl,
+        fileName: file.name,
+        pixelWidth: dimensions.width,
+        pixelHeight: dimensions.height,
+      });
+    } catch (error) {
+      setProjectMessages([error instanceof Error ? error.message : '舞台底图上传失败']);
+    } finally {
+      if (event) event.target.value = '';
+    }
+  };
+
+  const handleConfirmStageBackground = (totalWidth: number) => {
+    if (!pendingStageBackground) return;
+    const dimensions = calculateStageDimensionsFromImage(
+      totalWidth,
+      getWingWidth(stageConfig),
+      pendingStageBackground.pixelWidth,
+      pendingStageBackground.pixelHeight,
+    );
+    if (!dimensions) {
+      setProjectMessages(['图片真实总宽必须大于两侧备台宽度之和。']);
+      return;
+    }
+
+    const previousValue = stageConfig.background?.value;
+    setMediaCache((current) => {
+      const next = { ...current };
+      if (previousValue && previousValue !== pendingStageBackground.value) delete next[previousValue];
+      if (pendingStageBackground.mediaUrl) next[pendingStageBackground.value] = pendingStageBackground.mediaUrl;
+      return next;
+    });
+    setStageConfig((current) => ({
+      ...current,
+      width: dimensions.width,
+      depth: dimensions.depth,
+      ledDistanceFromBack: Math.min(getLedDistanceFromBack(current), dimensions.depth),
+      background: {
+        value: pendingStageBackground.value,
+        opacity: clampStageBackgroundOpacity(current.background?.opacity),
+        pixelWidth: pendingStageBackground.pixelWidth,
+        pixelHeight: pendingStageBackground.pixelHeight,
+      },
+    }));
+    setPendingStageBackground(null);
+    setProjectMessages(['舞台底图已应用，舞台比例已按图片尺寸更新。']);
+  };
+
+  const handleClearStageBackground = () => {
+    const previousValue = stageConfig.background?.value;
+    if (previousValue) {
+      setMediaCache((current) => {
+        if (!current[previousValue]) return current;
+        const next = { ...current };
+        delete next[previousValue];
+        return next;
+      });
+    }
+    setStageConfig((current) => ({ ...current, background: undefined }));
+  };
+
   const handleStageConfigChange = (updates: Partial<StageConfig>) => {
-    setStageConfig(prev => ({ ...prev, ...updates }));
+    setStageConfig((current) => {
+      const next = { ...current, ...updates };
+      return {
+        ...next,
+        ledDistanceFromBack: getLedDistanceFromBack(next),
+        background: next.background
+          ? { ...next.background, opacity: clampStageBackgroundOpacity(next.background.opacity) }
+          : undefined,
+      };
+    });
   };
 
   // ==================== Project Storage Handlers ====================
@@ -1142,6 +1302,7 @@ const App: React.FC = () => {
       setPerformers(saved.data.performers);
       setTransitions(saved.data.transitions || []);
       setAudioMarkers(saved.data.audioMarkers || []);
+      setStageConfig(saved.data.stageConfig);
       setMediaCache(saved.mediaUrls);
       setLastSavedState(JSON.stringify({
         performers: saved.data.performers,
@@ -2422,7 +2583,7 @@ const App: React.FC = () => {
   const renderFrameToCanvas = async (
     canvas: HTMLCanvasElement,
     timeMs: number,
-    opts?: { includeLabels?: boolean; includeGrid?: boolean; bgColor?: string; ledRenderer?: { draw: (ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, timeMs: number) => Promise<void> | void } | null; }
+    opts?: { includeLabels?: boolean; includeGrid?: boolean; bgColor?: string; stageBackgroundImage?: HTMLImageElement | null; ledRenderer?: { draw: (ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, timeMs: number) => Promise<void> | void } | null; }
   ) => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
@@ -2451,6 +2612,12 @@ const App: React.FC = () => {
     ctx.fillRect(0, 0, w, h);
     ctx.fillStyle = bgColor;
     ctx.fillRect(renderX, renderY, renderW, renderH);
+    if (opts?.stageBackgroundImage) {
+      ctx.save();
+      ctx.globalAlpha = stageConfig.background?.opacity ?? 0.5;
+      ctx.drawImage(opts.stageBackgroundImage, renderX, renderY, renderW, renderH);
+      ctx.restore();
+    }
     if (opts?.ledRenderer) {
       await opts.ledRenderer.draw(ctx, leftMainEdge, renderY, rightMainEdge - leftMainEdge, renderH, timeMs);
     }
@@ -2471,7 +2638,7 @@ const App: React.FC = () => {
       ctx.strokeStyle = '#38bdf8';
       ctx.globalAlpha = 0.72;
       ctx.lineWidth = 2.5 * scale;
-      STAGE_THIRD_POSITIONS.forEach((position) => {
+      if (stageConfig.showStageLines !== false) STAGE_THIRD_POSITIONS.forEach((position) => {
         const gy = renderY + position * renderH;
         ctx.beginPath(); ctx.moveTo(renderX, gy); ctx.lineTo(renderX + renderW, gy); ctx.stroke();
       });
@@ -2487,14 +2654,27 @@ const App: React.FC = () => {
     ctx.fillStyle = 'rgba(2,6,23,0.55)';
     ctx.fillRect(renderX, renderY, leftMainEdge - renderX, renderH);
     ctx.fillRect(rightMainEdge, renderY, renderX + renderW - rightMainEdge, renderH);
-    ctx.strokeStyle = 'rgba(245,158,11,0.8)';
+    if (stageConfig.showStageLines !== false) {
+      ctx.strokeStyle = 'rgba(245,158,11,0.8)';
+      ctx.lineWidth = Math.max(2, 2 * scale);
+      ctx.setLineDash([8 * scale, 6 * scale]);
+      ctx.beginPath();
+      ctx.moveTo(leftMainEdge, renderY);
+      ctx.lineTo(leftMainEdge, renderY + renderH);
+      ctx.moveTo(rightMainEdge, renderY);
+      ctx.lineTo(rightMainEdge, renderY + renderH);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    const ledWidth = Math.min(renderW, ((stageConfig.ledWidth ?? stageConfig.width) / totalStageW) * renderW);
+    const ledY = renderY + getLedStageYPercent(stageConfig) / 100 * renderH;
+    ctx.strokeStyle = 'rgba(232,121,249,0.95)';
     ctx.lineWidth = Math.max(2, 2 * scale);
-    ctx.setLineDash([8 * scale, 6 * scale]);
+    ctx.setLineDash([6 * scale, 4 * scale]);
     ctx.beginPath();
-    ctx.moveTo(leftMainEdge, renderY);
-    ctx.lineTo(leftMainEdge, renderY + renderH);
-    ctx.moveTo(rightMainEdge, renderY);
-    ctx.lineTo(rightMainEdge, renderY + renderH);
+    ctx.moveTo(renderX + (renderW - ledWidth) / 2, ledY);
+    ctx.lineTo(renderX + (renderW + ledWidth) / 2, ledY);
     ctx.stroke();
     ctx.setLineDash([]);
 
@@ -2506,6 +2686,29 @@ const App: React.FC = () => {
       ctx.fillText('左备场区', renderX + (leftMainEdge - renderX) / 2, renderY + 10 * scale);
       ctx.fillText('右备场区', rightMainEdge + (renderX + renderW - rightMainEdge) / 2, renderY + 10 * scale);
     }
+
+    const drawDirectionArrow = (size: number) => {
+      const arrowSize = size * 1.35;
+      ctx.save();
+      ctx.strokeStyle = '#ffffff';
+      ctx.fillStyle = '#ffffff';
+      ctx.lineWidth = Math.max(4, 3 * scale);
+      ctx.lineCap = 'round';
+      ctx.shadowColor = 'rgba(0,0,0,0.95)';
+      ctx.shadowBlur = 4 * scale;
+      ctx.shadowOffsetY = 1.5 * scale;
+      ctx.beginPath();
+      ctx.moveTo(0, -arrowSize * 0.22);
+      ctx.lineTo(0, arrowSize * 0.38);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, arrowSize * 0.55);
+      ctx.lineTo(-arrowSize * 0.22, arrowSize * 0.22);
+      ctx.lineTo(arrowSize * 0.22, arrowSize * 0.22);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    };
 
     // Draw props first, then actors, so occupied platforms stay visually below actors in 2D exports.
     [...performers]
@@ -2533,7 +2736,7 @@ const App: React.FC = () => {
 
         ctx.save();
         ctx.translate(cx, cy);
-        ctx.rotate(-rot);
+        ctx.rotate(rot);
 
         if (p.polygonPoints && p.polygonPoints.length >= 3) {
           ctx.beginPath();
@@ -2557,6 +2760,9 @@ const App: React.FC = () => {
         ctx.strokeStyle = 'rgba(255,255,255,0.3)';
         ctx.lineWidth = scale;
         ctx.strokeRect(-propW / 2, -propD / 2, propW, propD);
+        if (showDirectionArrows) {
+          drawDirectionArrow(Math.max(18 * scale, Math.min(propW, propD)));
+        }
 
         ctx.restore();
 
@@ -2569,29 +2775,37 @@ const App: React.FC = () => {
         }
       } else {
         const performerLift = platformOccupancy.entityLiftById[p.id] ?? 0;
+        const rot = rotation * Math.PI / 180;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(rot);
         ctx.fillStyle = p.color;
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 2 * scale;
         const shapeSize = 32 * scale;
         if (p.shape === 'circle') {
           ctx.beginPath();
-          ctx.arc(cx, cy, Math.floor(shapeSize / 2 - 7 * scale), 0, Math.PI * 2);
+          ctx.arc(0, 0, Math.floor(shapeSize / 2 - 7 * scale), 0, Math.PI * 2);
           ctx.fill();
           ctx.stroke();
         } else if (p.shape === 'square') {
           const s = shapeSize;
-          ctx.fillRect(cx - s / 2, cy - s / 2, s, s);
-          ctx.strokeRect(cx - s / 2, cy - s / 2, s, s);
+          ctx.fillRect(-s / 2, -s / 2, s, s);
+          ctx.strokeRect(-s / 2, -s / 2, s, s);
         } else {
           const s = shapeSize + 6 * scale;
           ctx.beginPath();
-          ctx.moveTo(cx, cy - s / 2);
-          ctx.lineTo(cx + s / 2, cy + s / 2);
-          ctx.lineTo(cx - s / 2, cy + s / 2);
+          ctx.moveTo(0, -s / 2);
+          ctx.lineTo(s / 2, s / 2);
+          ctx.lineTo(-s / 2, s / 2);
           ctx.closePath();
           ctx.fill();
           ctx.stroke();
         }
+        if (showDirectionArrows) {
+          drawDirectionArrow(shapeSize);
+        }
+        ctx.restore();
         if (includeLabels) {
           ctx.fillStyle = '#ffffff';
           ctx.font = `${Math.round(10 * scale)}px sans-serif`;
@@ -2693,6 +2907,12 @@ const App: React.FC = () => {
 
     // Desktop 2D export intentionally ignores prop textures / LED media to keep the path stable.
     const ledRenderer = isDesktopElectron ? null : await create2DExportLedRenderer();
+    let stageBackgroundImage: HTMLImageElement | null = null;
+    try {
+      stageBackgroundImage = await create2DExportStageBackground();
+    } catch (error) {
+      console.warn('2D 导出舞台底图加载失败，将继续导出基础舞台：', error);
+    }
 
     // Shared canvas for rendering (reused across both paths to avoid holding all frames in memory)
     const tmpCanvas = document.createElement('canvas');
@@ -2779,6 +2999,7 @@ const App: React.FC = () => {
           await renderFrameToCanvas(tmpCanvas, Math.min(t, outPointMs), {
             includeLabels: exportIncludeLabels,
             includeGrid: exportIncludeGrid,
+            stageBackgroundImage,
             ledRenderer,
           });
           const frame = await createFrameFromCanvas((i * 1_000_000) / fps, 1_000_000 / fps);
@@ -2992,6 +3213,7 @@ const App: React.FC = () => {
       await renderFrameToCanvas(tmpCanvas, t, {
         includeLabels: exportIncludeLabels,
         includeGrid: exportIncludeGrid,
+        stageBackgroundImage,
         ledRenderer,
       });
       setExportProgress(0.7 + Math.min(0.3, (currentFrameIdx / totalFrames) * 0.3));
@@ -3107,12 +3329,15 @@ const App: React.FC = () => {
     await Promise.all([
       preloadPropTextures(performers),
       preloadLEDVideo(stageConfig, mediaCache),
+      preloadStageBackground(stageConfig, mediaCache).catch((error) => {
+        console.warn('3D 导出舞台底图预加载失败，将继续导出基础舞台：', error);
+      }),
     ]);
     setExportProgress(0.08);
 
     // Create offline 3D scene
     const offline = createOfflineScene(
-      width, height, stageConfig, performers, exportCameraAngle, gridScale, mediaCache, exportIncludeGrid, exportIncludeLabels,
+      width, height, stageConfig, performers, exportCameraAngle, gridScale, mediaCache, exportIncludeGrid, exportIncludeLabels, showDirectionArrows,
     );
 
     // Pre-capture LED video frames for fast export (seeks once, then uses cache)
@@ -3583,6 +3808,17 @@ const App: React.FC = () => {
     <div className={`min-h-[100dvh] h-[100dvh] w-screen flex flex-col safe-top safe-bottom ${theme === 'dark' ? 'bg-slate-950 text-slate-200' : 'bg-gray-50 text-gray-900'} overflow-hidden`}>
       {/* Help Modal */}
       <HelpModal isOpen={showHelp} onClose={() => setShowHelp(false)} />
+      <StageBackgroundDialog
+        isOpen={pendingStageBackground !== null}
+        fileName={pendingStageBackground?.fileName ?? ''}
+        previewUrl={pendingStageBackground?.previewUrl ?? ''}
+        pixelWidth={pendingStageBackground?.pixelWidth ?? 0}
+        pixelHeight={pendingStageBackground?.pixelHeight ?? 0}
+        initialTotalWidth={getTotalStageWidth(stageConfig)}
+        wingWidth={getWingWidth(stageConfig)}
+        onConfirm={handleConfirmStageBackground}
+        onCancel={() => setPendingStageBackground(null)}
+      />
       {showWebSaveReminder && (
         <div className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
           <div
@@ -3760,6 +3996,8 @@ const App: React.FC = () => {
             onStageConfigChange={handleStageConfigChange}
             onLEDContentUpload={handleLEDContentUpload}
             onClearLEDContent={handleClearLEDContent}
+            onStageBackgroundUpload={handleStageBackgroundUpload}
+            onClearStageBackground={handleClearStageBackground}
             aiConfig={aiConfig}
             onAiConfigChange={setAiConfig}
             // Project storage props
@@ -3863,9 +4101,11 @@ const App: React.FC = () => {
               onUpdatePerformer={handleUpdatePerformer}
               readonly={isPlaying}
               showLabels={showLabels}
+              showDirectionArrows={showDirectionArrows}
               gridScale={gridScale}
               onZoom={handleGridZoom}
               stageConfig={stageConfig}
+              mediaCache={mediaCache}
             />
           ) : (
             <Stage3D
@@ -3885,6 +4125,7 @@ const App: React.FC = () => {
               currentTime={currentTime}
               isPlaying={isPlaying}
               gridScale={gridScale}
+              showDirectionArrows={showDirectionArrows}
               readonly={isPlaying}
             />
           )}
@@ -4127,6 +4368,14 @@ const App: React.FC = () => {
                   title="切换姓名显示"
                 >
                   <Type size={18} />
+                </button>
+                <button
+                  onClick={() => setShowDirectionArrows(!showDirectionArrows)}
+                  className={`p-2 rounded transition-colors ${showDirectionArrows ? 'text-blue-400' : theme === 'dark' ? 'text-slate-500 hover:bg-slate-800' : 'text-gray-500 hover:bg-gray-100'}`}
+                  title={showDirectionArrows ? '隐藏演员朝向' : '显示演员朝向'}
+                  aria-label={showDirectionArrows ? '隐藏演员朝向' : '显示演员朝向'}
+                >
+                  {showDirectionArrows ? <Eye size={18} /> : <EyeOff size={18} />}
                 </button>
                 <div className={`w-px h-6 mx-1 ${theme === 'dark' ? 'bg-slate-700' : 'bg-gray-300'}`}></div>
                 <div className="flex items-center gap-2 px-2">
