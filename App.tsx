@@ -2687,18 +2687,23 @@ const App: React.FC = () => {
     }
 
     const drawDirectionArrow = (size: number) => {
+      const arrowSize = size * 1.35;
       ctx.save();
       ctx.strokeStyle = '#ffffff';
       ctx.fillStyle = '#ffffff';
-      ctx.lineWidth = Math.max(2, 2 * scale);
+      ctx.lineWidth = Math.max(4, 3 * scale);
+      ctx.lineCap = 'round';
+      ctx.shadowColor = 'rgba(0,0,0,0.95)';
+      ctx.shadowBlur = 4 * scale;
+      ctx.shadowOffsetY = 1.5 * scale;
       ctx.beginPath();
-      ctx.moveTo(0, -size * 0.22);
-      ctx.lineTo(0, size * 0.38);
+      ctx.moveTo(0, -arrowSize * 0.22);
+      ctx.lineTo(0, arrowSize * 0.38);
       ctx.stroke();
       ctx.beginPath();
-      ctx.moveTo(0, size * 0.55);
-      ctx.lineTo(-size * 0.18, size * 0.25);
-      ctx.lineTo(size * 0.18, size * 0.25);
+      ctx.moveTo(0, arrowSize * 0.55);
+      ctx.lineTo(-arrowSize * 0.22, arrowSize * 0.22);
+      ctx.lineTo(arrowSize * 0.22, arrowSize * 0.22);
       ctx.closePath();
       ctx.fill();
       ctx.restore();

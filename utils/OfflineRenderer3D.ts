@@ -153,11 +153,11 @@ function createDirectionArrow(scale: number = 1, y: number = 0.06): THREE.Group 
   group.position.y = y;
   group.scale.setScalar(scale);
   const material = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
-  const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.035, 0.42), material);
-  shaft.position.z = 0.18;
+  const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.055, 0.64), material);
+  shaft.position.z = 0.28;
   group.add(shaft);
-  const head = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.3, 12), material.clone());
-  head.position.z = 0.5;
+  const head = new THREE.Mesh(new THREE.ConeGeometry(0.26, 0.46, 16), material.clone());
+  head.position.z = 0.78;
   head.rotation.x = Math.PI / 2;
   group.add(head);
   return group;

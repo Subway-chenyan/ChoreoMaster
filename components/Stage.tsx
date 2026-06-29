@@ -71,13 +71,27 @@ const ShapeIcon: React.FC<{ shape: string; color: string; size: number; classNam
 };
 
 const DirectionArrow: React.FC = () => (
-  <span
+  <svg
     data-direction-arrow
     aria-hidden="true"
-    className="pointer-events-none absolute bottom-0 left-1/2 z-20 -translate-x-1/2 translate-y-[42%] text-base font-black leading-none text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.95)]"
+    viewBox="0 0 32 44"
+    className="pointer-events-none absolute bottom-[-16px] left-1/2 z-20 h-11 w-8 -translate-x-1/2 drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)]"
   >
-    ↓
-  </span>
+    <path
+      d="M16 4v28"
+      stroke="#ffffff"
+      strokeWidth="5"
+      strokeLinecap="round"
+      fill="none"
+    />
+    <path
+      d="M5 24l11 16 11-16z"
+      fill="#ffffff"
+      stroke="#0f172a"
+      strokeWidth="2"
+      strokeLinejoin="round"
+    />
+  </svg>
 );
 
 interface DragState {
@@ -998,7 +1012,7 @@ export const Stage: React.FC<StageProps> = ({
                 top: `${pos.y}%`,
               }}
             >
-              <div className={`absolute -bottom-6 left-1/2 -translate-x-1/2 text-[10px] font-medium text-white bg-slate-900/80 px-2 py-0.5 rounded whitespace-nowrap shadow-sm`}>
+              <div className={`absolute -bottom-10 left-1/2 -translate-x-1/2 text-[10px] font-medium text-white bg-slate-900/80 px-2 py-0.5 rounded whitespace-nowrap shadow-sm`}>
                 {performer.name}
               </div>
             </div>
