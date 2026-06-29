@@ -164,7 +164,7 @@ function createDirectionArrow(scale: number = 1, y: number = 0.06): THREE.Group 
 }
 
 /** Create a performer mesh group matching Performer3D.tsx (no drag, no selection rings) */
-function createPerformerMesh(color: string): THREE.Group {
+function createPerformerMesh(color: string, includeDirectionArrow: boolean = true): THREE.Group {
   const group = new THREE.Group();
   const performerHeight = 1.8;
   const baseColor = new THREE.Color(color);
@@ -198,7 +198,9 @@ function createPerformerMesh(color: string): THREE.Group {
   bodyGroup.add(nose);
 
   group.add(bodyGroup);
-  group.add(createDirectionArrow(0.9));
+  if (includeDirectionArrow) {
+    group.add(createDirectionArrow(0.9));
+  }
   return group;
 }
 
@@ -239,7 +241,7 @@ function createFaceMaterial(faceTexture?: { dataUrl?: string }, fallbackColor: s
 }
 
 /** Create a prop mesh matching Prop3D.tsx */
-function createPropMesh(performer: Performer): THREE.Group {
+function createPropMesh(performer: Performer, includeDirectionArrow: boolean = true): THREE.Group {
   const group = new THREE.Group();
   const dims = { width: performer.width || 1, height: performer.height || 1, depth: performer.depth || 1 };
 
@@ -303,10 +305,12 @@ function createPropMesh(performer: Performer): THREE.Group {
     }
   }
 
-  group.add(createDirectionArrow(
-    Math.max(0.75, Math.min(1.5, dims.width)),
-    -dims.height / 2 + 0.06,
-  ));
+  if (includeDirectionArrow) {
+    group.add(createDirectionArrow(
+      Math.max(0.75, Math.min(1.5, dims.width)),
+      -dims.height / 2 + 0.06,
+    ));
+  }
   return group;
 }
 
@@ -344,6 +348,7 @@ export function createOfflineScene(
   mediaCache: Record<string, string> = {},
   includeGrid: boolean = true,
   includeLabels: boolean = true,
+  includeDirectionArrows: boolean = true,
 ): OfflineSceneResult {
   // Renderer
   const renderer = new THREE.WebGLRenderer({
@@ -458,7 +463,7 @@ export function createOfflineScene(
   performers.forEach(p => {
     let mesh: THREE.Group;
     if (p.type === 'prop') {
-      mesh = createPropMesh(p);
+      mesh = createPropMesh(p, includeDirectionArrows);
       // Collect materials for cleanup
       mesh.traverse(child => {
         if (child instanceof THREE.Mesh) {
@@ -470,7 +475,7 @@ export function createOfflineScene(
         }
       });
     } else {
-      mesh = createPerformerMesh(p.color);
+      mesh = createPerformerMesh(p.color, includeDirectionArrows);
     }
     if (includeLabels) {
       const labelHeight = p.type === 'prop' ? (p.height || 1) + 0.6 : 2.5;

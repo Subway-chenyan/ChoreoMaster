@@ -15,6 +15,7 @@ interface Performer3DProps {
   isSelected: boolean;
   onSelect: (id: string) => void;
   stageConfig: StageConfig;
+  showDirectionArrows?: boolean;
   onDragStart?: () => void;
   onDragEnd?: () => void;
   onPositionChange?: (pos: Position) => void;
@@ -28,6 +29,7 @@ const Performer3D: React.FC<Performer3DProps> = ({
   isSelected,
   onSelect,
   stageConfig,
+  showDirectionArrows = true,
   onDragStart,
   onDragEnd,
   onPositionChange
@@ -185,7 +187,7 @@ const Performer3D: React.FC<Performer3DProps> = ({
       onPointerDown={handlePlanePointerDown}
       onPointerUp={handlePlanePointerUp}
     >
-      <DirectionArrow3D scale={0.9} />
+      {showDirectionArrows && <DirectionArrow3D scale={0.9} />}
       {isSelected && (
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
           <ringGeometry args={[0.6, 0.7, 32]} />

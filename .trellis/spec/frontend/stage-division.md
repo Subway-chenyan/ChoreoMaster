@@ -86,6 +86,7 @@ getLedZPosition(stageConfig);
 - Performer and prop direction arrows consume the same per-frame rotation used by geometry in live 2D/3D and exports.
 - Rotation `0deg` means facing the stage front. In the 2D editor/canvas this is visually downward; in 3D it is the same world direction used by `mapTo3D` for the front edge. Do not flip only one renderer.
 - Direction indicators are operational cues, not decorative marks. Keep them legible at the default zoom: use a fixed SVG arrow in the 2D editor, a thicker canvas arrow in 2D export, and matching larger geometry in live/offline 3D.
+- The stage toolbar may hide direction indicators as a view preference. Hiding indicators must not clear or change `Frame.rotations` / `Performer.rotation`; it only gates arrow rendering in live 2D/3D and exports.
 
 ### 4. Validation & Error Matrix
 
@@ -110,6 +111,7 @@ getLedZPosition(stageConfig);
 - Desktop regression tests assert all four renderer paths reference the shared URL/LED helpers and both actor/prop components include direction arrows.
 - Desktop regression tests assert 2D direction arrows default toward the stage front and canvas export rotates arrows with the same sign as the editor.
 - Desktop regression tests assert the 2D arrow uses a visible SVG size/stroke and the live/offline 3D arrows use matching enlarged geometry.
+- Desktop regression tests assert the toolbar toggle state gates 2D arrows, live 3D arrows, and offline 3D export arrows without touching rotation values.
 - Browser verification asserts the settings controls render, the stage-line toggle removes wing boundaries, and no console errors are emitted.
 - Production build must pass after shared contract changes.
 

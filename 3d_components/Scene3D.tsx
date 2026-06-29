@@ -33,6 +33,7 @@ interface Scene3DProps {
   isPlaying?: boolean;
   hiddenGroupIds?: string[];
   gridScale?: number;
+  showDirectionArrows?: boolean;
   onDragStart?: (ids: string[]) => void;
   onDragEnd?: (ids: string[]) => void;
   onPositionChange?: (updates: { id: string; pos: Position }[]) => void;
@@ -74,6 +75,7 @@ const Scene3D: React.FC<Scene3DProps> = ({
   isPlaying = false,
   hiddenGroupIds = [],
   gridScale = 1,
+  showDirectionArrows = true,
   onDragStart,
   onDragEnd,
   onPositionChange,
@@ -179,6 +181,7 @@ const Scene3D: React.FC<Scene3DProps> = ({
           isSelected: selectedIds.includes(p.id),
           onSelect,
           stageConfig,
+          showDirectionArrows,
           onDragStart: handleHeightDragStart,
           onDragEnd: handleHeightDragEnd,
           onPositionChange: readonly ? undefined : (newPos: Position) => handlePositionChange(p.id, newPos)

@@ -19,6 +19,7 @@ interface Stage3DProps {
   currentTime?: number;
   isPlaying?: boolean;
   gridScale?: number;
+  showDirectionArrows?: boolean;
   readonly?: boolean;
   onDragStart?: (ids: string[]) => void;
   onDragEnd?: (ids: string[]) => void;
@@ -39,6 +40,7 @@ const Stage3D: React.FC<Stage3DProps> = ({
   currentTime = 0,
   isPlaying = false,
   gridScale = 1,
+  showDirectionArrows = true,
   readonly = false,
   onDragStart,
   onDragEnd
@@ -67,6 +69,7 @@ const Stage3D: React.FC<Stage3DProps> = ({
           isPlaying={isPlaying}
           hiddenGroupIds={hiddenGroupIds}
           gridScale={gridScale}
+          showDirectionArrows={showDirectionArrows}
           onPositionChange={onPositionChange}
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}

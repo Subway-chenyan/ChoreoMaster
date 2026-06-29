@@ -139,20 +139,28 @@ test('stage background upload uses a custom width dialog and sidebar controls', 
 
 test('2D stage renders background, LED marker, arrows, and actor rotation controls', async () => {
   const stage = await read('components/Stage.tsx');
+  const app = await read('App.tsx');
 
   assert.match(stage, /resolveStageBackgroundUrl/);
   assert.match(stage, /getLedStageYPercent/);
   assert.match(stage, /data-direction-arrow/);
+  assert.match(stage, /showDirectionArrows\?: boolean/);
+  assert.match(stage, /showDirectionArrows = true/);
+  assert.match(stage, /\{showDirectionArrows && <DirectionArrow \/>\}/);
   assert.match(stage, /viewBox="0 0 32 44"/);
   assert.match(stage, /bottom-\[-16px\] left-1\/2/);
   assert.match(stage, /h-11 w-8/);
   assert.match(stage, /strokeWidth="5"/);
-  assert.match(stage, /absolute -bottom-10 left-1\/2/);
+  assert.match(stage, /showDirectionArrows \? '-bottom-10' : '-bottom-6'/);
   assert.match(stage, /\* 180 \/ Math\.PI\) - 90/);
   assert.doesNotMatch(stage, /\* 180 \/ Math\.PI\) \+ 90/);
   assert.match(stage, /data-performer-id=\{performer\.id\}/);
   assert.match(stage, /onRotationStart\?\.\(performer\.id\)/);
   assert.match(stage, /rotations\[performer\.id\] \?\? performer\.rotation \?\? 0/);
+  assert.match(app, /const \[showDirectionArrows, setShowDirectionArrows\] = useState\(true\)/);
+  assert.match(app, /setShowDirectionArrows\(!showDirectionArrows\)/);
+  assert.match(app, /showDirectionArrows \? <Eye size=\{18\} \/> : <EyeOff size=\{18\} \/>/);
+  assert.match(app, /showDirectionArrows=\{showDirectionArrows\}/);
 });
 
 test('2D export direction arrows default toward the stage front', async () => {
@@ -163,6 +171,7 @@ test('2D export direction arrows default toward the stage front', async () => {
   assert.match(app, /ctx\.moveTo\(0, -arrowSize \* 0\.22\)/);
   assert.match(app, /ctx\.lineTo\(0, arrowSize \* 0\.38\)/);
   assert.match(app, /ctx\.moveTo\(0, arrowSize \* 0\.55\)/);
+  assert.match(app, /if \(showDirectionArrows\) \{\s*drawDirectionArrow/);
   assert.match(app, /ctx\.rotate\(rot\)/);
   assert.doesNotMatch(app, /ctx\.rotate\(-rot\)/);
 });
@@ -182,6 +191,10 @@ test('live 3D stage uses the background, LED depth, and direction arrows', async
   assert.match(led, /getLedZPosition/);
   assert.match(performer, /DirectionArrow3D/);
   assert.match(prop, /DirectionArrow3D/);
+  assert.match(scene, /showDirectionArrows = true/);
+  assert.match(scene, /showDirectionArrows,/);
+  assert.match(performer, /\{showDirectionArrows && <DirectionArrow3D/);
+  assert.match(prop, /\{showDirectionArrows && <DirectionArrow3D/);
   assert.match(await read('3d_components/DirectionArrow3D.tsx'), /0\.14, 0\.055, 0\.64/);
   assert.match(await read('3d_components/DirectionArrow3D.tsx'), /0\.26, 0\.46, 16/);
 });
@@ -192,6 +205,9 @@ test('offline 3D renderer includes stage background, LED depth, and arrows', asy
   assert.match(offline, /resolveStageBackgroundUrl/);
   assert.match(offline, /getLedZPosition/);
   assert.match(offline, /createDirectionArrow/);
+  assert.match(offline, /includeDirectionArrows: boolean = true/);
+  assert.match(offline, /createPropMesh\(p, includeDirectionArrows\)/);
+  assert.match(offline, /createPerformerMesh\(p\.color, includeDirectionArrows\)/);
   assert.match(offline, /0\.14, 0\.055, 0\.64/);
   assert.match(offline, /0\.26, 0\.46, 16/);
   assert.match(offline, /showStageLines/);

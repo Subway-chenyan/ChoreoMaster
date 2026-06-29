@@ -39,7 +39,7 @@ import {
   normalizeStageGridSpacing,
   STAGE_THIRD_POSITIONS,
 } from './utils/stage-grid';
-import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, ChevronDown, ChevronUp, PanelLeftClose, PanelLeftOpen, X, GripHorizontal, SlidersHorizontal, BookOpen, MessageCircle } from 'lucide-react';
+import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, ChevronDown, ChevronUp, PanelLeftClose, PanelLeftOpen, X, GripHorizontal, SlidersHorizontal, BookOpen, MessageCircle, Eye, EyeOff } from 'lucide-react';
 import { StageConfig } from './types';
 import {
   evaluateSceneStateAtTime,
@@ -322,6 +322,7 @@ const App: React.FC = () => {
 
   // Stage View State
   const [showLabels, setShowLabels] = useState(true);
+  const [showDirectionArrows, setShowDirectionArrows] = useState(true);
   const [gridScale, setGridScale] = useState(DEFAULT_STAGE_GRID_SPACING);
   const [showHelp, setShowHelp] = useState(false);
   const [showProductGuide, setShowProductGuide] = useState(false);
@@ -2759,7 +2760,9 @@ const App: React.FC = () => {
         ctx.strokeStyle = 'rgba(255,255,255,0.3)';
         ctx.lineWidth = scale;
         ctx.strokeRect(-propW / 2, -propD / 2, propW, propD);
-        drawDirectionArrow(Math.max(18 * scale, Math.min(propW, propD)));
+        if (showDirectionArrows) {
+          drawDirectionArrow(Math.max(18 * scale, Math.min(propW, propD)));
+        }
 
         ctx.restore();
 
@@ -2799,7 +2802,9 @@ const App: React.FC = () => {
           ctx.fill();
           ctx.stroke();
         }
-        drawDirectionArrow(shapeSize);
+        if (showDirectionArrows) {
+          drawDirectionArrow(shapeSize);
+        }
         ctx.restore();
         if (includeLabels) {
           ctx.fillStyle = '#ffffff';
@@ -3332,7 +3337,7 @@ const App: React.FC = () => {
 
     // Create offline 3D scene
     const offline = createOfflineScene(
-      width, height, stageConfig, performers, exportCameraAngle, gridScale, mediaCache, exportIncludeGrid, exportIncludeLabels,
+      width, height, stageConfig, performers, exportCameraAngle, gridScale, mediaCache, exportIncludeGrid, exportIncludeLabels, showDirectionArrows,
     );
 
     // Pre-capture LED video frames for fast export (seeks once, then uses cache)
@@ -4096,6 +4101,7 @@ const App: React.FC = () => {
               onUpdatePerformer={handleUpdatePerformer}
               readonly={isPlaying}
               showLabels={showLabels}
+              showDirectionArrows={showDirectionArrows}
               gridScale={gridScale}
               onZoom={handleGridZoom}
               stageConfig={stageConfig}
@@ -4119,6 +4125,7 @@ const App: React.FC = () => {
               currentTime={currentTime}
               isPlaying={isPlaying}
               gridScale={gridScale}
+              showDirectionArrows={showDirectionArrows}
               readonly={isPlaying}
             />
           )}
@@ -4361,6 +4368,14 @@ const App: React.FC = () => {
                   title="切换姓名显示"
                 >
                   <Type size={18} />
+                </button>
+                <button
+                  onClick={() => setShowDirectionArrows(!showDirectionArrows)}
+                  className={`p-2 rounded transition-colors ${showDirectionArrows ? 'text-blue-400' : theme === 'dark' ? 'text-slate-500 hover:bg-slate-800' : 'text-gray-500 hover:bg-gray-100'}`}
+                  title={showDirectionArrows ? '隐藏演员朝向' : '显示演员朝向'}
+                  aria-label={showDirectionArrows ? '隐藏演员朝向' : '显示演员朝向'}
+                >
+                  {showDirectionArrows ? <Eye size={18} /> : <EyeOff size={18} />}
                 </button>
                 <div className={`w-px h-6 mx-1 ${theme === 'dark' ? 'bg-slate-700' : 'bg-gray-300'}`}></div>
                 <div className="flex items-center gap-2 px-2">

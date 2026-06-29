@@ -28,6 +28,7 @@ interface Prop3DProps {
   isSelected: boolean;
   onSelect: (id: string) => void;
   stageConfig: StageConfig;
+  showDirectionArrows?: boolean;
   onDragStart?: () => void;
   onDragEnd?: () => void;
   onPositionChange?: (pos: Position) => void;
@@ -41,6 +42,7 @@ const Prop3D: React.FC<Prop3DProps> = ({
   isSelected,
   onSelect,
   stageConfig,
+  showDirectionArrows = true,
   onDragStart,
   onDragEnd,
   onPositionChange
@@ -232,7 +234,7 @@ const Prop3D: React.FC<Prop3DProps> = ({
       onPointerDown={handlePlanePointerDown}
       onPointerUp={handlePlanePointerUp}
     >
-      <DirectionArrow3D scale={Math.max(0.75, Math.min(1.5, dims.width))} y={-dims.height / 2 + 0.06} />
+      {showDirectionArrows && <DirectionArrow3D scale={Math.max(0.75, Math.min(1.5, dims.width))} y={-dims.height / 2 + 0.06} />}
       {isExtruded && extrudeGeometry ? (
         <mesh castShadow receiveShadow geometry={extrudeGeometry}>
           {extrudeMaterials ? (

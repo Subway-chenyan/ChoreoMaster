@@ -39,6 +39,7 @@ interface StageProps {
   readonly?: boolean;
   mode?: ToolMode;
   showLabels?: boolean;
+  showDirectionArrows?: boolean;
   gridScale?: number;
   onZoom?: (delta: number) => void;
   stageConfig: StageConfig;
@@ -149,6 +150,7 @@ export const Stage: React.FC<StageProps> = ({
   readonly = false,
   mode = ToolMode.SELECT,
   showLabels = true,
+  showDirectionArrows = true,
   gridScale = 1,
   onZoom,
   stageConfig,
@@ -921,7 +923,7 @@ export const Stage: React.FC<StageProps> = ({
                 <div className="opacity-0 group-hover:opacity-100 text-[8px] text-white font-mono bg-black/50 px-1 rounded absolute pointer-events-none">
                   {performer.name}
                 </div>
-                <DirectionArrow />
+                {showDirectionArrows && <DirectionArrow />}
 
                 {/* Resize Handles */}
                 {isSelected && !readonly && (
@@ -983,7 +985,7 @@ export const Stage: React.FC<StageProps> = ({
                     size={32}
                     className={`drop-shadow-lg ${isSelected ? 'filter brightness-125' : ''}`}
                   />
-                  <DirectionArrow />
+                  {showDirectionArrows && <DirectionArrow />}
 
                   {/* Selection Ring */}
                   {isSelected && (
@@ -1012,7 +1014,7 @@ export const Stage: React.FC<StageProps> = ({
                 top: `${pos.y}%`,
               }}
             >
-              <div className={`absolute -bottom-10 left-1/2 -translate-x-1/2 text-[10px] font-medium text-white bg-slate-900/80 px-2 py-0.5 rounded whitespace-nowrap shadow-sm`}>
+              <div className={`absolute ${showDirectionArrows ? '-bottom-10' : '-bottom-6'} left-1/2 -translate-x-1/2 text-[10px] font-medium text-white bg-slate-900/80 px-2 py-0.5 rounded whitespace-nowrap shadow-sm`}>
                 {performer.name}
               </div>
             </div>
