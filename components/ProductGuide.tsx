@@ -137,6 +137,9 @@ export const ProductGuide: React.FC<ProductGuideProps> = ({ onClose }) => {
             <button type="button" onClick={() => scrollToSection('operations')} className={`whitespace-nowrap rounded-lg px-3 py-2 transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-200'}`}>
               详细操作
             </button>
+            <button type="button" onClick={() => scrollToSection('terms')} className={`whitespace-nowrap rounded-lg px-3 py-2 transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-200'}`}>
+              权益声明
+            </button>
           </nav>
         </div>
       </header>
@@ -281,6 +284,41 @@ export const ProductGuide: React.FC<ProductGuideProps> = ({ onClose }) => {
         </section>
 
         <ProductGuideOperations />
+
+        <section id="terms" className={`scroll-mt-16 border-t ${lineClass}`}>
+          <div className="mx-auto max-w-7xl px-4 py-20 sm:px-6 lg:px-8">
+            <div className="max-w-3xl">
+              <p className="text-sm font-semibold text-blue-500">权益声明</p>
+              <h2 className="mt-4 text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">使用与展示规范。</h2>
+              <p className={`mt-5 leading-7 ${mutedClass}`}>
+                为避免在录屏、直播或商业展示中因文字/素材不当导致误解，建议在使用前阅读并遵守以下要点。
+              </p>
+            </div>
+
+            <div className={`mt-10 grid gap-6 lg:grid-cols-2`}>
+              <div className={`rounded-2xl border p-7 ${panelClass}`}>
+                <p className="text-lg font-semibold">允许商业展示（需标注来源）</p>
+                <ul className={`mt-4 list-disc space-y-2 pl-5 text-sm leading-7 ${mutedClass}`}>
+                  <li>允许在商业活动中录屏、直播、授课或展会演示使用 CosStage。</li>
+                  <li>对外发布或公开展示相关视频/截图时，请以合理方式标注来源（例如注明“使用 CosStage”）。</li>
+                </ul>
+              </div>
+
+              <div className={`rounded-2xl border p-7 ${panelClass}`}>
+                <p className="text-lg font-semibold">禁止转卖与内容责任</p>
+                <ul className={`mt-4 list-disc space-y-2 pl-5 text-sm leading-7 ${mutedClass}`}>
+                  <li>禁止对 CosStage 软件本体（安装包、可执行文件、镜像等）进行转卖或售卖。</li>
+                  <li>你对在软件中输入、导入、展示或导出的内容自行负责，并应确保合法合规且不侵权。</li>
+                  <li>不得制作、传播违法违规内容，不得暗示 CosStage 官方对你的内容或活动进行背书。</li>
+                </ul>
+              </div>
+            </div>
+
+            <p className={`mt-8 text-xs leading-6 ${mutedClass}`}>
+              CosStage 按“现状”（AS IS）提供，不作任何明示或默示保证；在法律允许的最大范围内，我们不对因使用或无法使用本软件产生的任何损失承担责任。
+            </p>
+          </div>
+        </section>
 
         <section className={`border-t ${lineClass}`}>
           <div className="mx-auto flex max-w-7xl flex-col items-start justify-between gap-8 px-4 py-16 sm:px-6 md:flex-row md:items-center lg:px-8">
