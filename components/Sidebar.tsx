@@ -57,6 +57,8 @@ interface SidebarProps {
     onStageConfigChange: (updates: Partial<StageConfig>) => void;
     onLEDContentUpload: (e?: React.ChangeEvent<HTMLInputElement>) => void;
     onClearLEDContent: () => void;
+    onStageBackgroundUpload: (e?: React.ChangeEvent<HTMLInputElement>) => void;
+    onClearStageBackground: () => void;
     aiConfig: AIConfig;
     onAiConfigChange: (config: AIConfig) => void;
     // Project storage props
@@ -199,6 +201,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     onStageConfigChange,
     onLEDContentUpload,
     onClearLEDContent,
+    onStageBackgroundUpload,
+    onClearStageBackground,
     aiConfig,
     onAiConfigChange,
     // Project storage props
@@ -736,6 +740,67 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 <p className="text-[10px] leading-4 text-slate-500">备场区参与演员、道具、轨迹和视频导出。</p>
                             </div>
 
+                            <div className="space-y-2 mb-3 rounded-lg border border-slate-700 bg-slate-900/40 p-3">
+                                <div className="flex items-center justify-between gap-2">
+                                    <label className="text-xs font-medium text-slate-300">舞台底图</label>
+                                    {stageConfig?.background && (
+                                        <button
+                                            type="button"
+                                            onClick={onClearStageBackground}
+                                            className="text-[11px] text-red-400 hover:text-red-300"
+                                        >
+                                            清除
+                                        </button>
+                                    )}
+                                </div>
+                                <label className="flex cursor-pointer items-center justify-center rounded border border-slate-600 bg-slate-700 px-3 py-2 text-xs text-white transition-colors hover:bg-slate-600">
+                                    {stageConfig?.background ? '替换底图' : '上传底图'}
+                                    <input
+                                        type="file"
+                                        accept="image/png,image/jpeg,image/webp"
+                                        className="hidden"
+                                        onClick={(event) => {
+                                            if (window.electronAPI?.isElectron) {
+                                                event.preventDefault();
+                                                onStageBackgroundUpload();
+                                            }
+                                        }}
+                                        onChange={onStageBackgroundUpload}
+                                    />
+                                </label>
+                                {stageConfig?.background && (
+                                    <label className="block text-[11px] text-slate-400">
+                                        <span className="mb-1 flex justify-between">
+                                            <span>底图透明度</span>
+                                            <span>{Math.round(stageConfig.background.opacity * 100)}%</span>
+                                        </span>
+                                        <input
+                                            type="range"
+                                            min={0}
+                                            max={1}
+                                            step={0.05}
+                                            value={stageConfig.background.opacity}
+                                            onChange={(event) => onStageConfigChange({
+                                                background: {
+                                                    ...stageConfig.background,
+                                                    opacity: Number(event.target.value),
+                                                },
+                                            })}
+                                            className="w-full accent-blue-500"
+                                        />
+                                    </label>
+                                )}
+                                <label className="flex items-center justify-between gap-3 text-xs text-slate-300">
+                                    <span>舞台划线</span>
+                                    <input
+                                        type="checkbox"
+                                        checked={stageConfig?.showStageLines !== false}
+                                        onChange={(event) => onStageConfigChange({ showStageLines: event.target.checked })}
+                                        className="h-4 w-4 accent-blue-500"
+                                    />
+                                </label>
+                            </div>
+
                             <div className="space-y-2 mb-3">
                                 <label className="text-xs text-slate-400">LED 屏幕宽度</label>
                                 <div className="flex items-center gap-2">
@@ -764,6 +829,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                     />
                                     <span className="text-xs text-slate-500">米</span>
                                 </div>
+                            </div>
+
+                            <div className="space-y-2 mb-3">
+                                <label className="text-xs text-slate-400">LED 距舞台后沿</label>
+                                <div className="flex items-center gap-2">
+                                    <EditableNumberInput
+                                        step={0.1}
+                                        min={0}
+                                        max={stageConfig?.depth ?? 11.25}
+                                        value={stageConfig?.ledDistanceFromBack ?? 0}
+                                        onChange={(value) => onStageConfigChange({ ledDistanceFromBack: value })}
+                                        className="flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                                    />
+                                    <span className="text-xs text-slate-500">米</span>
+                                </div>
+                                <p className="text-[10px] leading-4 text-slate-500">0 米贴后沿，数值增大时 LED 向舞台前方移动。</p>
                             </div>
 
                             {/* LED 内容 */}

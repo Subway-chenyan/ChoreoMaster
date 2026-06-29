@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { Performer, Position, ExtrudedTextures, StageConfig } from '../types';
 import { mapTo3D, mapTo2D, degToRad, getTotalStageWidth } from '../utils/coordinates';
 import { useDragContext } from './Scene3D';
+import DirectionArrow3D from './DirectionArrow3D';
 import { denormalizePoints } from '../components/prop-editor/PolygonUtils';
 import { getPropCenterFromAnchor } from '../utils/prop-pivot';
 
@@ -231,6 +232,7 @@ const Prop3D: React.FC<Prop3DProps> = ({
       onPointerDown={handlePlanePointerDown}
       onPointerUp={handlePlanePointerUp}
     >
+      <DirectionArrow3D scale={Math.max(0.75, Math.min(1.5, dims.width))} y={-dims.height / 2 + 0.06} />
       {isExtruded && extrudeGeometry ? (
         <mesh castShadow receiveShadow geometry={extrudeGeometry}>
           {extrudeMaterials ? (

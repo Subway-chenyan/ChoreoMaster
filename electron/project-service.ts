@@ -14,6 +14,7 @@ import type {
   ProjectImportResult,
   ProjectLoadResult,
   ProjectWarning,
+  StageBackground,
   StageConfig,
 } from './project-contract.js';
 
@@ -22,6 +23,7 @@ const PROJECT_FILE_NAME = 'project.json';
 const ASSET_DIRECTORIES: Record<ProjectAssetKind, string> = {
   audio: 'assets/audio',
   background: 'assets/backgrounds',
+  'stage-background': 'assets/stage-backgrounds',
 };
 
 type UnknownRecord = Record<string, unknown>;
@@ -82,21 +84,45 @@ function resolveInside(basePath: string, relativePath: string): string {
   return resolved;
 }
 
+function parseStageBackground(value: unknown): StageBackground | undefined {
+  if (!isRecord(value) || typeof value.value !== 'string' || !value.value) return undefined;
+  const pixelWidth = typeof value.pixelWidth === 'number' && Number.isFinite(value.pixelWidth) && value.pixelWidth > 0
+    ? value.pixelWidth
+    : 1;
+  const pixelHeight = typeof value.pixelHeight === 'number' && Number.isFinite(value.pixelHeight) && value.pixelHeight > 0
+    ? value.pixelHeight
+    : 1;
+  const opacity = typeof value.opacity === 'number' && Number.isFinite(value.opacity)
+    ? Math.max(0, Math.min(1, value.opacity))
+    : 0.5;
+  return { value: value.value, opacity, pixelWidth, pixelHeight };
+}
+
 function parseProjectDocument(value: unknown, fallbackName: string): ProjectDocument {
   if (!isRecord(value)) throw new Error('Project file must contain an object');
   if (!Array.isArray(value.performers) || !Array.isArray(value.frames)) {
     throw new Error('Project file is missing performers or frames');
   }
   const rawStageConfig = isRecord(value.stageConfig) ? value.stageConfig : {};
+  const depth = typeof rawStageConfig.depth === 'number' && Number.isFinite(rawStageConfig.depth)
+    ? Math.max(1, rawStageConfig.depth)
+    : 11.25;
+  const ledDistanceFromBack = typeof rawStageConfig.ledDistanceFromBack === 'number'
+    && Number.isFinite(rawStageConfig.ledDistanceFromBack)
+    ? Math.max(0, Math.min(depth, rawStageConfig.ledDistanceFromBack))
+    : 0;
   const stageConfig: StageConfig = {
     width: typeof rawStageConfig.width === 'number' ? rawStageConfig.width : 20,
-    depth: typeof rawStageConfig.depth === 'number' ? rawStageConfig.depth : 11.25,
+    depth,
     wingWidth: typeof rawStageConfig.wingWidth === 'number' ? rawStageConfig.wingWidth : undefined,
     ledWidth: typeof rawStageConfig.ledWidth === 'number' ? rawStageConfig.ledWidth : undefined,
     ledHeight: typeof rawStageConfig.ledHeight === 'number' ? rawStageConfig.ledHeight : 6,
     ledContent: isRecord(rawStageConfig.ledContent)
       ? rawStageConfig.ledContent as unknown as StageConfig['ledContent']
       : { type: 'none' },
+    background: parseStageBackground(rawStageConfig.background),
+    showStageLines: rawStageConfig.showStageLines !== false,
+    ledDistanceFromBack,
   };
   return {
     version: typeof value.version === 'string' ? value.version : '1.0',
@@ -130,6 +156,20 @@ function decodeDataUrl(dataUrl: string): { extension: string; buffer: Buffer } |
     ? Buffer.from(match[3], 'base64')
     : Buffer.from(decodeURIComponent(match[3]), 'utf8');
   return { extension, buffer };
+}
+
+async function externalizeStageBackground(
+  projectDir: string,
+  background: StageBackground | undefined,
+): Promise<StageBackground | undefined> {
+  if (!background?.value.startsWith('data:')) return background;
+  const decoded = decodeDataUrl(background.value);
+  if (!decoded) return background;
+  const relativePath = `assets/stage-backgrounds/stage-${Date.now()}${decoded.extension}`;
+  const targetPath = resolveInside(projectDir, relativePath);
+  await fs.mkdir(path.dirname(targetPath), { recursive: true });
+  await fs.writeFile(targetPath, decoded.buffer);
+  return { ...background, value: relativePath };
 }
 
 async function persistFaceTexture(
@@ -232,6 +272,19 @@ async function hydrateProject(
     }
   }
 
+  const stageBackgroundValue = document.stageConfig.background?.value;
+  if (stageBackgroundValue && !stageBackgroundValue.startsWith('data:')) {
+    if (await assetExists(projectDir, stageBackgroundValue)) {
+      mediaUrls[stageBackgroundValue] = assetUrl(projectId, stageBackgroundValue);
+    } else {
+      warnings.push({
+        code: 'missing_asset',
+        resource: stageBackgroundValue,
+        message: `舞台底图资源缺失：${stageBackgroundValue}`,
+      });
+    }
+  }
+
   const hydrateTexture = async (texture: FaceTexture | undefined): Promise<FaceTexture | undefined> => {
     if (!texture?.assetPath) return texture;
     if (await assetExists(projectDir, texture.assetPath)) {
@@ -293,6 +346,7 @@ export async function createManagedProject(
   const projectDir = path.join(storagePath, 'projects', id);
   await fs.mkdir(path.join(projectDir, 'assets/audio'), { recursive: true });
   await fs.mkdir(path.join(projectDir, 'assets/backgrounds'), { recursive: true });
+  await fs.mkdir(path.join(projectDir, 'assets/stage-backgrounds'), { recursive: true });
   await fs.mkdir(path.join(projectDir, 'assets/props'), { recursive: true });
   const now = new Date().toISOString();
   const project: ProjectDocument = {
@@ -328,6 +382,7 @@ export async function saveManagedProject(
   const performers = await Promise.all(
     projectData.performers.map((performer) => externalizePerformerTextures(projectDir, performer)),
   );
+  const background = await externalizeStageBackground(projectDir, projectData.stageConfig.background);
   const document: ProjectDocument = {
     ...projectData,
     version: PROJECT_VERSION,
@@ -336,6 +391,15 @@ export async function saveManagedProject(
     updatedAt: new Date().toISOString(),
     performers,
     audioMarkers: parseAudioMarkers(projectData.audioMarkers),
+    stageConfig: {
+      ...projectData.stageConfig,
+      background,
+      showStageLines: projectData.stageConfig.showStageLines !== false,
+      ledDistanceFromBack: Math.max(0, Math.min(
+        projectData.stageConfig.depth,
+        projectData.stageConfig.ledDistanceFromBack ?? 0,
+      )),
+    },
   };
   await fs.writeFile(projectPath, JSON.stringify(document, null, 2), 'utf8');
   return document;

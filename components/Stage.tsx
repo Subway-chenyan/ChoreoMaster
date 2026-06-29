@@ -15,6 +15,7 @@ import {
   formatStageGridLabel,
   STAGE_THIRD_POSITIONS,
 } from '../utils/stage-grid';
+import { getLedStageYPercent, resolveStageBackgroundUrl } from '../utils/stage-config';
 
 interface StageProps {
   performers: Performer[];
@@ -41,6 +42,7 @@ interface StageProps {
   gridScale?: number;
   onZoom?: (delta: number) => void;
   stageConfig: StageConfig;
+  mediaCache?: Record<string, string>;
 }
 
 const ShapeIcon: React.FC<{ shape: string; color: string; size: number; className?: string }> = ({ shape, color, size, className }) => {
@@ -67,6 +69,16 @@ const ShapeIcon: React.FC<{ shape: string; color: string; size: number; classNam
     </svg>
   );
 };
+
+const DirectionArrow: React.FC = () => (
+  <span
+    data-direction-arrow
+    aria-hidden="true"
+    className="pointer-events-none absolute left-1/2 top-0 z-20 -translate-x-1/2 -translate-y-[42%] text-base font-black leading-none text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.95)]"
+  >
+    ↑
+  </span>
+);
 
 interface DragState {
   startX: number;
@@ -125,7 +137,8 @@ export const Stage: React.FC<StageProps> = ({
   showLabels = true,
   gridScale = 1,
   onZoom,
-  stageConfig
+  stageConfig,
+  mediaCache = {},
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -162,6 +175,10 @@ export const Stage: React.FC<StageProps> = ({
   const leftMainEdge = stageXToViewPercent(0, stageConfig);
   const rightMainEdge = stageXToViewPercent(100, stageConfig);
   const visualAspectRatio = totalStageWidth / stageConfig.depth;
+  const backgroundUrl = resolveStageBackgroundUrl(stageConfig, mediaCache);
+  const showStageLines = stageConfig.showStageLines !== false;
+  const ledTop = getLedStageYPercent(stageConfig);
+  const ledWidthPercent = Math.min(100, ((stageConfig.ledWidth ?? stageConfig.width) / totalStageWidth) * 100);
   const fittedSize = useMemo(() => {
     if (availableSize.width <= 0 || availableSize.height <= 0) {
       return { width: 0, height: 0 };
@@ -629,7 +646,7 @@ export const Stage: React.FC<StageProps> = ({
             opacity={mark.offsetMeters === 0 ? 0.55 : 0.2}
           />
         ))}
-        {STAGE_THIRD_POSITIONS.map((position) => (
+        {showStageLines && STAGE_THIRD_POSITIONS.map((position) => (
           <line
             key={`third-${position}`}
             x1="0"
@@ -643,7 +660,7 @@ export const Stage: React.FC<StageProps> = ({
         ))}
       </svg>
     );
-  }, [gridMarks]);
+  }, [gridMarks, showStageLines]);
 
   const transitionOverlays = useMemo(() => transitionPaths.map((transitionPath) => {
     const startX = stageXToViewPercent(transitionPath.start.x, stageConfig);
@@ -688,17 +705,35 @@ export const Stage: React.FC<StageProps> = ({
         onWheel={handleWheel}
         onContextMenu={handleContextMenu}
       >
+        {backgroundUrl && (
+          <img
+            src={backgroundUrl}
+            alt="舞台底图"
+            className="pointer-events-none absolute inset-0 h-full w-full select-none"
+            style={{ opacity: stageConfig.background?.opacity ?? 0.5 }}
+          />
+        )}
         <div
-          className="absolute inset-y-0 left-0 bg-slate-950/55 border-r-2 border-dashed border-amber-400/70 pointer-events-none"
+          className={`absolute inset-y-0 left-0 bg-slate-950/55 pointer-events-none ${showStageLines ? 'border-r-2 border-dashed border-amber-400/70' : ''}`}
           style={{ width: `${leftMainEdge}%` }}
         />
         <div
-          className="absolute inset-y-0 right-0 bg-slate-950/55 border-l-2 border-dashed border-amber-400/70 pointer-events-none"
+          className={`absolute inset-y-0 right-0 bg-slate-950/55 pointer-events-none ${showStageLines ? 'border-l-2 border-dashed border-amber-400/70' : ''}`}
           style={{ width: `${100 - rightMainEdge}%` }}
         />
 
         {/* Dynamic Grid Lines */}
         {gridLines}
+
+        <div
+          className="pointer-events-none absolute z-[3] -translate-y-1/2 border-t-2 border-dashed border-fuchsia-400/90"
+          style={{
+            left: `${(100 - ledWidthPercent) / 2}%`,
+            top: `${ledTop}%`,
+            width: `${ledWidthPercent}%`,
+          }}
+          title={`LED 距舞台后沿 ${Number((stageConfig.ledDistanceFromBack ?? 0).toFixed(2))} 米`}
+        />
 
         {transitionOverlays.length > 0 && (
           <>
@@ -822,6 +857,7 @@ export const Stage: React.FC<StageProps> = ({
 
           const isSelected = selectedPerformerIds.includes(performer.id)
             || selectedTransitionPath?.performerId === performer.id;
+          const rotation = rotations[performer.id] ?? performer.rotation ?? 0;
 
           // Render Prop
           if (performer.type === 'prop') {
@@ -829,7 +865,6 @@ export const Stage: React.FC<StageProps> = ({
             const isPlatform = isPlatformProp(performer);
             const isOccupiedPlatform = platformOccupancy.occupiedPlatformIds.has(performer.id);
             const propLift = platformOccupancy.entityLiftById[performer.id] ?? 0;
-            const rotation = rotations[performer.id] ?? performer.rotation ?? 0;
             const displayPos = getPropCenterFromAnchor(pos, rotation, performer, stageConfig);
 
             // width(长) for 2D x-axis, depth(宽) for 2D y-axis
@@ -872,6 +907,7 @@ export const Stage: React.FC<StageProps> = ({
                 <div className="opacity-0 group-hover:opacity-100 text-[8px] text-white font-mono bg-black/50 px-1 rounded absolute pointer-events-none">
                   {performer.name}
                 </div>
+                <DirectionArrow />
 
                 {/* Resize Handles */}
                 {isSelected && !readonly && (
@@ -903,6 +939,7 @@ export const Stage: React.FC<StageProps> = ({
           return (
             <div
               key={performer.id}
+              data-performer-id={performer.id}
               onPointerDown={(e) => handlePerformerPointerDown(e, performer.id)}
               className={`absolute min-w-11 min-h-11 flex items-center justify-center transform -translate-x-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing z-10 group touch-none`}
               style={{
@@ -911,18 +948,34 @@ export const Stage: React.FC<StageProps> = ({
                 zIndex: (platformOccupancy.entityLiftById[performer.id] ?? 0) > 0 ? 14 : 10,
               }}
             >
-              <div className={`relative transition-transform duration-100 ${isSelected ? 'scale-125' : 'hover:scale-110'}`}>
-                <ShapeIcon
-                  shape={performer.shape}
-                  color={performer.color}
-                  size={32}
-                  className={`drop-shadow-lg ${isSelected ? 'filter brightness-125' : ''}`}
-                />
-
-                {/* Selection Ring */}
-                {isSelected && (
-                  <div className="absolute inset-0 -m-1 border-2 border-blue-400 rounded-full animate-pulse opacity-50" />
+              <div className="relative" style={{ transform: `rotate(${rotation}deg)` }}>
+                {isSelected && !readonly && (
+                  <button
+                    type="button"
+                    className="absolute left-1/2 top-[-34px] z-30 h-5 w-5 -translate-x-1/2 rounded-full border-2 border-white bg-amber-500 shadow-lg cursor-grab active:cursor-grabbing"
+                    title="拖动旋转"
+                    onPointerDown={(event) => {
+                      event.stopPropagation();
+                      event.preventDefault();
+                      onRotationStart?.(performer.id);
+                      setRotationDragId(performer.id);
+                    }}
+                  />
                 )}
+                <div className={`relative transition-transform duration-100 ${isSelected ? 'scale-125' : 'hover:scale-110'}`}>
+                  <ShapeIcon
+                    shape={performer.shape}
+                    color={performer.color}
+                    size={32}
+                    className={`drop-shadow-lg ${isSelected ? 'filter brightness-125' : ''}`}
+                  />
+                  <DirectionArrow />
+
+                  {/* Selection Ring */}
+                  {isSelected && (
+                    <div className="absolute inset-0 -m-1 border-2 border-blue-400 rounded-full animate-pulse opacity-50" />
+                  )}
+                </div>
               </div>
             </div>
           );

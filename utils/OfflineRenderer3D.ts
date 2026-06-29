@@ -5,6 +5,7 @@ import { denormalizePoints } from '../components/prop-editor/PolygonUtils';
 import { buildPlatformOccupancy, isPlatformProp } from './platforms';
 import { getPropCenterFromAnchor } from './prop-pivot';
 import { createCenteredStageGridMarks, STAGE_THIRD_POSITIONS } from './stage-grid';
+import { getLedZPosition, resolveStageBackgroundUrl } from './stage-config';
 
 export type CameraAngle = 'judge' | 'overhead';
 
@@ -51,9 +52,12 @@ function createCamera(angle: CameraAngle, stageConfig: StageConfig, aspect: numb
 }
 
 /** Build stage floor (plane + grid + edge lines) matching StageFloor.tsx */
-function createStageFloor(width: number, depth: number, wingWidth: number, gridScale: number, includeGrid: boolean): THREE.Group {
+function createStageFloor(stageConfig: StageConfig, gridScale: number, includeGrid: boolean): THREE.Group {
   const group = new THREE.Group();
+  const { width, depth } = stageConfig;
+  const wingWidth = getWingWidth(stageConfig);
   const totalWidth = width + wingWidth * 2;
+  const showStageLines = stageConfig.showStageLines !== false;
 
   // Floor plane
   const floorGeo = new THREE.PlaneGeometry(width, depth);
@@ -76,14 +80,16 @@ function createStageFloor(width: number, depth: number, wingWidth: number, gridS
     rightWing.position.x = (width + wingWidth) / 2;
     group.add(rightWing);
 
-    const boundaryGeo = new THREE.BoxGeometry(0.06, 0.05, depth);
-    const boundaryMat = new THREE.MeshBasicMaterial({ color: 0xf59e0b });
-    const leftBoundary = new THREE.Mesh(boundaryGeo, boundaryMat);
-    leftBoundary.position.set(-width / 2, 0.025, 0);
-    group.add(leftBoundary);
-    const rightBoundary = leftBoundary.clone();
-    rightBoundary.position.x = width / 2;
-    group.add(rightBoundary);
+    if (showStageLines) {
+      const boundaryGeo = new THREE.BoxGeometry(0.06, 0.05, depth);
+      const boundaryMat = new THREE.MeshBasicMaterial({ color: 0xf59e0b });
+      const leftBoundary = new THREE.Mesh(boundaryGeo, boundaryMat);
+      leftBoundary.position.set(-width / 2, 0.025, 0);
+      group.add(leftBoundary);
+      const rightBoundary = leftBoundary.clone();
+      rightBoundary.position.x = width / 2;
+      group.add(rightBoundary);
+    }
   }
 
   // Grid
@@ -100,7 +106,7 @@ function createStageFloor(width: number, depth: number, wingWidth: number, gridS
       group.add(line);
     });
 
-    STAGE_THIRD_POSITIONS.forEach((position) => {
+    if (showStageLines) STAGE_THIRD_POSITIONS.forEach((position) => {
       const geometry = new THREE.BoxGeometry(totalWidth, 0.035, 0.065);
       const material = new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.85 });
       const line = new THREE.Mesh(geometry, material);
@@ -130,7 +136,6 @@ function createStageFloor(width: number, depth: number, wingWidth: number, gridS
 function createLEDMesh(stageConfig: StageConfig): THREE.Mesh {
   const height = stageConfig.ledHeight || 6;
   const width = stageConfig.ledWidth ?? stageConfig.width;
-  const depth = stageConfig.depth;
 
   const geo = new THREE.PlaneGeometry(width, height);
   const mat = new THREE.MeshBasicMaterial({
@@ -139,8 +144,23 @@ function createLEDMesh(stageConfig: StageConfig): THREE.Mesh {
     toneMapped: false,
   });
   const mesh = new THREE.Mesh(geo, mat);
-  mesh.position.set(0, height / 2, -depth / 2 - 0.1);
+  mesh.position.set(0, height / 2, getLedZPosition(stageConfig) - 0.1);
   return mesh;
+}
+
+function createDirectionArrow(scale: number = 1, y: number = 0.06): THREE.Group {
+  const group = new THREE.Group();
+  group.position.y = y;
+  group.scale.setScalar(scale);
+  const material = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
+  const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.035, 0.42), material);
+  shaft.position.z = 0.18;
+  group.add(shaft);
+  const head = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.3, 12), material.clone());
+  head.position.z = 0.5;
+  head.rotation.x = Math.PI / 2;
+  group.add(head);
+  return group;
 }
 
 /** Create a performer mesh group matching Performer3D.tsx (no drag, no selection rings) */
@@ -178,6 +198,7 @@ function createPerformerMesh(color: string): THREE.Group {
   bodyGroup.add(nose);
 
   group.add(bodyGroup);
+  group.add(createDirectionArrow(0.9));
   return group;
 }
 
@@ -282,6 +303,10 @@ function createPropMesh(performer: Performer): THREE.Group {
     }
   }
 
+  group.add(createDirectionArrow(
+    Math.max(0.75, Math.min(1.5, dims.width)),
+    -dims.height / 2 + 0.06,
+  ));
   return group;
 }
 
@@ -349,8 +374,36 @@ export function createOfflineScene(
   camera.updateProjectionMatrix();
 
   // Stage floor
-  const floor = createStageFloor(stageConfig.width, stageConfig.depth, getWingWidth(stageConfig), gridScale, includeGrid);
+  const floor = createStageFloor(stageConfig, gridScale, includeGrid);
   scene.add(floor);
+  let stageBackgroundTexture: THREE.Texture | null = null;
+  const stageBackgroundUrl = resolveStageBackgroundUrl(stageConfig, mediaCache);
+  if (stageBackgroundUrl) {
+    stageBackgroundTexture = new THREE.TextureLoader().load(
+      stageBackgroundUrl,
+      (texture) => {
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.wrapS = THREE.ClampToEdgeWrapping;
+        texture.wrapT = THREE.ClampToEdgeWrapping;
+        texture.minFilter = THREE.LinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+      },
+      undefined,
+      (error) => console.warn('3D 导出舞台底图加载失败，将继续导出基础舞台：', error),
+    );
+    const backgroundGeometry = new THREE.PlaneGeometry(getTotalStageWidth(stageConfig), stageConfig.depth);
+    backgroundGeometry.rotateX(-Math.PI / 2);
+    const backgroundMaterial = new THREE.MeshBasicMaterial({
+      map: stageBackgroundTexture,
+      transparent: true,
+      opacity: stageConfig.background?.opacity ?? 0.5,
+      toneMapped: false,
+    });
+    const backgroundMesh = new THREE.Mesh(backgroundGeometry, backgroundMaterial);
+    backgroundMesh.position.y = 0.005;
+    backgroundMesh.receiveShadow = true;
+    floor.add(backgroundMesh);
+  }
 
   // LED wall
   const ledMesh = createLEDMesh(stageConfig);
@@ -596,6 +649,7 @@ export function createOfflineScene(
     }
     if (ledVideoTexture) ledVideoTexture.dispose();
     if (ledImageTexture) ledImageTexture.dispose();
+    if (stageBackgroundTexture) stageBackgroundTexture.dispose();
     // Dispose frame cache
     if (ledFrameCache) {
       ledFrameCache.forEach(bitmap => bitmap.close());
@@ -655,6 +709,20 @@ export async function preloadPropTextures(performers: Performer[]): Promise<void
       });
     });
   await Promise.all(texturePromises);
+}
+
+export async function preloadStageBackground(
+  stageConfig: StageConfig,
+  mediaCache: Record<string, string>,
+): Promise<void> {
+  const url = resolveStageBackgroundUrl(stageConfig, mediaCache);
+  if (!url) return;
+  await new Promise<void>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve();
+    image.onerror = () => reject(new Error('舞台底图加载失败'));
+    image.src = url;
+  });
 }
 
 /**

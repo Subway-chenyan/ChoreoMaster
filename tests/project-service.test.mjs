@@ -131,6 +131,51 @@ test('saves prop textures as assets and restores them through project URLs', asy
   });
 });
 
+test('persists stage background configuration and restores its project URL', async () => {
+  await withTempDir(async (storagePath) => {
+    const created = await createManagedProject(storagePath, 'Stage Background Project');
+    await saveManagedProject(storagePath, created.id, {
+      ...projectDocument('Stage Background Project'),
+      stageConfig: {
+        width: 18,
+        depth: 16,
+        wingWidth: 3,
+        showStageLines: false,
+        ledDistanceFromBack: 2.5,
+        background: {
+          value: ONE_PIXEL_PNG,
+          opacity: 0.35,
+          pixelWidth: 1,
+          pixelHeight: 1,
+        },
+      },
+    });
+
+    const saved = JSON.parse(await readFile(path.join(created.path, 'project.json'), 'utf8'));
+    assert.match(saved.stageConfig.background.value, /^assets\/stage-backgrounds\//);
+    assert.equal(saved.stageConfig.background.opacity, 0.35);
+    assert.equal(saved.stageConfig.showStageLines, false);
+    assert.equal(saved.stageConfig.ledDistanceFromBack, 2.5);
+
+    const loaded = await loadManagedProject(storagePath, created.id);
+    const backgroundPath = loaded.data.stageConfig.background.value;
+    assert.match(loaded.mediaUrls[backgroundPath], /^choreo-asset:\/\//);
+    assert.deepEqual(loaded.warnings, []);
+  });
+});
+
+test('normalizes legacy stage configuration defaults', async () => {
+  await withTempDir(async (storagePath) => {
+    const created = await createManagedProject(storagePath, 'Legacy Stage Project');
+    await writeFile(path.join(created.path, 'project.json'), JSON.stringify(projectDocument('Legacy Stage Project')));
+
+    const loaded = await loadManagedProject(storagePath, created.id);
+    assert.equal(loaded.data.stageConfig.showStageLines, true);
+    assert.equal(loaded.data.stageConfig.ledDistanceFromBack, 0);
+    assert.equal(loaded.data.stageConfig.background, undefined);
+  });
+});
+
 test('normalizes audio markers and persists them in project.json', async () => {
   await withTempDir(async (storagePath) => {
     const created = await createManagedProject(storagePath, 'Marker Project');

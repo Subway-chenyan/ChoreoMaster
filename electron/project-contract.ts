@@ -239,6 +239,13 @@ export interface LEDContent {
   loop?: boolean;
 }
 
+export interface StageBackground {
+  value: string;
+  opacity: number;
+  pixelWidth: number;
+  pixelHeight: number;
+}
+
 export interface StageConfig {
   width: number;
   depth: number;
@@ -246,6 +253,9 @@ export interface StageConfig {
   ledWidth?: number;
   ledHeight?: number;
   ledContent?: LEDContent;
+  background?: StageBackground;
+  showStageLines?: boolean;
+  ledDistanceFromBack?: number;
 }
 
 export interface AudioMarker {
@@ -270,7 +280,7 @@ export interface ProjectDocument {
   stageConfig: StageConfig;
 }
 
-export type ProjectAssetKind = 'audio' | 'background';
+export type ProjectAssetKind = 'audio' | 'background' | 'stage-background';
 
 export interface ProjectAssetResult {
   relativePath: string;

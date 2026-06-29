@@ -7,7 +7,7 @@ import Performer3D from './Performer3D';
 import Prop3D from './Prop3D';
 import LEDTV from '../components/LEDTV';
 import { Performer, Position, StageConfig } from '../types';
-import { getTotalStageWidth, getWingWidth, mapTo2D } from '../utils/coordinates';
+import { getTotalStageWidth, mapTo2D } from '../utils/coordinates';
 import { buildPlatformOccupancy } from '../utils/platforms';
 
 interface DragContextType {
@@ -168,7 +168,7 @@ const Scene3D: React.FC<Scene3DProps> = ({
         currentTime={currentTime}
         isPlaying={isPlaying}
       />
-      <StageFloor width={stageConfig.width} depth={stageConfig.depth} wingWidth={getWingWidth(stageConfig)} gridScale={gridScale} />
+      <StageFloor stageConfig={stageConfig} mediaCache={mediaCache} gridScale={gridScale} />
       {visiblePerformers.map(p => {
         const pos = positions[p.id]; if (!pos) return null;
         const commonProps = {

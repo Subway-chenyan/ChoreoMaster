@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { Performer, Position, StageConfig } from '../types';
 import { mapTo3D, mapTo2D, degToRad, getTotalStageWidth } from '../utils/coordinates';
 import { useDragContext } from './Scene3D';
+import DirectionArrow3D from './DirectionArrow3D';
 
 interface Performer3DProps {
   performer: Performer;
@@ -184,6 +185,7 @@ const Performer3D: React.FC<Performer3DProps> = ({
       onPointerDown={handlePlanePointerDown}
       onPointerUp={handlePlanePointerUp}
     >
+      <DirectionArrow3D scale={0.9} />
       {isSelected && (
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
           <ringGeometry args={[0.6, 0.7, 32]} />

@@ -199,3 +199,29 @@ test('normalizes frame rotations and prop pivot values at the project boundary',
   assert.equal(performers[1].rotationPivot, 'center');
   assert.equal(performers[2].rotationPivot, 'center');
 });
+
+test('derives stage dimensions from a full-stage background width', async () => {
+  const { calculateStageDimensionsFromImage } = await importTypeScriptModule('../utils/stage-config.ts');
+
+  assert.deepEqual(calculateStageDimensionsFromImage(24, 3, 1200, 800), {
+    width: 18,
+    depth: 16,
+  });
+  assert.equal(calculateStageDimensionsFromImage(6, 3, 1200, 800), null);
+  assert.equal(calculateStageDimensionsFromImage(24, 3, 0, 800), null);
+});
+
+test('normalizes stage background opacity and LED distance', async () => {
+  const {
+    clampStageBackgroundOpacity,
+    getLedDistanceFromBack,
+    getLedStageYPercent,
+    getLedZPosition,
+  } = await importTypeScriptModule('../utils/stage-config.ts');
+
+  assert.equal(clampStageBackgroundOpacity(2), 1);
+  assert.equal(clampStageBackgroundOpacity(Number.NaN), 0.5);
+  assert.equal(getLedDistanceFromBack({ width: 20, depth: 10, ledDistanceFromBack: 12 }), 10);
+  assert.equal(getLedStageYPercent({ width: 20, depth: 10, ledDistanceFromBack: 3 }), 30);
+  assert.equal(getLedZPosition({ width: 20, depth: 10, ledDistanceFromBack: 3 }), -2);
+});

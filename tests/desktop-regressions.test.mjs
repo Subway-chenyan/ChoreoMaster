@@ -120,6 +120,60 @@ test('stage grid uses meter spacing, centered ruler marks, and third divisions',
   assert.match(app, /\{gridScale\.toFixed\(1\)\}m/);
 });
 
+test('stage background upload uses a custom width dialog and sidebar controls', async () => {
+  const [app, dialog, sidebar] = await Promise.all([
+    read('App.tsx'),
+    read('components/StageBackgroundDialog.tsx'),
+    read('components/Sidebar.tsx'),
+  ]);
+
+  assert.match(app, /StageBackgroundDialog/);
+  assert.match(app, /calculateStageDimensionsFromImage/);
+  assert.match(app, /setStageConfig\(saved\.data\.stageConfig\)/);
+  assert.match(dialog, /role="dialog"/);
+  assert.doesNotMatch(`${app}\n${dialog}`, /\bprompt\s*\(/);
+  assert.match(sidebar, /舞台底图/);
+  assert.match(sidebar, /舞台划线/);
+  assert.match(sidebar, /LED 距舞台后沿/);
+});
+
+test('2D stage renders background, LED marker, arrows, and actor rotation controls', async () => {
+  const stage = await read('components/Stage.tsx');
+
+  assert.match(stage, /resolveStageBackgroundUrl/);
+  assert.match(stage, /getLedStageYPercent/);
+  assert.match(stage, /data-direction-arrow/);
+  assert.match(stage, /data-performer-id=\{performer\.id\}/);
+  assert.match(stage, /onRotationStart\?\.\(performer\.id\)/);
+  assert.match(stage, /rotations\[performer\.id\] \?\? performer\.rotation \?\? 0/);
+});
+
+test('live 3D stage uses the background, LED depth, and direction arrows', async () => {
+  const [scene, floor, led, performer, prop] = await Promise.all([
+    read('3d_components/Scene3D.tsx'),
+    read('3d_components/StageFloor.tsx'),
+    read('components/LEDTV.tsx'),
+    read('3d_components/Performer3D.tsx'),
+    read('3d_components/Prop3D.tsx'),
+  ]);
+
+  assert.match(scene, /stageConfig=\{stageConfig\}/);
+  assert.match(floor, /resolveStageBackgroundUrl/);
+  assert.match(floor, /showStageLines/);
+  assert.match(led, /getLedZPosition/);
+  assert.match(performer, /DirectionArrow3D/);
+  assert.match(prop, /DirectionArrow3D/);
+});
+
+test('offline 3D renderer includes stage background, LED depth, and arrows', async () => {
+  const offline = await read('utils/OfflineRenderer3D.ts');
+
+  assert.match(offline, /resolveStageBackgroundUrl/);
+  assert.match(offline, /getLedZPosition/);
+  assert.match(offline, /createDirectionArrow/);
+  assert.match(offline, /showStageLines/);
+});
+
 test('stage selection box converts client pixels into transformed local coordinates', async () => {
   const stage = await read('components/Stage.tsx');
 
