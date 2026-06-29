@@ -21,6 +21,7 @@ build/agent-backend/
 __pycache__/
 .pytest_cache/
 .superpowers/
+.worktrees/
 *.py[cod]
 
 # Editor directories and files
