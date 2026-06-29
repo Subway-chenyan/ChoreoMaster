@@ -84,6 +84,7 @@ getLedZPosition(stageConfig);
 - `showStageLines !== false` is the compatibility default. It gates wing boundary lines and the two horizontal third-division lines, but not the vertical meter grid.
 - `ledDistanceFromBack` uses meters, defaults to `0`, and is clamped to `0..stage depth`.
 - Performer and prop direction arrows consume the same per-frame rotation used by geometry in live 2D/3D and exports.
+- Rotation `0deg` means facing the stage front. In the 2D editor/canvas this is visually downward; in 3D it is the same world direction used by `mapTo3D` for the front edge. Do not flip only one renderer.
 
 ### 4. Validation & Error Matrix
 
@@ -106,6 +107,7 @@ getLedZPosition(stageConfig);
 - Pure utility tests assert dimension derivation, invalid widths, opacity normalization, and LED clamping/coordinate conversion.
 - Project-service tests assert data URL externalization, `mediaUrls` hydration, exact option persistence, and legacy defaults.
 - Desktop regression tests assert all four renderer paths reference the shared URL/LED helpers and both actor/prop components include direction arrows.
+- Desktop regression tests assert 2D direction arrows default toward the stage front and canvas export rotates arrows with the same sign as the editor.
 - Browser verification asserts the settings controls render, the stage-line toggle removes wing boundaries, and no console errors are emitted.
 - Production build must pass after shared contract changes.
 

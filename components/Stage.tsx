@@ -74,9 +74,9 @@ const DirectionArrow: React.FC = () => (
   <span
     data-direction-arrow
     aria-hidden="true"
-    className="pointer-events-none absolute left-1/2 top-0 z-20 -translate-x-1/2 -translate-y-[42%] text-base font-black leading-none text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.95)]"
+    className="pointer-events-none absolute bottom-0 left-1/2 z-20 -translate-x-1/2 translate-y-[42%] text-base font-black leading-none text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.95)]"
   >
-    ↑
+    ↓
   </span>
 );
 
@@ -323,14 +323,14 @@ export const Stage: React.FC<StageProps> = ({
       const element = stageRef.current?.querySelector<HTMLElement>(`[data-performer-id="${rotationDragId}"]`);
       if (!element) return;
       const rect = element.getBoundingClientRect();
-      const angle = (Math.atan2(event.clientY - (rect.top + rect.height / 2), event.clientX - (rect.left + rect.width / 2)) * 180 / Math.PI) + 90;
+      const angle = (Math.atan2(event.clientY - (rect.top + rect.height / 2), event.clientX - (rect.left + rect.width / 2)) * 180 / Math.PI) - 90;
       onRotationChange(rotationDragId, angle);
     };
     const handleRotationEnd = (event: PointerEvent) => {
       const element = stageRef.current?.querySelector<HTMLElement>(`[data-performer-id="${rotationDragId}"]`);
       if (element && onRotationEnd) {
         const rect = element.getBoundingClientRect();
-        const angle = (Math.atan2(event.clientY - (rect.top + rect.height / 2), event.clientX - (rect.left + rect.width / 2)) * 180 / Math.PI) + 90;
+        const angle = (Math.atan2(event.clientY - (rect.top + rect.height / 2), event.clientX - (rect.left + rect.width / 2)) * 180 / Math.PI) - 90;
         onRotationEnd(rotationDragId, angle);
       }
       setRotationDragId(null);

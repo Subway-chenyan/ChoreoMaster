@@ -2692,13 +2692,13 @@ const App: React.FC = () => {
       ctx.fillStyle = '#ffffff';
       ctx.lineWidth = Math.max(2, 2 * scale);
       ctx.beginPath();
-      ctx.moveTo(0, size * 0.22);
-      ctx.lineTo(0, -size * 0.38);
+      ctx.moveTo(0, -size * 0.22);
+      ctx.lineTo(0, size * 0.38);
       ctx.stroke();
       ctx.beginPath();
-      ctx.moveTo(0, -size * 0.55);
-      ctx.lineTo(-size * 0.18, -size * 0.25);
-      ctx.lineTo(size * 0.18, -size * 0.25);
+      ctx.moveTo(0, size * 0.55);
+      ctx.lineTo(-size * 0.18, size * 0.25);
+      ctx.lineTo(size * 0.18, size * 0.25);
       ctx.closePath();
       ctx.fill();
       ctx.restore();
@@ -2730,7 +2730,7 @@ const App: React.FC = () => {
 
         ctx.save();
         ctx.translate(cx, cy);
-        ctx.rotate(-rot);
+        ctx.rotate(rot);
 
         if (p.polygonPoints && p.polygonPoints.length >= 3) {
           ctx.beginPath();
@@ -2770,7 +2770,7 @@ const App: React.FC = () => {
         const rot = rotation * Math.PI / 180;
         ctx.save();
         ctx.translate(cx, cy);
-        ctx.rotate(-rot);
+        ctx.rotate(rot);
         ctx.fillStyle = p.color;
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 2 * scale;

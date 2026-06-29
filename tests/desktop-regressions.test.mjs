@@ -143,9 +143,23 @@ test('2D stage renders background, LED marker, arrows, and actor rotation contro
   assert.match(stage, /resolveStageBackgroundUrl/);
   assert.match(stage, /getLedStageYPercent/);
   assert.match(stage, /data-direction-arrow/);
+  assert.match(stage, /bottom-0 left-1\/2/);
+  assert.match(stage, />\s*↓\s*<\/span>/);
+  assert.match(stage, /\* 180 \/ Math\.PI\) - 90/);
+  assert.doesNotMatch(stage, /\* 180 \/ Math\.PI\) \+ 90/);
   assert.match(stage, /data-performer-id=\{performer\.id\}/);
   assert.match(stage, /onRotationStart\?\.\(performer\.id\)/);
   assert.match(stage, /rotations\[performer\.id\] \?\? performer\.rotation \?\? 0/);
+});
+
+test('2D export direction arrows default toward the stage front', async () => {
+  const app = await read('App.tsx');
+
+  assert.match(app, /ctx\.moveTo\(0, -size \* 0\.22\)/);
+  assert.match(app, /ctx\.lineTo\(0, size \* 0\.38\)/);
+  assert.match(app, /ctx\.moveTo\(0, size \* 0\.55\)/);
+  assert.match(app, /ctx\.rotate\(rot\)/);
+  assert.doesNotMatch(app, /ctx\.rotate\(-rot\)/);
 });
 
 test('live 3D stage uses the background, LED depth, and direction arrows', async () => {
