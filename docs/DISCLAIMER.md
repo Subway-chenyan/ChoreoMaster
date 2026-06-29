@@ -9,7 +9,7 @@
 
 ## 2. 用户输入与导出内容的责任
 
-- 你在 CosStage 内输入、导入、上传、生成、展示或导出的任何内容（包括但不限于演员/道具名称、文字、图片、音频、视频、舞台素材、AI 生成内容）均由你自行负责。
+- 你在 CosStage 内输入、导入、上传、生成、展示或导出的任何内容（包括但不限于演员/道具名称、文字、图片、音频、视频、舞台素材等）均由你自行负责。
 - 你应确保你对上述内容拥有合法权利或已获得必要授权，并保证其不会侵犯任何第三方的著作权、商标权、肖像权、隐私权、名誉权等合法权益。
 - 如你将 CosStage 用于录屏、直播、教学、展会展示或商业活动宣传，你应自行对展示内容的合法合规性负责，并对外部受众产生的影响自行承担责任。
 
@@ -33,15 +33,11 @@ https://docs.github.com/en/site-policy/acceptable-use-policies/github-acceptable
 - MIT License：https://mit-license.org/
 - Apache License 2.0：https://apache.org/licenses/LICENSE-2.0
 
-## 5. 第三方服务、AI 功能与输出可靠性
+## 5. 商业展示与署名、禁止转卖
 
-- CosStage 的部分能力可能依赖第三方软件、库或服务（例如：FFmpeg、浏览器多媒体能力、以及你自行配置的模型服务）。
-- 当你启用 AI 相关能力时，你提交的文本/素材可能会被发送到你所配置的第三方模型服务提供方进行处理；你应在使用前阅读并遵守相应服务条款，并避免上传敏感信息或未获授权的素材。
-- AI 输出具有不确定性，可能出现不准确、不完整或不适用的内容。你应对输出进行人工复核，不应将其作为医疗、法律、金融等专业建议的唯一依据。
-
-相关“输出准确性/不得依赖为唯一事实来源”的表述可参考（示例）：
-- OpenAI Terms of Use（Accuracy）：https://openai.com/policies/terms-of-use/
-- Gemini API Additional Terms（Disclaimers）：https://ai.google.dev/gemini-api/terms-archive/terms_05_20_25
+- 你可以在商业活动中使用 CosStage 进行录屏、直播、教学、展会展示或演示。
+- 当你对外发布或公开展示使用 CosStage 生成/导出的画面、视频或截图时，你应以合理方式标注来源（例如注明“使用 CosStage”）。
+- 你不得将 CosStage 软件本体（安装包、可执行文件、镜像等）以任何形式转卖或售卖，也不得将其作为付费下载内容单独售卖。
 
 ## 6. 侵权或不良内容处理（通知与联系）
 
@@ -50,4 +46,3 @@ https://docs.github.com/en/site-policy/acceptable-use-policies/github-acceptable
   - 涉及内容的链接与证据材料
   - 权利证明或授权证明（如适用）
   - 你的联系方式与处理诉求
-
