@@ -39,7 +39,7 @@ import {
   normalizeStageGridSpacing,
   STAGE_THIRD_POSITIONS,
 } from './utils/stage-grid';
-import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, ChevronDown, ChevronUp, PanelLeftClose, PanelLeftOpen, X, GripHorizontal, SlidersHorizontal, BookOpen, MessageCircle, Eye, EyeOff } from 'lucide-react';
+import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, ChevronDown, ChevronUp, ChevronRight, PanelLeftClose, PanelLeftOpen, X, GripHorizontal, SlidersHorizontal, BookOpen, MessageCircle, Eye, EyeOff } from 'lucide-react';
 import { StageConfig } from './types';
 import {
   evaluateSceneStateAtTime,
@@ -302,6 +302,10 @@ const App: React.FC = () => {
   const [currentFrameId, setCurrentFrameId] = useState<string>(DEFAULT_FRAME.id);
   const [selectedTransitionId, setSelectedTransitionId] = useState<string | null>(null);
   const [selectedTransitionPerformerId, setSelectedTransitionPerformerId] = useState<string | null>(null);
+  const [transitionPerformerGroupExpanded, setTransitionPerformerGroupExpanded] = useState<Record<PerformerType, boolean>>({
+    performer: true,
+    prop: true,
+  });
   const [selectedPerformerIds, setSelectedPerformerIds] = useState<string[]>([]);
   const [musicUrl, setMusicUrl] = useState<string | null>(null);
   const [audioBuffer, setAudioBuffer] = useState<AudioBuffer | null>(null);
@@ -1464,11 +1468,34 @@ const App: React.FC = () => {
 
   const transitionSelectablePerformers = useMemo(() => {
     if (!selectedTransitionFrames) return [];
-    return performers.filter((performer) => (
-      selectedTransitionFrames.fromFrame.positions[performer.id] !== undefined
-      && selectedTransitionFrames.toFrame.positions[performer.id] !== undefined
-    ));
+    return performers
+      .filter((performer) => (
+        selectedTransitionFrames.fromFrame.positions[performer.id] !== undefined
+        && selectedTransitionFrames.toFrame.positions[performer.id] !== undefined
+      ))
+      .sort((left, right) => {
+        const leftTypeOrder = (left.type ?? 'performer') === 'prop' ? 1 : 0;
+        const rightTypeOrder = (right.type ?? 'performer') === 'prop' ? 1 : 0;
+        if (leftTypeOrder !== rightTypeOrder) {
+          return leftTypeOrder - rightTypeOrder;
+        }
+        return left.name.localeCompare(right.name, 'zh-CN', { numeric: true, sensitivity: 'base' });
+      });
   }, [performers, selectedTransitionFrames]);
+
+  const transitionSelectablePerformerGroups = useMemo(() => {
+    const groupConfigs: { key: PerformerType; label: string }[] = [
+      { key: 'performer', label: '演员' },
+      { key: 'prop', label: '道具' },
+    ];
+    return groupConfigs
+      .map(({ key, label }) => ({
+        key,
+        label,
+        performers: transitionSelectablePerformers.filter((performer) => (performer.type ?? 'performer') === key),
+      }))
+      .filter((group) => group.performers.length > 0);
+  }, [transitionSelectablePerformers]);
 
   useEffect(() => {
     if (transitionSelectablePerformers.length === 0) {
@@ -1511,6 +1538,13 @@ const App: React.FC = () => {
     setSelectedTransitionId(transitionId);
     setSelectedTransitionPerformerId(null);
     setSelectedPerformerIds([]);
+  }, []);
+
+  const handleToggleTransitionPerformerGroup = useCallback((group: PerformerType) => {
+    setTransitionPerformerGroupExpanded((current) => ({
+      ...current,
+      [group]: !current[group],
+    }));
   }, []);
 
   const handleTransitionUpdate = useCallback((nextTransition: TransitionSegment) => {
@@ -4132,9 +4166,10 @@ const App: React.FC = () => {
 
           {selectedTransition && selectedTransitionFrames && (
             <div
-              className="absolute right-4 z-40 w-[min(380px,calc(100vw-2rem))] rounded-xl border border-slate-700 bg-slate-900/95 p-3 text-slate-100 shadow-2xl backdrop-blur"
+              className="absolute right-4 z-40 flex w-[min(380px,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900/95 p-3 text-slate-100 shadow-2xl backdrop-blur"
               style={{
                 top: isCompactLayout ? 12 : 16,
+                maxHeight: `calc(100vh - ${(isCompactLayout ? 12 : 16) * 2}px)`,
               }}
               onPointerDown={(event) => event.stopPropagation()}
             >
@@ -4156,130 +4191,159 @@ const App: React.FC = () => {
                 </button>
               </div>
 
-              {transitionSelectablePerformers.length === 0 ? (
-                <div className="rounded-lg border border-slate-800 bg-slate-950/80 px-3 py-2 text-xs text-slate-400">
-                  当前过渡没有同时存在于前后队形的对象，无法配置路径。
-                </div>
-              ) : (
-                <>
-                  <div className="mb-3 rounded-lg border border-slate-800 bg-slate-950/70 p-1.5">
-                    <div className="grid grid-cols-2 gap-1">
-                      {transitionSelectablePerformers.map((performer) => {
-                        const motion = selectedTransition.objectMotions[performer.id];
-                        const selected = performer.id === selectedTransitionPerformerId;
-                        return (
-                          <button
-                            key={performer.id}
-                            type="button"
-                            onClick={() => setSelectedTransitionPerformerId(performer.id)}
-                            className={`flex items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-[11px] ${selected ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'}`}
-                          >
-                            <span className="truncate">{performer.name}</span>
-                            <span className="shrink-0 text-[9px] opacity-75">
-                              {motion?.pathType === 'bezier' ? '曲线' : '直线'}
-                              {performer.type === 'prop' ? ` · ${motion?.rotationMode === 'fixed' ? '固定' : '旋转'}` : ''}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
+              <div
+                className="min-h-0 overflow-y-auto pr-1"
+                style={{ scrollbarGutter: 'stable' }}
+              >
+                {transitionSelectablePerformers.length === 0 ? (
+                  <div className="rounded-lg border border-slate-800 bg-slate-950/80 px-3 py-2 text-xs text-slate-400">
+                    当前过渡没有同时存在于前后队形的对象，无法配置路径。
                   </div>
+                ) : (
+                  <>
+                    <div className="mb-3 rounded-lg border border-slate-800 bg-slate-950/70 p-1.5">
+                      <div className="space-y-2">
+                        {transitionSelectablePerformerGroups.map((group) => {
+                          const expanded = transitionPerformerGroupExpanded[group.key];
+                          return (
+                            <div key={group.key} className="overflow-hidden rounded-md border border-slate-800 bg-slate-950/70">
+                              <button
+                                type="button"
+                                onClick={() => handleToggleTransitionPerformerGroup(group.key)}
+                                className="flex w-full items-center justify-between gap-2 px-2 py-2 text-left text-[11px] text-slate-200 hover:bg-slate-800/80"
+                                aria-expanded={expanded}
+                              >
+                                <span className="flex min-w-0 items-center gap-2">
+                                  {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                                  <span className="font-medium">{group.label}</span>
+                                </span>
+                                <span className="shrink-0 text-[10px] text-slate-400">{group.performers.length} 个</span>
+                              </button>
 
-                  <div className={`grid gap-2 ${canEditSelectedTransitionRotation ? 'grid-cols-2' : 'grid-cols-1'}`}>
-                    <label className="text-[10px] text-slate-400">
-                      路径
-                      <select
-                        value={selectedTransitionMotion.pathType || 'linear'}
-                        onChange={(event) => updateSelectedTransitionMotion({
-                          pathType: event.target.value as 'linear' | 'bezier',
-                          controlPoints: event.target.value === 'bezier' ? (selectedTransitionMotion.controlPoints || undefined) : undefined,
+                              {expanded && (
+                                <div className="grid grid-cols-2 gap-1 border-t border-slate-800 p-1">
+                                  {group.performers.map((performer) => {
+                                    const motion = selectedTransition.objectMotions[performer.id];
+                                    const selected = performer.id === selectedTransitionPerformerId;
+                                    return (
+                                      <button
+                                        key={performer.id}
+                                        type="button"
+                                        onClick={() => setSelectedTransitionPerformerId(performer.id)}
+                                        className={`flex items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-[11px] ${selected ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'}`}
+                                      >
+                                        <span className="truncate">{performer.name}</span>
+                                        <span className="shrink-0 text-[9px] opacity-75">
+                                          {motion?.pathType === 'bezier' ? '曲线' : '直线'}
+                                          {performer.type === 'prop' ? ` · ${motion?.rotationMode === 'fixed' ? '固定' : '旋转'}` : ''}
+                                        </span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          );
                         })}
-                        className="mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 text-xs text-slate-100 outline-none focus:border-blue-500"
-                      >
-                        <option value="linear">直线</option>
-                        <option value="bezier">Bezier 曲线</option>
-                      </select>
-                    </label>
+                      </div>
+                    </div>
 
-                    {canEditSelectedTransitionRotation && (
+                    <div className={`grid gap-2 ${canEditSelectedTransitionRotation ? 'grid-cols-2' : 'grid-cols-1'}`}>
                       <label className="text-[10px] text-slate-400">
-                        旋转模式
+                        路径
                         <select
-                          value={selectedTransitionMotion.rotationMode || 'lerp'}
-                          onChange={(event) => updateSelectedTransitionMotion({ rotationMode: event.target.value as 'fixed' | 'lerp' })}
+                          value={selectedTransitionMotion.pathType || 'linear'}
+                          onChange={(event) => updateSelectedTransitionMotion({
+                            pathType: event.target.value as 'linear' | 'bezier',
+                            controlPoints: event.target.value === 'bezier' ? (selectedTransitionMotion.controlPoints || undefined) : undefined,
+                          })}
                           className="mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 text-xs text-slate-100 outline-none focus:border-blue-500"
                         >
-                          <option value="lerp">旋转插值</option>
-                          <option value="fixed">固定朝向</option>
+                          <option value="linear">直线</option>
+                          <option value="bezier">Bezier 曲线</option>
                         </select>
                       </label>
+
+                      {canEditSelectedTransitionRotation && (
+                        <label className="text-[10px] text-slate-400">
+                          旋转模式
+                          <select
+                            value={selectedTransitionMotion.rotationMode || 'lerp'}
+                            onChange={(event) => updateSelectedTransitionMotion({ rotationMode: event.target.value as 'fixed' | 'lerp' })}
+                            className="mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 text-xs text-slate-100 outline-none focus:border-blue-500"
+                          >
+                            <option value="lerp">旋转插值</option>
+                            <option value="fixed">固定朝向</option>
+                          </select>
+                        </label>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={resetSelectedTransitionMotion}
+                      disabled={!selectedTransitionPerformerId || !selectedTransition.objectMotions[selectedTransitionPerformerId]}
+                      className="mt-2 h-9 w-full rounded-md border border-slate-700 text-xs text-slate-300 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      重置当前对象
+                    </button>
+
+                    {canEditSelectedTransitionRotation && selectedTransitionPerformerId && (
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        <label className="text-[10px] text-slate-400">
+                          起始队形角度
+                          <EditableNumberInput
+                            step={1}
+                            value={selectedTransitionFrames.fromFrame.rotations?.[selectedTransitionPerformerId]
+                              ?? selectedTransitionPerformer?.rotation
+                              ?? 0}
+                            onChange={(value) => {
+                              handleFrameRotationChange(selectedTransitionFrames.fromFrame.id, selectedTransitionPerformerId, value);
+                            }}
+                            className="mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 font-mono text-xs text-slate-100 outline-none focus:border-blue-500"
+                          />
+                        </label>
+                        <label className="text-[10px] text-slate-400">
+                          目标队形角度
+                          <EditableNumberInput
+                            step={1}
+                            value={selectedTransitionFrames.toFrame.rotations?.[selectedTransitionPerformerId]
+                              ?? selectedTransitionPerformer?.rotation
+                              ?? 0}
+                            onChange={(value) => {
+                              handleFrameRotationChange(selectedTransitionFrames.toFrame.id, selectedTransitionPerformerId, value);
+                            }}
+                            className="mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 font-mono text-xs text-slate-100 outline-none focus:border-blue-500"
+                          />
+                        </label>
+                      </div>
                     )}
-                  </div>
 
-                  <button
-                    type="button"
-                    onClick={resetSelectedTransitionMotion}
-                    disabled={!selectedTransitionPerformerId || !selectedTransition.objectMotions[selectedTransitionPerformerId]}
-                    className="mt-2 h-9 w-full rounded-md border border-slate-700 text-xs text-slate-300 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    重置当前对象
-                  </button>
-
-                  {canEditSelectedTransitionRotation && selectedTransitionPerformerId && (
-                    <div className="mt-3 grid grid-cols-2 gap-2">
-                      <label className="text-[10px] text-slate-400">
-                        起始队形角度
-                        <EditableNumberInput
-                          step={1}
-                          value={selectedTransitionFrames.fromFrame.rotations?.[selectedTransitionPerformerId]
-                            ?? selectedTransitionPerformer?.rotation
-                            ?? 0}
-                          onChange={(value) => {
-                            handleFrameRotationChange(selectedTransitionFrames.fromFrame.id, selectedTransitionPerformerId, value);
-                          }}
-                          className="mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 font-mono text-xs text-slate-100 outline-none focus:border-blue-500"
-                        />
-                      </label>
-                      <label className="text-[10px] text-slate-400">
-                        目标队形角度
-                        <EditableNumberInput
-                          step={1}
-                          value={selectedTransitionFrames.toFrame.rotations?.[selectedTransitionPerformerId]
-                            ?? selectedTransitionPerformer?.rotation
-                            ?? 0}
-                          onChange={(value) => {
-                            handleFrameRotationChange(selectedTransitionFrames.toFrame.id, selectedTransitionPerformerId, value);
-                          }}
-                          className="mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 font-mono text-xs text-slate-100 outline-none focus:border-blue-500"
-                        />
-                      </label>
-                    </div>
-                  )}
-
-                  {(selectedTransitionMotion.pathType || 'linear') === 'bezier' && (
-                    <div className="mt-3 grid grid-cols-2 gap-3">
-                      {[0, 1].map((index) => (
-                        <div key={index} className="rounded-lg border border-slate-800 bg-slate-950/80 p-2">
-                          <div className="mb-2 text-[10px] font-medium text-slate-300">控制点 {index + 1}</div>
-                          <div className="grid grid-cols-3 gap-2">
-                            {(['x', 'y', 'z'] as const).map((axis) => (
-                              <label key={axis} className="text-[10px] text-slate-500">
-                                {axis.toUpperCase()}
-                                <EditableNumberInput
-                                  step={0.1}
-                                  value={selectedTransitionMotion.controlPoints?.[index]?.[axis] ?? 0}
-                                  onChange={(value) => handleTransitionMotionControlPointChange(index, axis, value)}
-                                  className="mt-1 h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 font-mono text-[11px] text-slate-100 outline-none focus:border-blue-500"
-                                />
-                              </label>
-                            ))}
+                    {(selectedTransitionMotion.pathType || 'linear') === 'bezier' && (
+                      <div className="mt-3 grid grid-cols-2 gap-3">
+                        {[0, 1].map((index) => (
+                          <div key={index} className="rounded-lg border border-slate-800 bg-slate-950/80 p-2">
+                            <div className="mb-2 text-[10px] font-medium text-slate-300">控制点 {index + 1}</div>
+                            <div className="grid grid-cols-3 gap-2">
+                              {(['x', 'y', 'z'] as const).map((axis) => (
+                                <label key={axis} className="text-[10px] text-slate-500">
+                                  {axis.toUpperCase()}
+                                  <EditableNumberInput
+                                    step={0.1}
+                                    value={selectedTransitionMotion.controlPoints?.[index]?.[axis] ?? 0}
+                                    onChange={(value) => handleTransitionMotionControlPointChange(index, axis, value)}
+                                    className="mt-1 h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 font-mono text-[11px] text-slate-100 outline-none focus:border-blue-500"
+                                  />
+                                </label>
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </>
-              )}
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
           )}
 
