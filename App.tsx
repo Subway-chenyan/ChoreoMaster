@@ -4178,7 +4178,7 @@ const App: React.FC = () => {
                   <div className="text-sm font-semibold">过渡参数</div>
                   <div className="mt-0.5 truncate text-[11px] text-slate-400">
                     {selectedTransitionFrames.fromFrame.name} → {selectedTransitionFrames.toFrame.name}
-                    <span className="ml-2">{(selectedTransition.duration / 1000).toFixed(1)} 秒</span>
+                    <span className="ml-2">{((selectedTransition.duration ?? 0) / 1000).toFixed(1)} 秒</span>
                   </div>
                 </div>
                 <button
