@@ -306,6 +306,7 @@ const App: React.FC = () => {
     performer: true,
     prop: true,
   });
+  const [transitionPerformerSubgroupExpanded, setTransitionPerformerSubgroupExpanded] = useState<Record<string, boolean>>({});
   const [selectedPerformerIds, setSelectedPerformerIds] = useState<string[]>([]);
   const [musicUrl, setMusicUrl] = useState<string | null>(null);
   const [audioBuffer, setAudioBuffer] = useState<AudioBuffer | null>(null);
@@ -342,6 +343,7 @@ const App: React.FC = () => {
   const [isCompactLayout, setIsCompactLayout] = useState(() => window.matchMedia('(max-width: 1100px)').matches);
   const [undoStack, setUndoStack] = useState<UndoAction[]>([]);
   const [redoStack, setRedoStack] = useState<UndoAction[]>([]);
+  const [stageViewportHeight, setStageViewportHeight] = useState(0);
   const pendingMoveUndoRef = useRef<{
     frameId: string;
     performerIds: string[];
@@ -352,6 +354,7 @@ const App: React.FC = () => {
     performerId: string;
     before: number;
   } | null>(null);
+  const stageViewportRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const media = window.matchMedia('(max-width: 1100px)');
@@ -365,6 +368,24 @@ const App: React.FC = () => {
     syncLayout();
     media.addEventListener('change', syncLayout);
     return () => media.removeEventListener('change', syncLayout);
+  }, []);
+
+  useEffect(() => {
+    const element = stageViewportRef.current;
+    if (!element) return;
+
+    const updateHeight = () => {
+      setStageViewportHeight(element.clientHeight);
+    };
+
+    updateHeight();
+
+    const observer = new ResizeObserver(() => {
+      updateHeight();
+    });
+    observer.observe(element);
+
+    return () => observer.disconnect();
   }, []);
 
   // 新增：3D 模式相关状态
@@ -1488,14 +1509,89 @@ const App: React.FC = () => {
       { key: 'performer', label: '演员' },
       { key: 'prop', label: '道具' },
     ];
+    const performerGroupById = new Map(performerGroups.map((group, index) => [group.id, { group, index }]));
     return groupConfigs
-      .map(({ key, label }) => ({
-        key,
-        label,
-        performers: transitionSelectablePerformers.filter((performer) => (performer.type ?? 'performer') === key),
-      }))
+      .map(({ key, label }) => {
+        const typedPerformers = transitionSelectablePerformers.filter((performer) => (performer.type ?? 'performer') === key);
+        const subgroupMap = new Map<string, {
+          stateKey: string;
+          label: string;
+          performers: Performer[];
+          sortOrder: number;
+          defaultExpanded: boolean;
+        }>();
+
+        typedPerformers.forEach((performer) => {
+          const performerGroupMeta = performer.groupId ? performerGroupById.get(performer.groupId) : undefined;
+          const subgroup = performerGroupMeta?.group;
+          const stateKey = subgroup
+            ? `${key}:${subgroup.id}`
+            : `${key}:ungrouped`;
+          const existing = subgroupMap.get(stateKey);
+
+          if (existing) {
+            existing.performers.push(performer);
+            return;
+          }
+
+          subgroupMap.set(stateKey, {
+            stateKey,
+            label: subgroup?.name ?? '未分组',
+            performers: [performer],
+            sortOrder: subgroup ? performerGroupMeta.index : Number.MAX_SAFE_INTEGER,
+            defaultExpanded: subgroup ? !subgroup.collapsed : true,
+          });
+        });
+
+        const subgroups = Array.from(subgroupMap.values())
+          .sort((left, right) => {
+            if (left.sortOrder !== right.sortOrder) {
+              return left.sortOrder - right.sortOrder;
+            }
+            return left.label.localeCompare(right.label, 'zh-CN', { numeric: true, sensitivity: 'base' });
+          });
+
+        return {
+          key,
+          label,
+          performers: typedPerformers,
+          subgroups,
+        };
+      })
       .filter((group) => group.performers.length > 0);
-  }, [transitionSelectablePerformers]);
+  }, [performerGroups, transitionSelectablePerformers]);
+
+  useEffect(() => {
+    setTransitionPerformerSubgroupExpanded((current) => {
+      const validKeys = new Set(
+        transitionSelectablePerformerGroups.flatMap((group) => group.subgroups.map((subgroup) => subgroup.stateKey))
+      );
+      const next: Record<string, boolean> = {};
+      let changed = false;
+
+      transitionSelectablePerformerGroups.forEach((group) => {
+        group.subgroups.forEach((subgroup) => {
+          const existing = current[subgroup.stateKey];
+          next[subgroup.stateKey] = existing ?? subgroup.defaultExpanded;
+          if (existing === undefined || existing !== next[subgroup.stateKey]) {
+            changed = true;
+          }
+        });
+      });
+
+      Object.keys(current).forEach((key) => {
+        if (!validKeys.has(key)) {
+          changed = true;
+        }
+      });
+
+      if (!changed && Object.keys(current).length === Object.keys(next).length) {
+        return current;
+      }
+
+      return next;
+    });
+  }, [transitionSelectablePerformerGroups]);
 
   useEffect(() => {
     if (transitionSelectablePerformers.length === 0) {
@@ -1544,6 +1640,13 @@ const App: React.FC = () => {
     setTransitionPerformerGroupExpanded((current) => ({
       ...current,
       [group]: !current[group],
+    }));
+  }, []);
+
+  const handleToggleTransitionPerformerSubgroup = useCallback((stateKey: string, defaultExpanded: boolean) => {
+    setTransitionPerformerSubgroupExpanded((current) => ({
+      ...current,
+      [stateKey]: !(current[stateKey] ?? defaultExpanded),
     }));
   }, []);
 
@@ -4080,7 +4183,7 @@ const App: React.FC = () => {
         )}
 
         <div className={`min-w-0 flex-1 flex flex-col relative ${theme === 'dark' ? 'bg-black' : 'bg-gray-100'}`}>
-          <div className="min-h-0 flex-1 flex flex-col relative">
+          <div ref={stageViewportRef} className="min-h-0 flex-1 flex flex-col relative">
           {!isCompactLayout && (
             <button
               type="button"
@@ -4169,7 +4272,9 @@ const App: React.FC = () => {
               className="absolute right-4 z-40 flex w-[min(380px,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900/95 p-3 text-slate-100 shadow-2xl backdrop-blur"
               style={{
                 top: isCompactLayout ? 12 : 16,
-                maxHeight: `calc(100vh - ${(isCompactLayout ? 12 : 16) * 2}px)`,
+                maxHeight: stageViewportHeight > 0
+                  ? `${Math.max(0, stageViewportHeight - ((isCompactLayout ? 12 : 16) * 2))}px`
+                  : undefined,
               }}
               onPointerDown={(event) => event.stopPropagation()}
             >
@@ -4221,23 +4326,47 @@ const App: React.FC = () => {
                               </button>
 
                               {expanded && (
-                                <div className="grid grid-cols-2 gap-1 border-t border-slate-800 p-1">
-                                  {group.performers.map((performer) => {
-                                    const motion = selectedTransition.objectMotions[performer.id];
-                                    const selected = performer.id === selectedTransitionPerformerId;
+                                <div className="space-y-2 border-t border-slate-800 p-1">
+                                  {group.subgroups.map((subgroup) => {
+                                    const subgroupExpanded = transitionPerformerSubgroupExpanded[subgroup.stateKey] ?? subgroup.defaultExpanded;
                                     return (
-                                      <button
-                                        key={performer.id}
-                                        type="button"
-                                        onClick={() => setSelectedTransitionPerformerId(performer.id)}
-                                        className={`flex items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-[11px] ${selected ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'}`}
-                                      >
-                                        <span className="truncate">{performer.name}</span>
-                                        <span className="shrink-0 text-[9px] opacity-75">
-                                          {motion?.pathType === 'bezier' ? '曲线' : '直线'}
-                                          {performer.type === 'prop' ? ` · ${motion?.rotationMode === 'fixed' ? '固定' : '旋转'}` : ''}
-                                        </span>
-                                      </button>
+                                      <div key={subgroup.stateKey} className="overflow-hidden rounded-md border border-slate-800/80 bg-slate-900/70">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleToggleTransitionPerformerSubgroup(subgroup.stateKey, subgroup.defaultExpanded)}
+                                          className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-[10px] text-slate-300 hover:bg-slate-800/70"
+                                          aria-expanded={subgroupExpanded}
+                                        >
+                                          <span className="flex min-w-0 items-center gap-2">
+                                            {subgroupExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                                            <span className="truncate">{subgroup.label}</span>
+                                          </span>
+                                          <span className="shrink-0 text-[10px] text-slate-500">{subgroup.performers.length} 个</span>
+                                        </button>
+
+                                        {subgroupExpanded && (
+                                          <div className="grid grid-cols-2 gap-1 border-t border-slate-800/80 p-1">
+                                            {subgroup.performers.map((performer) => {
+                                              const motion = selectedTransition.objectMotions[performer.id];
+                                              const selected = performer.id === selectedTransitionPerformerId;
+                                              return (
+                                                <button
+                                                  key={performer.id}
+                                                  type="button"
+                                                  onClick={() => setSelectedTransitionPerformerId(performer.id)}
+                                                  className={`flex items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-[11px] ${selected ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'}`}
+                                                >
+                                                  <span className="truncate">{performer.name}</span>
+                                                  <span className="shrink-0 text-[9px] opacity-75">
+                                                    {motion?.pathType === 'bezier' ? '曲线' : '直线'}
+                                                    {performer.type === 'prop' ? ` · ${motion?.rotationMode === 'fixed' ? '固定' : '旋转'}` : ''}
+                                                  </span>
+                                                </button>
+                                              );
+                                            })}
+                                          </div>
+                                        )}
+                                      </div>
                                     );
                                   })}
                                 </div>
