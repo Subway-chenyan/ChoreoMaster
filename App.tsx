@@ -823,7 +823,7 @@ const App: React.FC = () => {
   const handleAddNote = (performerId: string, frameId?: string) => {
     const now = Date.now();
     const newNote: PerformerNote = {
-      id: `note_${now}_${Math.random().toString(36).slice(2, 8)}`,
+      id: `note_${generateId()}`,
       performerId,
       frameId,
       content: '',
@@ -848,7 +848,7 @@ const App: React.FC = () => {
       if (n.id !== noteId) return n;
       return {
         ...n,
-        items: [...n.items, { ...item, id: `item_${Date.now()}_${Math.random().toString(36).slice(2, 8)}` }],
+        items: [...n.items, { ...item, id: `item_${generateId()}` }],
         updatedAt: Date.now(),
       };
     }));
