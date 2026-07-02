@@ -1,6 +1,9 @@
-import { autoUpdater, UpdateInfo } from 'electron-updater';
+import electronUpdater from 'electron-updater';
 import { BrowserWindow, app } from 'electron';
 import { EventEmitter } from 'events';
+
+const { autoUpdater } = electronUpdater;
+type UpdateInfo = any;
 
 // ==================== Update State Types ====================
 
