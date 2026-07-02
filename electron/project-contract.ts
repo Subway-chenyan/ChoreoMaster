@@ -167,6 +167,24 @@ export interface Performer {
   boundToId?: string;
 }
 
+export interface NoteItem {
+  id: string;
+  name: string;
+  type: 'carry' | 'handoff' | 'event';
+  description?: string;
+  frameId?: string;
+}
+
+export interface PerformerNote {
+  id: string;
+  performerId: string;
+  frameId?: string;       // undefined = global note
+  content: string;
+  items: NoteItem[];
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface PerformerGroup {
   id: string;
   name: string;
@@ -278,6 +296,7 @@ export interface ProjectDocument {
   transitions?: TransitionSegment[];
   audioMarkers?: AudioMarker[];
   stageConfig: StageConfig;
+  performerNotes?: PerformerNote[];
 }
 
 export type ProjectAssetKind = 'audio' | 'background' | 'stage-background';
