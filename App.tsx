@@ -2817,21 +2817,21 @@ const App: React.FC = () => {
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 2 * scale;
         const shapeSize = 32 * scale;
+        const iconScale = shapeSize / 24;
         if (p.shape === 'circle') {
           ctx.beginPath();
-          ctx.arc(0, 0, Math.floor(shapeSize / 2 - 7 * scale), 0, Math.PI * 2);
+          ctx.arc(0, 0, 9 * iconScale, 0, Math.PI * 2);
           ctx.fill();
           ctx.stroke();
         } else if (p.shape === 'square') {
-          const s = shapeSize;
+          const s = 16 * iconScale;
           ctx.fillRect(-s / 2, -s / 2, s, s);
           ctx.strokeRect(-s / 2, -s / 2, s, s);
         } else {
-          const s = shapeSize + 6 * scale;
           ctx.beginPath();
-          ctx.moveTo(0, -s / 2);
-          ctx.lineTo(s / 2, s / 2);
-          ctx.lineTo(-s / 2, s / 2);
+          ctx.moveTo(0, -8 * iconScale);
+          ctx.lineTo(8 * iconScale, 8 * iconScale);
+          ctx.lineTo(-8 * iconScale, 8 * iconScale);
           ctx.closePath();
           ctx.fill();
           ctx.stroke();
