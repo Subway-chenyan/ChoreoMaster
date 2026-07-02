@@ -2302,6 +2302,8 @@ const App: React.FC = () => {
     setMusicUrl(null);
     setCurrentTime(0);
     setSelectedPerformerIds([]);
+    setCurrentProjectId(null);
+    setProjectHasChanges(false);
   };
 
   const handleImportProject = async (e: React.ChangeEvent<HTMLInputElement>) => {
