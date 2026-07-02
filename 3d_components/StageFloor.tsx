@@ -16,6 +16,7 @@ const StageFloor: React.FC<StageFloorProps> = ({ stageConfig, mediaCache = {}, g
   const wingWidth = getWingWidth(stageConfig);
   const totalWidth = width + wingWidth * 2;
   const gridMarks = createCenteredStageGridMarks(totalWidth, gridScale);
+  const depthGridMarks = createCenteredStageGridMarks(depth, gridScale);
   const showStageLines = stageConfig.showStageLines !== false;
   const backgroundUrl = resolveStageBackgroundUrl(stageConfig, mediaCache);
   const [backgroundTexture, setBackgroundTexture] = useState<THREE.Texture | null>(null);
@@ -85,6 +86,16 @@ const StageFloor: React.FC<StageFloorProps> = ({ stageConfig, mediaCache = {}, g
       {gridMarks.map((mark) => (
         <mesh key={`meter-${mark.offsetMeters}`} position={[mark.offsetMeters, 0.01, 0]}>
           <boxGeometry args={[mark.offsetMeters === 0 ? 0.035 : 0.02, 0.018, depth]} />
+          <meshBasicMaterial
+            color={mark.offsetMeters === 0 ? '#cbd5e1' : '#475569'}
+            transparent
+            opacity={mark.offsetMeters === 0 ? 0.8 : 0.55}
+          />
+        </mesh>
+      ))}
+      {depthGridMarks.map((mark) => (
+        <mesh key={`depth-meter-${mark.offsetMeters}`} position={[0, 0.01, mark.offsetMeters]}>
+          <boxGeometry args={[totalWidth, 0.018, mark.offsetMeters === 0 ? 0.035 : 0.02]} />
           <meshBasicMaterial
             color={mark.offsetMeters === 0 ? '#cbd5e1' : '#475569'}
             transparent

@@ -9,6 +9,7 @@ import LEDTV from '../components/LEDTV';
 import { Performer, Position, StageConfig } from '../types';
 import { getTotalStageWidth, mapTo2D } from '../utils/coordinates';
 import { buildPlatformOccupancy } from '../utils/platforms';
+import { snapStagePosition } from '../utils/stage-grid';
 
 interface DragContextType {
   isDragging: boolean;
@@ -33,9 +34,10 @@ interface Scene3DProps {
   isPlaying?: boolean;
   hiddenGroupIds?: string[];
   gridScale?: number;
+  snapToGrid?: boolean;
   showDirectionArrows?: boolean;
   onDragStart?: (ids: string[]) => void;
-  onDragEnd?: (ids: string[]) => void;
+  onDragEnd?: (ids: string[], finalUpdates?: { id: string; pos: Position }[]) => void;
   onPositionChange?: (updates: { id: string; pos: Position }[]) => void;
   readonly?: boolean;
 }
@@ -75,6 +77,7 @@ const Scene3D: React.FC<Scene3DProps> = ({
   isPlaying = false,
   hiddenGroupIds = [],
   gridScale = 1,
+  snapToGrid = false,
   showDirectionArrows = true,
   onDragStart,
   onDragEnd,
@@ -84,11 +87,13 @@ const Scene3D: React.FC<Scene3DProps> = ({
   const { camera, raycaster, pointer } = useThree();
   const dragPlaneRef = useRef<THREE.Plane>(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0));
   const draggingIdRef = useRef<string | null>(null);
+  const lastDragPositionRef = useRef<{ id: string; pos: Position } | null>(null);
   const draggablesRef = useRef<Map<string, THREE.Object3D>>(new Map());
 
   const onPlaneDragStart = (id: string) => {
     if (readonly) return;
     draggingIdRef.current = id;
+    lastDragPositionRef.current = null;
     onDragStart?.([id]);
   };
 
@@ -105,13 +110,27 @@ const Scene3D: React.FC<Scene3DProps> = ({
     newPos.x = Math.max(-halfWingPercent, Math.min(100 + halfWingPercent, newPos.x));
     newPos.y = Math.max(0, Math.min(100, newPos.y));
 
+    lastDragPositionRef.current = { id, pos: newPos };
     onPositionChange([{ id, pos: newPos }]);
   };
 
   const onPlaneDragEnd = () => {
     const draggedId = draggingIdRef.current;
+    const lastUpdate = lastDragPositionRef.current;
     draggingIdRef.current = null;
-    onDragEnd?.(draggedId ? [draggedId] : []);
+    lastDragPositionRef.current = null;
+    if (!draggedId || !lastUpdate || lastUpdate.id !== draggedId) {
+      onDragEnd?.(draggedId ? [draggedId] : []);
+      return;
+    }
+    const committedUpdate = {
+      id: draggedId,
+      pos: snapToGrid
+        ? snapStagePosition(lastUpdate.pos, gridScale, stageConfig)
+        : lastUpdate.pos,
+    };
+    if (snapToGrid) onPositionChange?.([committedUpdate]);
+    onDragEnd?.([draggedId], [committedUpdate]);
   };
 
   const registerDraggable = (id: string, mesh: THREE.Object3D) => {

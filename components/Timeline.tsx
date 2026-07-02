@@ -4,6 +4,7 @@ import { AudioMarker, Frame, MotionControlPoint, ObjectMotion, Performer, Transi
 import { Flag, Pause, Play, PlusCircle, SkipBack, Trash2, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { EditableNumberInput } from './FormControls';
 import { createTransitionId, getDefaultBezierControlPoints, getGapSelectionId } from '../utils/transitions';
+import { getTimelineHorizontalWheelDelta } from '../utils/timeline-scroll';
 
 interface TimelineProps {
     performers: Performer[];
@@ -351,6 +352,15 @@ export const Timeline: React.FC<TimelineProps> = ({
         }
     };
 
+    const handleTimelineWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+        const container = containerRef.current;
+        if (!container || container.scrollWidth <= container.clientWidth) return;
+        const delta = getTimelineHorizontalWheelDelta(event, container.clientWidth);
+        if (delta === 0) return;
+        event.preventDefault();
+        container.scrollLeft += delta;
+    };
+
     const handleFrameDragStart = (e: React.PointerEvent, frame: Frame, type: 'move' | 'resize') => {
         e.stopPropagation();
         e.preventDefault();
@@ -487,9 +497,14 @@ export const Timeline: React.FC<TimelineProps> = ({
             <div
                 className={`timeline-scroll min-h-0 flex-1 overflow-x-auto max-[1100px]:overflow-x-hidden overflow-y-hidden relative custom-scrollbar bg-slate-950 ${isScrubbing ? 'cursor-col-resize' : 'cursor-default'}`}
                 ref={containerRef}
-                onPointerDown={handlePointerDown}
+                onWheel={handleTimelineWheel}
             >
-                <div style={{ width: totalWidth, minWidth: '100%' }} className="h-full relative">
+                <div
+                    data-timeline-content
+                    style={{ width: totalWidth, minWidth: '100%' }}
+                    className="h-full relative"
+                    onPointerDown={handlePointerDown}
+                >
 
                     {/* Waveform Canvas Layer */}
                     <canvas

@@ -106,6 +106,19 @@ function createStageFloor(stageConfig: StageConfig, gridScale: number, includeGr
       group.add(line);
     });
 
+    const depthGridMarks = createCenteredStageGridMarks(depth, gridScale);
+    depthGridMarks.forEach((mark) => {
+      const geometry = new THREE.BoxGeometry(totalWidth, 0.018, mark.offsetMeters === 0 ? 0.035 : 0.02);
+      const material = new THREE.MeshBasicMaterial({
+        color: mark.offsetMeters === 0 ? 0xcbd5e1 : 0x475569,
+        transparent: true,
+        opacity: mark.offsetMeters === 0 ? 0.8 : 0.55,
+      });
+      const line = new THREE.Mesh(geometry, material);
+      line.position.set(0, 0.01, mark.offsetMeters);
+      group.add(line);
+    });
+
     if (showStageLines) STAGE_THIRD_POSITIONS.forEach((position) => {
       const geometry = new THREE.BoxGeometry(totalWidth, 0.035, 0.065);
       const material = new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.85 });

@@ -166,6 +166,26 @@ Scrollbars should be invisible by default and fade in/out smoothly on hover. Thi
 }
 ```
 
+## Interactive Scrollbars Must Not Share Content Pointer Handlers
+
+Native scrollbar pointer events target the overflow element. If that same element owns a content action such as timeline seeking, clicking or dragging the scrollbar can accidentally run the content action.
+
+```tsx
+// Good: the viewport owns scrolling; the inner surface owns seeking.
+<div ref={scrollRef} className="overflow-x-auto" onWheel={handleHorizontalWheel}>
+  <div data-timeline-content onPointerDown={handleSeekStart}>
+    {timelineContent}
+  </div>
+</div>
+
+// Bad: native scrollbar interaction can enter handleSeekStart.
+<div ref={scrollRef} className="overflow-x-auto" onPointerDown={handleSeekStart}>
+  {timelineContent}
+</div>
+```
+
+For a horizontally scrolling timeline, normalize `WheelEvent.deltaMode`, preserve dominant native `deltaX`, and convert dominant `deltaY` to `scrollLeft`. Only call `preventDefault()` when horizontal overflow exists and a non-zero scroll delta will be consumed.
+
 **Behavior:**
 
 | State              | Opacity | Transition |

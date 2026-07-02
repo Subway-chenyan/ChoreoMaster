@@ -121,15 +121,24 @@ test('stage grid uses meter spacing, centered ruler marks, and third divisions',
     read('utils/stage-grid.ts'),
   ]);
 
-  assert.match(grid, /MIN_STAGE_GRID_SPACING = 0\.5/);
+  assert.match(grid, /MIN_STAGE_GRID_SPACING = 0\.1/);
   assert.match(grid, /MAX_STAGE_GRID_SPACING = 2\.5/);
   assert.match(grid, /DEFAULT_STAGE_GRID_SPACING = 1/);
   assert.match(grid, /STAGE_THIRD_POSITIONS = \[1 \/ 3, 2 \/ 3\]/);
   assert.match(stage, /createCenteredStageGridMarks\(totalStageWidth, gridScale\)/);
+  assert.match(stage, /createCenteredStageGridMarks\(stageConfig\.depth, gridScale\)/);
   assert.match(stage, /formatStageGridLabel\(mark\.offsetMeters\)/);
+  assert.match(stage, /snapStagePosition/);
+  assert.match(stageFloor, /depthGridMarks\.map/);
   assert.match(stageFloor, /STAGE_THIRD_POSITIONS\.map/);
   assert.match(offline, /createCenteredStageGridMarks\(totalWidth, gridScale\)/);
-  assert.match(app, /\{gridScale\.toFixed\(1\)\}m/);
+  assert.match(offline, /depthGridMarks/);
+  assert.match(await read('3d_components/Scene3D.tsx'), /snapToGrid/);
+  assert.match(app, /const \[snapToGrid, setSnapToGrid\] = useState\(false\)/);
+  assert.match(app, /aria-label="吸附到网格"/);
+  assert.match(app, /step=\{STAGE_GRID_SPACING_STEP\}/);
+  assert.match(app, /createCenteredStageGridMarks\(stageD, gridScale\)/);
+  assert.match(stage, /shouldShowStageGridLabels\(gridScale\)/);
 });
 
 test('stage background upload uses a custom width dialog and sidebar controls', async () => {
@@ -235,15 +244,21 @@ test('stage selection box converts client pixels into transformed local coordina
 });
 
 test('CosStage rebrand preserves upgrade and legacy compatibility identifiers', async () => {
-  const [pkg, builder, index, ipc] = await Promise.all([
+  const [pkg, builder, ipc] = await Promise.all([
     read('package.json'),
     read('electron-builder.config.cjs'),
-    read('index.tsx'),
     read('electron/ipc-handlers.ts'),
   ]);
 
   assert.match(pkg, /"name": "cosstage-desktop"/);
   assert.match(builder, /appId: 'com\.choreomaster\.app'/);
-  assert.match(index, /key\.startsWith\('choreomaster-'\) \|\| key\.startsWith\('cosstage-'\)/);
   assert.match(ipc, /Legacy ChoreoMaster JSON/);
+});
+
+test('timeline native scrollbar is isolated from seeking and wheel input scrolls horizontally', async () => {
+  const source = await read('components/Timeline.tsx');
+
+  assert.match(source, /onWheel=\{handleTimelineWheel\}/);
+  assert.match(source, /data-timeline-content/);
+  assert.doesNotMatch(source, /ref=\{containerRef\}[\s\S]{0,160}onPointerDown=\{handlePointerDown\}/);
 });

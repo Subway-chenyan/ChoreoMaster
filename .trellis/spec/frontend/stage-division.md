@@ -7,13 +7,37 @@ All stage renderers must use `utils/stage-grid.ts` as the single source of truth
 ```typescript
 createCenteredStageGridMarks(totalWidth, spacing);
 normalizeStageGridSpacing(value);
+shouldShowStageGridLabels(spacing);
+snapStagePosition(position, spacing, stageConfig);
 ```
 
 - Spacing defaults to `1m`.
-- Valid spacing is `0.5m` through `2.5m` in `0.5m` steps.
+- Valid spacing is `0.1m` through `2.5m` in `0.1m` steps.
+- The same spacing controls both width-axis and depth-axis grid lines.
 - The stage front ruler is centered at `0m`.
 - Labels increase outward using absolute distances on both sides.
+- Hide ruler number labels when spacing is below `0.5m`; keep ruler ticks and grid lines visible.
 - Two prominent depth lines at `1/3` and `2/3` divide the stage into front, middle, and back zones.
+
+## Drop-Time Grid Snapping
+
+- Snapping is an editor preference and defaults to off.
+- Dragging remains continuous. Only the final pointer-up position is snapped.
+- Snap each moved performer or prop independently to the nearest centered width/depth grid intersection.
+- Preserve optional height (`Position.z`) and clamp the result to the normal stage and wing bounds.
+- Pass snapped final updates through `onDragEnd(ids, updates)` so undo captures the committed coordinates rather than stale parent state.
+
+```typescript
+const committedUpdates = snapToGrid
+  ? finalUpdates.map((update) => ({
+      ...update,
+      pos: snapStagePosition(update.pos, gridScale, stageConfig),
+    }))
+  : finalUpdates;
+
+onPositionChange(committedUpdates);
+onDragEnd?.(draggedIds, committedUpdates);
+```
 
 ## Renderer Consistency
 
@@ -30,7 +54,11 @@ Do not calculate independent division counts inside a renderer. Physical meter s
 
 - Default stage shows a centered `0m` mark.
 - Equal labels appear on the left and right at the selected spacing.
-- The control clamps to `0.5m` and `2.5m`.
+- The control clamps to `0.1m` and `2.5m` in `0.1m` steps.
+- Width and depth grid lines use `createCenteredStageGridMarks` in all four renderers.
+- Ruler number labels disappear below `0.5m` without removing ticks.
+- With snapping off, pointer-up preserves the free-drag coordinate.
+- With snapping on, pointer-up commits the nearest grid intersection and undo restores the pre-drag coordinate.
 - Exactly two prominent depth division lines are rendered.
 - 2D and 3D views render without console errors.
 - Export renderers use the same shared grid marks.

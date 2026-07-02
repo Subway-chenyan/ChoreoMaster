@@ -36,10 +36,14 @@ import {
   createCenteredStageGridMarks,
   DEFAULT_STAGE_GRID_SPACING,
   formatStageGridLabel,
+  MAX_STAGE_GRID_SPACING,
+  MIN_STAGE_GRID_SPACING,
   normalizeStageGridSpacing,
+  shouldShowStageGridLabels,
+  STAGE_GRID_SPACING_STEP,
   STAGE_THIRD_POSITIONS,
 } from './utils/stage-grid';
-import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, ChevronDown, ChevronUp, ChevronRight, PanelLeftClose, PanelLeftOpen, X, GripHorizontal, SlidersHorizontal, BookOpen, MessageCircle, Eye, EyeOff } from 'lucide-react';
+import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, ChevronDown, ChevronUp, ChevronRight, PanelLeftClose, PanelLeftOpen, X, GripHorizontal, SlidersHorizontal, BookOpen, MessageCircle, Eye, EyeOff, Magnet } from 'lucide-react';
 import { StageConfig } from './types';
 import {
   evaluateSceneStateAtTime,
@@ -329,6 +333,7 @@ const App: React.FC = () => {
   const [showLabels, setShowLabels] = useState(true);
   const [showDirectionArrows, setShowDirectionArrows] = useState(true);
   const [gridScale, setGridScale] = useState(DEFAULT_STAGE_GRID_SPACING);
+  const [snapToGrid, setSnapToGrid] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [showProductGuide, setShowProductGuide] = useState(false);
   const [showWebSaveReminder, setShowWebSaveReminder] = useState(() => !window.electronAPI?.isElectron);
@@ -2764,6 +2769,7 @@ const App: React.FC = () => {
 
     if (includeGrid) {
       const gridMarks = createCenteredStageGridMarks(totalStageW, gridScale);
+      const depthGridMarks = createCenteredStageGridMarks(stageD, gridScale);
       ctx.strokeStyle = '#94a3b8';
       ctx.lineWidth = scale;
       gridMarks.forEach((mark) => {
@@ -2771,6 +2777,12 @@ const App: React.FC = () => {
         ctx.globalAlpha = mark.offsetMeters === 0 ? 0.55 : 0.2;
         ctx.lineWidth = (mark.offsetMeters === 0 ? 1.5 : 1) * scale;
         ctx.beginPath(); ctx.moveTo(gx, renderY); ctx.lineTo(gx, renderY + renderH); ctx.stroke();
+      });
+      depthGridMarks.forEach((mark) => {
+        const gy = renderY + mark.positionRatio * renderH;
+        ctx.globalAlpha = mark.offsetMeters === 0 ? 0.55 : 0.2;
+        ctx.lineWidth = (mark.offsetMeters === 0 ? 1.5 : 1) * scale;
+        ctx.beginPath(); ctx.moveTo(renderX, gy); ctx.lineTo(renderX + renderW, gy); ctx.stroke();
       });
       ctx.strokeStyle = '#38bdf8';
       ctx.globalAlpha = 0.72;
@@ -2969,7 +2981,9 @@ const App: React.FC = () => {
       ctx.moveTo(x, renderY + renderH - rulerHeight);
       ctx.lineTo(x, renderY + renderH - rulerHeight + 7 * scale);
       ctx.stroke();
-      ctx.fillText(formatStageGridLabel(mark.offsetMeters), x, renderY + renderH - rulerHeight + 8 * scale);
+      if (shouldShowStageGridLabels(gridScale)) {
+        ctx.fillText(formatStageGridLabel(mark.offsetMeters), x, renderY + renderH - rulerHeight + 8 * scale);
+      }
     });
     ctx.fillStyle = '#ffffff';
     ctx.font = `${Math.max(7, Math.round(8 * scale))}px sans-serif`;
@@ -4240,6 +4254,7 @@ const App: React.FC = () => {
               showLabels={showLabels}
               showDirectionArrows={showDirectionArrows}
               gridScale={gridScale}
+              snapToGrid={snapToGrid}
               onZoom={handleGridZoom}
               stageConfig={stageConfig}
               mediaCache={mediaCache}
@@ -4262,6 +4277,7 @@ const App: React.FC = () => {
               currentTime={currentTime}
               isPlaying={isPlaying}
               gridScale={gridScale}
+              snapToGrid={snapToGrid}
               showDirectionArrows={showDirectionArrows}
               readonly={isPlaying}
             />
@@ -4572,9 +4588,44 @@ const App: React.FC = () => {
                 </button>
                 <div className={`w-px h-6 mx-1 ${theme === 'dark' ? 'bg-slate-700' : 'bg-gray-300'}`}></div>
                 <div className="flex items-center gap-2 px-2">
-                  <button onClick={() => handleGridZoom(-0.5)} className={theme === 'dark' ? 'text-slate-500 hover:text-white' : 'text-gray-500 hover:text-gray-900'}><MinusCircle size={16} /></button>
-                  <span className={`w-12 text-center font-mono text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-gray-600'}`}>{gridScale.toFixed(1)}m</span>
-                  <button onClick={() => handleGridZoom(0.5)} className={theme === 'dark' ? 'text-slate-500 hover:text-white' : 'text-gray-500 hover:text-gray-900'}><PlusCircle size={16} /></button>
+                  <button
+                    type="button"
+                    onClick={() => handleGridZoom(-STAGE_GRID_SPACING_STEP)}
+                    className={theme === 'dark' ? 'text-slate-500 hover:text-white' : 'text-gray-500 hover:text-gray-900'}
+                    aria-label="减小网格间距"
+                  >
+                    <MinusCircle size={16} />
+                  </button>
+                  <EditableNumberInput
+                    min={MIN_STAGE_GRID_SPACING}
+                    max={MAX_STAGE_GRID_SPACING}
+                    step={STAGE_GRID_SPACING_STEP}
+                    value={gridScale}
+                    fallbackValue={gridScale}
+                    onChange={(value) => setGridScale(normalizeStageGridSpacing(value))}
+                    formatValue={(value) => value.toFixed(1)}
+                    aria-label="网格间距"
+                    className={`w-14 rounded border px-1.5 py-1 text-center font-mono text-xs outline-none ${theme === 'dark' ? 'border-slate-600 bg-slate-950 text-slate-300 focus:border-blue-500' : 'border-gray-300 bg-white text-gray-700 focus:border-blue-500'}`}
+                  />
+                  <span className={`text-xs ${theme === 'dark' ? 'text-slate-500' : 'text-gray-500'}`}>m</span>
+                  <button
+                    type="button"
+                    onClick={() => handleGridZoom(STAGE_GRID_SPACING_STEP)}
+                    className={theme === 'dark' ? 'text-slate-500 hover:text-white' : 'text-gray-500 hover:text-gray-900'}
+                    aria-label="增大网格间距"
+                  >
+                    <PlusCircle size={16} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSnapToGrid((enabled) => !enabled)}
+                    className={`rounded p-2 transition-colors ${snapToGrid ? 'bg-blue-500/15 text-blue-400' : theme === 'dark' ? 'text-slate-500 hover:bg-slate-800 hover:text-white' : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900'}`}
+                    aria-label="吸附到网格"
+                    aria-pressed={snapToGrid}
+                    title={snapToGrid ? '关闭松手吸附' : '开启松手吸附'}
+                  >
+                    <Magnet size={16} />
+                  </button>
                 </div>
               </div>
             )}

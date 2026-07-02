@@ -13,6 +13,8 @@ import { getPropCenterFromAnchor } from '../utils/prop-pivot';
 import {
   createCenteredStageGridMarks,
   formatStageGridLabel,
+  shouldShowStageGridLabels,
+  snapStagePosition,
   STAGE_THIRD_POSITIONS,
 } from '../utils/stage-grid';
 import { getLedStageYPercent, resolveStageBackgroundUrl } from '../utils/stage-config';
@@ -41,6 +43,7 @@ interface StageProps {
   showLabels?: boolean;
   showDirectionArrows?: boolean;
   gridScale?: number;
+  snapToGrid?: boolean;
   onZoom?: (delta: number) => void;
   stageConfig: StageConfig;
   mediaCache?: Record<string, string>;
@@ -152,6 +155,7 @@ export const Stage: React.FC<StageProps> = ({
   showLabels = true,
   showDirectionArrows = true,
   gridScale = 1,
+  snapToGrid = false,
   onZoom,
   stageConfig,
   mediaCache = {},
@@ -171,6 +175,11 @@ export const Stage: React.FC<StageProps> = ({
     () => createCenteredStageGridMarks(totalStageWidth, gridScale),
     [gridScale, totalStageWidth],
   );
+  const depthGridMarks = useMemo(
+    () => createCenteredStageGridMarks(stageConfig.depth, gridScale),
+    [gridScale, stageConfig.depth],
+  );
+  const showGridLabels = shouldShowStageGridLabels(gridScale);
 
   const getDragUpdates = (clientX: number, clientY: number, state: DragState): { id: string; pos: Position }[] => {
     if (!stageRef.current) return [];
@@ -483,15 +492,21 @@ export const Stage: React.FC<StageProps> = ({
 
     if (readonly) return;
     const finalDragUpdates = dragState ? getDragUpdates(e.clientX, e.clientY, dragState) : [];
+    const committedDragUpdates = snapToGrid
+      ? finalDragUpdates.map((update) => ({
+        ...update,
+        pos: snapStagePosition(update.pos, gridScale, stageConfig),
+      }))
+      : finalDragUpdates;
     const draggedIds = dragState ? Object.keys(dragState.initialPositions) : [];
     setResizeState(null);
     setDragState(null);
     setSelectionBox(null);
     if (draggedIds.length > 0) {
-      if (finalDragUpdates.length > 0) {
-        onPositionChange(finalDragUpdates);
+      if (committedDragUpdates.length > 0) {
+        onPositionChange(committedDragUpdates);
       }
-      onDragEnd?.(draggedIds, finalDragUpdates);
+      onDragEnd?.(draggedIds, committedDragUpdates);
     }
 
     // Context for selection box logic... (retained but moved logic out of if block to be safe, or just keep it)
@@ -662,6 +677,18 @@ export const Stage: React.FC<StageProps> = ({
             opacity={mark.offsetMeters === 0 ? 0.55 : 0.2}
           />
         ))}
+        {depthGridMarks.map((mark) => (
+          <line
+            key={`depth-meter-${mark.offsetMeters}`}
+            x1="0"
+            y1={`${mark.positionRatio * 100}%`}
+            x2="100%"
+            y2={`${mark.positionRatio * 100}%`}
+            stroke={mark.offsetMeters === 0 ? '#e2e8f0' : '#94a3b8'}
+            strokeWidth={mark.offsetMeters === 0 ? 1.5 : 1}
+            opacity={mark.offsetMeters === 0 ? 0.55 : 0.2}
+          />
+        ))}
         {showStageLines && STAGE_THIRD_POSITIONS.map((position) => (
           <line
             key={`third-${position}`}
@@ -676,7 +703,7 @@ export const Stage: React.FC<StageProps> = ({
         ))}
       </svg>
     );
-  }, [gridMarks, showStageLines]);
+  }, [depthGridMarks, gridMarks, showStageLines]);
 
   const transitionOverlays = useMemo(() => transitionPaths.map((transitionPath) => {
     const startX = stageXToViewPercent(transitionPath.start.x, stageConfig);
@@ -854,7 +881,7 @@ export const Stage: React.FC<StageProps> = ({
               style={{ left: `${mark.positionRatio * 100}%` }}
             >
               <span className="mx-auto block h-1.5 w-px bg-slate-200" />
-              <span>{formatStageGridLabel(mark.offsetMeters)}</span>
+              {showGridLabels && <span>{formatStageGridLabel(mark.offsetMeters)}</span>}
             </div>
           ))}
         </div>
