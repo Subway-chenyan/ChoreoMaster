@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Performer, Frame, PerformerShape, PerformerGroup, PerformerType, PropCategory, AIConfig, AIChoreoPlan } from '../types';
-import { Plus, Users, Trash2, Download, Grid, Music, Sparkles, Wand2, Film, Copy, Search, Settings, Scaling, Upload, FilePlus, Circle, Square, Triangle, UserCheck, UserX, Eye, EyeOff, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreVertical, Palette, Edit2, Box, Library, Save } from 'lucide-react';
+import { Plus, Users, Trash2, Download, Grid, Music, Sparkles, Wand2, Film, Copy, Search, Settings, Scaling, Upload, FilePlus, Circle, Square, Triangle, UserCheck, UserX, Eye, EyeOff, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreVertical, Palette, Edit2, Box, Library, Save, StickyNote } from 'lucide-react';
 import { PRESET_SHAPES, DEFAULT_COLORS } from '../constants';
 import { StageConfig } from '../types';
 import { ProjectBrowser } from './ProjectBrowser';
@@ -69,6 +69,8 @@ interface SidebarProps {
     onLoadTemplate?: (templateData: any) => void;
     onSaveProject?: () => void;
     projectHasChanges?: boolean;
+    performerNotes?: import('../types').PerformerNote[];
+    onOpenNoteDrawer?: (performerId: string) => void;
 }
 
 type Tab = 'library' | 'project' | 'formations' | 'performers' | 'props' | 'presets';
@@ -212,6 +214,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     onLoadTemplate,
     onSaveProject,
     projectHasChanges,
+    performerNotes = [],
+    onOpenNoteDrawer,
 }) => {
     const [activeTab, setActiveTab] = useState<Tab>('library');
     const [editingFrameId, setEditingFrameId] = useState<string | null>(null);
@@ -576,6 +580,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
                 {/* Actions: Toggle In/Out of Frame, Delete */}
                 <div className="flex items-center gap-1">
+                    {onOpenNoteDrawer && (() => {
+                        const noteCount = performerNotes.filter(n => n.performerId === p.id).length;
+                        return (
+                            <button
+                                onClick={(e) => { e.stopPropagation(); onOpenNoteDrawer(p.id); }}
+                                className={`p-1 rounded relative ${noteCount > 0 ? 'text-blue-400 hover:text-white hover:bg-blue-600' : 'text-slate-600 hover:text-white hover:bg-slate-600'}`}
+                                title="演员笔记"
+                            >
+                                <StickyNote size={14} />
+                                {noteCount > 0 && (
+                                    <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-blue-500 text-[8px] text-white flex items-center justify-center font-bold">
+                                        {noteCount > 9 ? '9+' : noteCount}
+                                    </span>
+                                )}
+                            </button>
+                        );
+                    })()}
                     <button
                         onClick={(e) => { e.stopPropagation(); onTogglePerformerInFrame(p.id); }}
                         className={`p-1 rounded ${inFrame ? 'text-blue-400 hover:text-white hover:bg-blue-600' : 'text-slate-600 hover:text-white hover:bg-green-600'}`}
@@ -1322,6 +1343,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 >
                                     移出分组
                                 </button>
+                                {onOpenNoteDrawer && contextMenuState.performerIds.length === 1 && (
+                                    <>
+                                        <div className="h-px bg-slate-700 my-1"></div>
+                                        <button
+                                            onClick={() => {
+                                                onOpenNoteDrawer(contextMenuState.performerIds[0]);
+                                                closeContextMenu();
+                                            }}
+                                            className="w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 flex items-center gap-2"
+                                        >
+                                            <StickyNote size={12} /> 演员笔记
+                                        </button>
+                                    </>
+                                )}
                                 {(() => {
                                     const targetPerformerId = contextMenuState.performerIds[0];
                                     if (contextMenuState.performerIds.length === 1 && contextMenuState.performerType === 'prop') {
