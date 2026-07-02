@@ -8,6 +8,7 @@ import type {
   AudioMarker,
   FaceTexture,
   Performer,
+  PerformerNote,
   ProjectAssetKind,
   ProjectAssetResult,
   ProjectDocument,
@@ -98,6 +99,33 @@ function parseStageBackground(value: unknown): StageBackground | undefined {
   return { value: value.value, opacity, pixelWidth, pixelHeight };
 }
 
+function parsePerformerNotes(raw: unknown): PerformerNote[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((n: any) => n && typeof n.id === 'string' && typeof n.performerId === 'string')
+    .map((n: any) => ({
+      id: String(n.id),
+      performerId: String(n.performerId),
+      frameId: typeof n.frameId === 'string' ? n.frameId : undefined,
+      content: typeof n.content === 'string' ? n.content : '',
+      items: Array.isArray(n.items)
+        ? n.items
+            .filter((i: any) => i && typeof i.id === 'string')
+            .map((i: any) => ({
+              id: String(i.id),
+              name: typeof i.name === 'string' ? i.name : '',
+              type: i.type === 'carry' || i.type === 'handoff' || i.type === 'event'
+                ? i.type
+                : ('event' as const),
+              description: typeof i.description === 'string' ? i.description : undefined,
+              frameId: typeof i.frameId === 'string' ? i.frameId : undefined,
+            }))
+        : [],
+      createdAt: typeof n.createdAt === 'number' ? n.createdAt : 0,
+      updatedAt: typeof n.updatedAt === 'number' ? n.updatedAt : 0,
+    }));
+}
+
 function parseProjectDocument(value: unknown, fallbackName: string): ProjectDocument {
   if (!isRecord(value)) throw new Error('Project file must contain an object');
   if (!Array.isArray(value.performers) || !Array.isArray(value.frames)) {
@@ -139,6 +167,7 @@ function parseProjectDocument(value: unknown, fallbackName: string): ProjectDocu
     transitions: normalizeTransitions(value.transitions),
     audioMarkers: parseAudioMarkers(value.audioMarkers),
     stageConfig,
+    performerNotes: parsePerformerNotes(value.performerNotes),
   };
 }
 
