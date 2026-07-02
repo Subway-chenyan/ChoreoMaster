@@ -262,3 +262,17 @@ test('timeline native scrollbar is isolated from seeking and wheel input scrolls
   assert.match(source, /data-timeline-content/);
   assert.doesNotMatch(source, /ref=\{containerRef\}[\s\S]{0,160}onPointerDown=\{handlePointerDown\}/);
 });
+
+test('sidebar moves compatible multi-selection through menu and drag-and-drop', async () => {
+  const [sidebar, app] = await Promise.all([
+    read('components/Sidebar.tsx'),
+    read('App.tsx'),
+  ]);
+
+  assert.match(sidebar, /performerIds: string\[\]/);
+  assert.match(sidebar, /resolveGroupAction/);
+  assert.match(sidebar, /onAddPerformersToGroup\(contextMenuState\.performerIds/);
+  assert.match(sidebar, /onRemovePerformersFromGroup/);
+  assert.match(sidebar, /dragState\.performerIds\.length/);
+  assert.match(app, /handleRemovePerformersFromGroup/);
+});

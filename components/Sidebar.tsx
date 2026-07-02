@@ -10,6 +10,7 @@ import { PropEditorModal } from './PropEditorModal';
 import { ChoreoAgentModal } from './ChoreoAgentModal';
 import { EditableNumberInput, SelectField, StepperNumberField } from './FormControls';
 import { validateAgentAccess } from '../services/choreoAgentService';
+import { isPerformerGroupCompatible, resolveGroupAction, type GroupablePerformerType } from '../utils/performer-grouping';
 
 interface SidebarProps {
     performers: Performer[];
@@ -45,9 +46,8 @@ interface SidebarProps {
     onAddGroup: (name: string, color: string, type?: 'performer' | 'prop') => string;
     onRemoveGroup: (groupId: string) => void;
     onUpdateGroup: (groupId: string, updates: Partial<PerformerGroup>) => void;
-    onAddPerformerToGroup: (performerId: string, groupId: string) => void;
-    onRemovePerformerFromGroup: (performerId: string) => void;
     onAddPerformersToGroup: (performerIds: string[], groupId: string) => void;
+    onRemovePerformersFromGroup: (performerIds: string[]) => void;
     onUpdateGroupPerformers: (groupId: string, updates: Partial<Performer>) => void;
     onToggleGroupVisibility: (groupId: string) => void;
     onToggleGroupCollapsed: (groupId: string) => void;
@@ -190,9 +190,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     onAddGroup,
     onRemoveGroup,
     onUpdateGroup,
-    onAddPerformerToGroup,
-    onRemovePerformerFromGroup,
     onAddPerformersToGroup,
+    onRemovePerformersFromGroup,
     onUpdateGroupPerformers,
     onToggleGroupVisibility,
     onToggleGroupCollapsed,
@@ -249,10 +248,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
         show: boolean;
         x: number;
         y: number;
-        performerId: string | null;
+        performerIds: string[];
+        performerType: GroupablePerformerType | null;
         groupId: string | null;
-    }>({ show: false, x: 0, y: 0, performerId: null, groupId: null });
-    const [draggedPerformerId, setDraggedPerformerId] = useState<string | null>(null);
+    }>({ show: false, x: 0, y: 0, performerIds: [], performerType: null, groupId: null });
+    const [dragState, setDragState] = useState<{
+        performerIds: string[];
+        performerType: GroupablePerformerType;
+        overGroupId: string | null;
+        overUngrouped: boolean;
+    } | null>(null);
 
     // Custom Color Picker Modal State
     const [colorPickerState, setColorPickerState] = useState<{
@@ -403,17 +408,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
         const menuWidth = 208;
         const menuHeight = 320;
         const viewportPadding = 8;
+        const action = performerId
+            ? resolveGroupAction(performers, selectedPerformerIds, performerId)
+            : null;
+        if (performerId && !action) return;
+        if (performerId && !selectedPerformerIds.includes(performerId)) {
+            onSelectionChange([performerId]);
+        }
         setContextMenuState({
             show: true,
             x: Math.max(viewportPadding, Math.min(e.clientX, window.innerWidth - menuWidth - viewportPadding)),
             y: Math.max(viewportPadding, Math.min(e.clientY, window.innerHeight - menuHeight - viewportPadding)),
-            performerId,
+            performerIds: action?.performerIds ?? [],
+            performerType: action?.performerType ?? null,
             groupId,
         });
     };
 
     const closeContextMenu = () => {
-        setContextMenuState({ show: false, x: 0, y: 0, performerId: null, groupId: null });
+        setContextMenuState({ show: false, x: 0, y: 0, performerIds: [], performerType: null, groupId: null });
     };
 
     // Close context menu when clicking outside
@@ -431,34 +444,53 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
     // Drag and Drop Handlers
     const handleDragStart = (e: React.DragEvent, performerId: string) => {
-        setDraggedPerformerId(performerId);
+        const action = resolveGroupAction(performers, selectedPerformerIds, performerId);
+        if (!action) {
+            e.preventDefault();
+            return;
+        }
+        if (!selectedPerformerIds.includes(performerId)) {
+            onSelectionChange([performerId]);
+        }
+        setDragState({ ...action, overGroupId: null, overUngrouped: false });
         e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', performerId);
+        e.dataTransfer.setData('text/plain', action.performerIds.join(','));
     };
 
-    const handleDragOver = (e: React.DragEvent) => {
+    const handleDragOverGroup = (e: React.DragEvent, group: PerformerGroup) => {
+        if (!dragState || !isPerformerGroupCompatible(group, dragState.performerType)) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
+        if (dragState.overGroupId !== group.id || dragState.overUngrouped) {
+            setDragState({ ...dragState, overGroupId: group.id, overUngrouped: false });
+        }
     };
 
-    const handleDropOnGroup = (e: React.DragEvent, groupId: string) => {
+    const handleDropOnGroup = (e: React.DragEvent, group: PerformerGroup) => {
+        if (!dragState || !isPerformerGroupCompatible(group, dragState.performerType)) return;
         e.preventDefault();
-        if (draggedPerformerId) {
-            onAddPerformerToGroup(draggedPerformerId, groupId);
+        onAddPerformersToGroup(dragState.performerIds, group.id);
+        setDragState(null);
+    };
+
+    const handleDragOverUngrouped = (e: React.DragEvent) => {
+        if (!dragState) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        if (!dragState.overUngrouped || dragState.overGroupId) {
+            setDragState({ ...dragState, overGroupId: null, overUngrouped: true });
         }
-        setDraggedPerformerId(null);
     };
 
     const handleDropOnUngrouped = (e: React.DragEvent) => {
+        if (!dragState) return;
         e.preventDefault();
-        if (draggedPerformerId) {
-            onRemovePerformerFromGroup(draggedPerformerId);
-        }
-        setDraggedPerformerId(null);
+        onRemovePerformersFromGroup(dragState.performerIds);
+        setDragState(null);
     };
 
     const handleDragEnd = () => {
-        setDraggedPerformerId(null);
+        setDragState(null);
     };
 
     // Render performer item (reusable)
@@ -479,7 +511,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     : inFrame
                         ? 'hover:bg-slate-800 border border-transparent'
                         : 'opacity-50 hover:opacity-80 hover:bg-slate-800 border border-dashed border-slate-700'
-                    } ${isHiddenByGroup ? 'opacity-30' : ''} ${draggedPerformerId === p.id ? 'opacity-50' : ''}`}
+                    } ${isHiddenByGroup ? 'opacity-30' : ''} ${dragState?.performerIds.includes(p.id) ? 'opacity-50' : ''}`}
             >
                 {/* Icon */}
                 {/* Icon */}
@@ -1145,10 +1177,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                     <div key={group.id} className="mb-2">
                                         {/* Group Header */}
                                         <div
-                                            onDragOver={handleDragOver}
-                                            onDrop={(e) => handleDropOnGroup(e, group.id)}
+                                            onDragOver={(e) => handleDragOverGroup(e, group)}
+                                            onDrop={(e) => handleDropOnGroup(e, group)}
                                             onContextMenu={(e) => handleContextMenu(e, null, group.id)}
-                                            className="flex items-center gap-2 p-2 bg-slate-800/50 hover:bg-slate-800 rounded-lg border border-slate-700 cursor-pointer group/header transition-colors"
+                                            className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer group/header transition-colors ${dragState?.overGroupId === group.id
+                                                ? 'border-blue-400 bg-blue-500/15 ring-1 ring-blue-400/40'
+                                                : 'border-slate-700 bg-slate-800/50 hover:bg-slate-800'
+                                                }`}
                                         >
                                             <button onClick={() => onToggleGroupCollapsed(group.id)} className="text-slate-400 hover:text-white">
                                                 {group.collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
@@ -1187,7 +1222,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                                     onClick={() => onSelectGroupPerformers(group.id)}
                                                     className="flex-1 text-sm font-medium text-slate-200 truncate"
                                                 >
-                                                    {group.name} <span className="text-xs text-slate-500">({groupPerformers.length})</span>
+                                                    {dragState?.overGroupId === group.id
+                                                        ? <span className="text-blue-300">拖入 {dragState.performerIds.length} 项</span>
+                                                        : <>{group.name} <span className="text-xs text-slate-500">({groupPerformers.length})</span></>}
                                                 </div>
                                             )}
 
@@ -1213,14 +1250,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             })}
 
                             {/* Ungrouped Performers */}
-                            {performersByGroup.ungrouped.length > 0 && (
+                            {(performersByGroup.ungrouped.length > 0 || dragState) && (
                                 <div>
                                     <div
-                                        onDragOver={handleDragOver}
+                                        onDragOver={handleDragOverUngrouped}
                                         onDrop={handleDropOnUngrouped}
-                                        className="flex items-center gap-2 p-2 mb-1 text-xs text-slate-500 uppercase tracking-wider"
+                                        className={`flex items-center gap-2 p-2 mb-1 rounded border text-xs uppercase tracking-wider transition-colors ${dragState?.overUngrouped
+                                            ? 'border-blue-400 bg-blue-500/15 text-blue-300'
+                                            : 'border-transparent text-slate-500'
+                                            }`}
                                     >
-                                        <Users size={12} /> 未分组 ({performersByGroup.ungrouped.length})
+                                        <Users size={12} /> {dragState?.overUngrouped
+                                            ? <>拖入 {dragState.performerIds.length} 项</>
+                                            : <>未分组 ({performersByGroup.ungrouped.length})</>}
                                     </div>
                                     <div className="space-y-1">
                                         {performersByGroup.ungrouped.map(p => renderPerformerItem(p))}
@@ -1240,18 +1282,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         style={{ position: 'fixed', left: contextMenuState.x, top: contextMenuState.y, zIndex: 100000 }}
                         className="max-h-[min(70vh,420px)] overflow-y-auto bg-slate-800 border border-slate-700 rounded-lg shadow-2xl py-1 min-w-[176px] animate-in fade-in zoom-in-95 duration-100"
                     >
-                        {contextMenuState.performerId && (
+                        {contextMenuState.performerIds.length > 0 && contextMenuState.performerType && (
                             <>
-                                <div className="px-3 py-1 text-xs text-slate-500 uppercase tracking-wider">移动到分组</div>
+                                <div className="px-3 py-1 text-xs text-slate-500 uppercase tracking-wider">
+                                    移动 {contextMenuState.performerIds.length} 个{contextMenuState.performerType === 'prop' ? '道具' : '演员'}到分组
+                                </div>
                                 {(() => {
-                                    const targetPerformer = performers.find(p => p.id === contextMenuState.performerId);
-                                    const relevantGroups = performerGroups.filter(g => {
-                                        if (targetPerformer?.type === 'prop') {
-                                            return g.type === 'prop';
-                                        } else {
-                                            return !g.type || g.type === 'performer';
-                                        }
-                                    });
+                                    const performerType = contextMenuState.performerType;
+                                    if (!performerType) return null;
+                                    const relevantGroups = performerGroups.filter(group => (
+                                        isPerformerGroupCompatible(group, performerType)
+                                    ));
 
                                     if (relevantGroups.length === 0) {
                                         return <div className="px-3 py-2 text-xs text-slate-600 italic">暂无可用分组</div>;
@@ -1261,9 +1302,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                         <button
                                             key={group.id}
                                             onClick={() => {
-                                                if (contextMenuState.performerId) {
-                                                    onAddPerformerToGroup(contextMenuState.performerId, group.id);
-                                                }
+                                                onAddPerformersToGroup(contextMenuState.performerIds, group.id);
                                                 closeContextMenu();
                                             }}
                                             className="w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 flex items-center gap-2"
@@ -1276,9 +1315,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 <div className="h-px bg-slate-700 my-1"></div>
                                 <button
                                     onClick={() => {
-                                        if (contextMenuState.performerId) {
-                                            onRemovePerformerFromGroup(contextMenuState.performerId);
-                                        }
+                                        onRemovePerformersFromGroup(contextMenuState.performerIds);
                                         closeContextMenu();
                                     }}
                                     className="w-full px-3 py-2 text-left text-sm text-slate-400 hover:bg-slate-700"
@@ -1286,17 +1323,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                     移出分组
                                 </button>
                                 {(() => {
-                                    const targetPerformer = performers.find(p => p.id === contextMenuState.performerId);
-                                    if (targetPerformer?.type === 'prop') {
+                                    const targetPerformerId = contextMenuState.performerIds[0];
+                                    if (contextMenuState.performerIds.length === 1 && contextMenuState.performerType === 'prop') {
                                         return (
                                             <>
                                                 <div className="h-px bg-slate-700 my-1"></div>
                                                 <button
                                                     onClick={() => {
-                                                        if (contextMenuState.performerId) {
-                                                            setPropEditorPerformerId(contextMenuState.performerId);
-                                                            setPropEditorOpen(true);
-                                                        }
+                                                        setPropEditorPerformerId(targetPerformerId);
+                                                        setPropEditorOpen(true);
                                                         closeContextMenu();
                                                     }}
                                                     className="w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 flex items-center gap-2"

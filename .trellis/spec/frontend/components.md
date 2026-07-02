@@ -296,6 +296,29 @@ toast.info('Copied', 1500);
 
 ## Drag and Drop (Tree Structures)
 
+### Batch Grouping for Performers and Props
+
+Sidebar grouping actions must derive their payload from the item that starts the
+action. If the initiator is selected, include every selected item of the same
+groupable type; if it is not selected, replace the selection and act on that item
+alone. Performer and prop groups are never compatible with each other.
+
+```ts
+const action = resolveGroupAction(performers, selectedIds, initiatorId);
+if (!action) return;
+
+onAddPerformersToGroup(action.performerIds, compatibleGroup.id);
+onRemovePerformersFromGroup(action.performerIds);
+```
+
+Keep the batch IDs and type in transient menu/drag state. Compatible drop targets
+must show the batch count, while incompatible targets must not accept the drop.
+Pure utility tests must cover selected, unselected, missing, and mixed-type
+initiators; a renderer regression must assert that both context-menu and drop
+paths call the batch callbacks.
+
+---
+
 When implementing drag-and-drop for tree structures, use a library like `@dnd-kit`.
 
 ### Library Choice

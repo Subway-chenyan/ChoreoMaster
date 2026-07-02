@@ -840,16 +840,13 @@ const App: React.FC = () => {
     setPerformerGroups(prev => prev.map(g => g.id === groupId ? { ...g, ...updates } : g));
   };
 
-  const handleAddPerformerToGroup = (performerId: string, groupId: string) => {
-    setPerformers(prev => prev.map(p => p.id === performerId ? { ...p, groupId } : p));
-  };
-
-  const handleRemovePerformerFromGroup = (performerId: string) => {
-    setPerformers(prev => prev.map(p => p.id === performerId ? { ...p, groupId: undefined } : p));
-  };
-
   const handleAddPerformersToGroup = (performerIds: string[], groupId: string) => {
     setPerformers(prev => prev.map(p => performerIds.includes(p.id) ? { ...p, groupId } : p));
+  };
+
+  const handleRemovePerformersFromGroup = (performerIds: string[]) => {
+    const performerIdSet = new Set(performerIds);
+    setPerformers(prev => prev.map(p => performerIdSet.has(p.id) ? { ...p, groupId: undefined } : p));
   };
 
   const handleUpdateGroupPerformers = (groupId: string, updates: Partial<Performer>) => {
@@ -4136,9 +4133,8 @@ const App: React.FC = () => {
             onAddGroup={handleAddGroup}
             onRemoveGroup={handleRemoveGroup}
             onUpdateGroup={handleUpdateGroup}
-            onAddPerformerToGroup={handleAddPerformerToGroup}
-            onRemovePerformerFromGroup={handleRemovePerformerFromGroup}
             onAddPerformersToGroup={handleAddPerformersToGroup}
+            onRemovePerformersFromGroup={handleRemovePerformersFromGroup}
             onUpdateGroupPerformers={handleUpdateGroupPerformers}
             onToggleGroupVisibility={handleToggleGroupVisibilityInFrame}
             onToggleGroupCollapsed={handleToggleGroupCollapsed}

@@ -18,7 +18,7 @@
     "preview": "vite preview",
     "test:backend": "node scripts/run-backend-pytest.cjs",
     "test:project": "npm run build:main && node --test tests/project-service.test.mjs",
-    "test:desktop": "node --experimental-strip-types --test tests/desktop-regressions.test.mjs tests/stage-grid-behavior.test.ts",
+    "test:desktop": "node --experimental-strip-types --test tests/desktop-regressions.test.mjs tests/performer-grouping.test.ts tests/stage-grid-behavior.test.ts",
     "test": "npm run test:backend && npm run test:project && npm run test:desktop && npm run build"
   },
   "dependencies": {
