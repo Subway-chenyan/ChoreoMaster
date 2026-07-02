@@ -15,6 +15,8 @@ import {
   ProjectLoadResult,
   PropRotationPivot,
   TransitionSegment,
+  PerformerNote,
+  NoteItem,
   normalizeFrames,
   normalizePerformers,
   normalizeTransitions,
@@ -302,6 +304,7 @@ const App: React.FC = () => {
   // State
   const [performers, setPerformers] = useState<Performer[]>([]);
   const [performerGroups, setPerformerGroups] = useState<PerformerGroup[]>([]);
+  const [performerNotes, setPerformerNotes] = useState<PerformerNote[]>([]);
   const [frames, setFrames] = useState<Frame[]>([DEFAULT_FRAME]);
   const [transitions, setTransitions] = useState<TransitionSegment[]>([]);
   const [currentFrameId, setCurrentFrameId] = useState<string>(DEFAULT_FRAME.id);
@@ -476,6 +479,7 @@ const App: React.FC = () => {
     stageConfig,
     musicName,
     musicAsset,
+    performerNotes,
   }), [
     performers,
     performerGroups,
@@ -485,6 +489,7 @@ const App: React.FC = () => {
     stageConfig,
     musicName,
     musicAsset,
+    performerNotes,
   ]);
 
   // Initialize Audio Context
@@ -763,6 +768,7 @@ const App: React.FC = () => {
       delete nextObjectMotions[id];
       return { ...transition, objectMotions: nextObjectMotions };
     }));
+    setPerformerNotes(prev => prev.filter(n => n.performerId !== id));
   };
 
   const handleUpdatePerformer = (id: string, updates: Partial<Performer>) => {
@@ -811,6 +817,59 @@ const App: React.FC = () => {
       }));
     }
     setPerformers(prev => prev.map(p => p.id === id ? { ...p, ...updates, rotationPivot: newPivot } : p));
+  };
+
+  // --- Performer Notes ---
+  const handleAddNote = (performerId: string, frameId?: string) => {
+    const now = Date.now();
+    const newNote: PerformerNote = {
+      id: `note_${now}_${Math.random().toString(36).slice(2, 8)}`,
+      performerId,
+      frameId,
+      content: '',
+      items: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    setPerformerNotes(prev => [...prev, newNote]);
+    return newNote.id;
+  };
+
+  const handleUpdateNote = (noteId: string, updates: Partial<PerformerNote>) => {
+    setPerformerNotes(prev => prev.map(n => n.id === noteId ? { ...n, ...updates, updatedAt: Date.now() } : n));
+  };
+
+  const handleDeleteNote = (noteId: string) => {
+    setPerformerNotes(prev => prev.filter(n => n.id !== noteId));
+  };
+
+  const handleAddNoteItem = (noteId: string, item: Omit<NoteItem, 'id'>) => {
+    setPerformerNotes(prev => prev.map(n => {
+      if (n.id !== noteId) return n;
+      return {
+        ...n,
+        items: [...n.items, { ...item, id: `item_${Date.now()}_${Math.random().toString(36).slice(2, 8)}` }],
+        updatedAt: Date.now(),
+      };
+    }));
+  };
+
+  const handleUpdateNoteItem = (noteId: string, itemId: string, updates: Partial<NoteItem>) => {
+    setPerformerNotes(prev => prev.map(n => {
+      if (n.id !== noteId) return n;
+      return {
+        ...n,
+        items: n.items.map(i => i.id === itemId ? { ...i, ...updates } : i),
+        updatedAt: Date.now(),
+      };
+    }));
+  };
+
+  const handleDeleteNoteItem = (noteId: string, itemId: string) => {
+    setPerformerNotes(prev => prev.map(n => {
+      if (n.id !== noteId) return n;
+      return { ...n, items: n.items.filter(i => i.id !== itemId), updatedAt: Date.now() };
+    }));
   };
 
   // --- Group Management ---
@@ -1066,6 +1125,7 @@ const App: React.FC = () => {
     setMusicName(data.musicName || null);
     setMusicAsset(data.musicAsset || null);
     setStageConfig(data.stageConfig);
+    setPerformerNotes(data.performerNotes || []);
     setMediaCache(mediaUrls);
     setCurrentTime(0);
     setAudioBuffer(null);
@@ -1098,6 +1158,7 @@ const App: React.FC = () => {
       stageConfig: data.stageConfig,
       musicName: data.musicName || null,
       musicAsset: data.musicAsset || null,
+      performerNotes: data.performerNotes || [],
     }));
     setProjectHasChanges(false);
     setProjectMessages(messages.length > 0 ? messages : ['项目已完整恢复']);
@@ -1114,8 +1175,9 @@ const App: React.FC = () => {
       stageConfig,
       musicName,
       musicAsset,
+      performerNotes,
     });
-  }, [performers, performerGroups, frames, transitions, audioMarkers, stageConfig, musicName, musicAsset]);
+  }, [performers, performerGroups, frames, transitions, audioMarkers, stageConfig, musicName, musicAsset, performerNotes]);
 
   // Track changes to project
   useEffect(() => {
@@ -1123,7 +1185,7 @@ const App: React.FC = () => {
       const currentState = getProjectStateString();
       setProjectHasChanges(currentState !== lastSavedState);
     }
-  }, [performers, performerGroups, frames, transitions, audioMarkers, stageConfig, musicName, musicAsset, currentProjectId, lastSavedState, getProjectStateString]);
+  }, [performers, performerGroups, frames, transitions, audioMarkers, stageConfig, musicName, musicAsset, performerNotes, currentProjectId, lastSavedState, getProjectStateString]);
 
   // Create a new project
   const handleCreateProject = async (name: string): Promise<string> => {
@@ -2109,6 +2171,7 @@ const App: React.FC = () => {
     if (frames.length <= 0) return;
     if (isPlaying) handlePlayPause();
     const filtered = frames.filter(f => f.id !== id);
+    setPerformerNotes(prev => prev.filter(n => n.frameId !== id));
     setTransitions((prev) => prev.filter((transition) => (
       transition.fromFrameId !== id && transition.toFrameId !== id
     )));

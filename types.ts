@@ -28,6 +28,8 @@ export type {
   StageBackground,
   StageConfig,
   TransitionSegment,
+  PerformerNote,
+  NoteItem,
 } from './electron/project-contract';
 
 export {
