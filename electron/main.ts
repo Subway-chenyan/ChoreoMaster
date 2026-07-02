@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import isDev from 'electron-is-dev';
 import { getProjectStoragePath, registerIpcHandlers } from './ipc-handlers.js';
 import { resolveProjectAssetPath } from './project-service.js';
+import { updaterManager } from './updater.js';
 
 // ESM 兼容: 获取 __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -162,6 +163,9 @@ app.whenReady().then(async () => {
   createWindow();
   if (mainWindow) {
     registerIpcHandlers(mainWindow);
+    updaterManager.init(mainWindow);
+    // 启动后延迟检查更新，避免影响启动速度
+    setTimeout(() => updaterManager.checkForUpdates(), 5000);
   }
 
   app.on('activate', () => {

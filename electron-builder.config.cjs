@@ -56,7 +56,11 @@ module.exports = {
   asar: true,
   asarUnpack: [],
   compression: 'maximum',
-  publish: null,
+  publish: {
+    provider: 'generic',
+    url: 'https://beat.cosdrama.cn/downloads/',
+    channel: 'latest',
+  },
   // 只保留英文和中文 locale
   electronLanguages: ['en', 'en-US', 'zh-CN', 'zh-TW'],
 };

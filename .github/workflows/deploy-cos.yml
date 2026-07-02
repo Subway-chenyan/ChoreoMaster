@@ -61,6 +61,29 @@ jobs:
           "$hash  CosStage-Setup-x64.exe" |
             Set-Content -Encoding ascii -Path 'release/CosStage-Setup-x64.exe.sha256'
 
+      - name: Generate latest.yml for auto-update
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $installer = 'CosStage-Setup-x64.exe'
+          $installerPath = "release/$installer"
+          $sha512 = (Get-FileHash -Algorithm SHA512 -LiteralPath $installerPath).Hash.ToLowerInvariant()
+          $size = (Get-Item $installerPath).Length
+
+          $yml = @"
+          version: $version
+          files:
+            - url: $installer
+              sha512: $sha512
+              size: $size
+          path: $installer
+          sha512: $sha512
+          releaseDate: '$(Get-Date -Format "yyyy-MM-ddTHH:mm:ss.fffZ")'
+          "@
+
+          $yml | Set-Content -Encoding ascii -Path 'release/latest.yml'
+          Write-Host "Generated latest.yml for version $version"
+
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
@@ -68,6 +91,7 @@ jobs:
           path: |
             release/CosStage-Setup-x64.exe
             release/CosStage-Setup-x64.exe.sha256
+            release/latest.yml
           if-no-files-found: error
           retention-days: 1
 
@@ -179,6 +203,17 @@ jobs:
             --secret-key "${TENCENT_SECRET_KEY}" \
             --meta "Cache-Control:no-cache#Content-Type:text/plain"
 
+      - name: Upload latest.yml to COS
+        env:
+          TENCENT_SECRET_ID: ${{ secrets.TENCENT_SECRET_ID }}
+          TENCENT_SECRET_KEY: ${{ secrets.TENCENT_SECRET_KEY }}
+        run: |
+          coscli cp ./desktop-release/latest.yml \
+            "cos://${COS_ALIAS}/downloads/latest.yml" \
+            --secret-id "${TENCENT_SECRET_ID}" \
+            --secret-key "${TENCENT_SECRET_KEY}" \
+            --meta "Cache-Control:no-cache#Content-Type:text/yaml"
+
       - name: Install Tencent Cloud CLI
         run: pip install --disable-pip-version-check tccli
 
@@ -198,7 +233,7 @@ jobs:
             --secretId "${TENCENT_SECRET_ID}" \
             --secretKey "${TENCENT_SECRET_KEY}" \
             --region "${COS_REGION}" \
-            --Urls "[\"${INSTALLER_URL}\",\"${INSTALLER_URL}.sha256\",\"${CDN_URL}sw.js\",\"${CDN_URL}manifest.webmanifest\"]" \
+            --Urls "[\"${INSTALLER_URL}\",\"${INSTALLER_URL}.sha256\",\"${CDN_URL}downloads/latest.yml\",\"${CDN_URL}sw.js\",\"${CDN_URL}manifest.webmanifest\"]" \
             --Area mainland
 
       - name: Verify deployment

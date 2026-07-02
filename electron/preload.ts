@@ -23,6 +23,30 @@ export interface AppSettings {
   maxRecentProjects: number;
 }
 
+// ==================== Update Types ====================
+
+export type UpdateStatus =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'not-available'
+  | 'downloading'
+  | 'downloaded'
+  | 'error';
+
+export interface UpdateState {
+  status: UpdateStatus;
+  version?: string;
+  releaseNotes?: string;
+  progress?: {
+    percent: number;
+    bytesPerSecond: number;
+    transferred: number;
+    total: number;
+  };
+  error?: string;
+}
+
 export interface ElectronAPI {
   // Dialog operations
   saveFile: (defaultName: string, filters?: Electron.FileFilter[]) => Promise<string | null>;
@@ -55,6 +79,15 @@ export interface ElectronAPI {
     openStorageFolder: () => Promise<void>;
     rename: (projectId: string, newName: string) => Promise<void>;
     duplicate: (projectId: string) => Promise<{ id: string; path: string }>;
+  };
+
+  // Update operations
+  update: {
+    getState: () => Promise<UpdateState>;
+    check: () => Promise<void>;
+    download: () => Promise<void>;
+    install: () => Promise<void>;
+    onStateChanged: (callback: (state: UpdateState) => void) => () => void;
   };
 
   // System information
@@ -102,6 +135,19 @@ const electronAPI: ElectronAPI = {
     openStorageFolder: () => ipcRenderer.invoke('project:openStorageFolder'),
     rename: (projectId, newName) => ipcRenderer.invoke('project:rename', projectId, newName),
     duplicate: (projectId) => ipcRenderer.invoke('project:duplicate', projectId),
+  },
+
+  // Update operations
+  update: {
+    getState: () => ipcRenderer.invoke('update:getState'),
+    check: () => ipcRenderer.invoke('update:check'),
+    download: () => ipcRenderer.invoke('update:download'),
+    install: () => ipcRenderer.invoke('update:install'),
+    onStateChanged: (callback: (state: UpdateState) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, state: UpdateState) => callback(state);
+      ipcRenderer.on('update:stateChanged', handler);
+      return () => ipcRenderer.removeListener('update:stateChanged', handler);
+    },
   },
 
   // System information

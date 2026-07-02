@@ -12,6 +12,7 @@ import {
   loadManagedProject,
   saveManagedProject,
 } from './project-service.js';
+import { updaterManager } from './updater.js';
 
 // ==================== Project Storage Types ====================
 
@@ -157,7 +158,25 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   // ==================== Utility Handlers ====================
 
   ipcMain.handle('app:getVersion', async () => {
-    return '1.0.0';
+    return app.getVersion();
+  });
+
+  // ==================== Update Handlers ====================
+
+  ipcMain.handle('update:getState', async () => {
+    return updaterManager.getState();
+  });
+
+  ipcMain.handle('update:check', async () => {
+    await updaterManager.checkForUpdates(true);
+  });
+
+  ipcMain.handle('update:download', async () => {
+    await updaterManager.downloadUpdate();
+  });
+
+  ipcMain.handle('update:install', async () => {
+    updaterManager.quitAndInstall();
   });
 
   // ==================== Project Storage Handlers ====================

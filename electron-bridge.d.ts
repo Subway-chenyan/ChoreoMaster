@@ -14,6 +14,30 @@ interface AppSettings {
   maxRecentProjects: number;
 }
 
+// ==================== Update Types ====================
+
+type UpdateStatus =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'not-available'
+  | 'downloading'
+  | 'downloaded'
+  | 'error';
+
+interface UpdateState {
+  status: UpdateStatus;
+  version?: string;
+  releaseNotes?: string;
+  progress?: {
+    percent: number;
+    bytesPerSecond: number;
+    transferred: number;
+    total: number;
+  };
+  error?: string;
+}
+
 import type {
   ProjectAssetKind,
   ProjectAssetResult,
@@ -30,11 +54,11 @@ declare global {
       openFile: (filters: Electron.FileFilter[]) => Promise<string | null>;
       openMultipleFiles: (filters: Electron.FileFilter[]) => Promise<string[]>;
       selectDirectory: () => Promise<string | null>;
-      
+
       // File system operations
       readFile: (filePath: string) => Promise<string>;
       writeFile: (filePath: string, content: string) => Promise<void>;
-      
+
       // Project storage operations
       project: {
         getSettings: () => Promise<AppSettings>;
@@ -55,6 +79,15 @@ declare global {
         openStorageFolder: () => Promise<void>;
         rename: (projectId: string, newName: string) => Promise<void>;
         duplicate: (projectId: string) => Promise<{ id: string; path: string }>;
+      };
+
+      // Update operations
+      update: {
+        getState: () => Promise<UpdateState>;
+        check: () => Promise<void>;
+        download: () => Promise<void>;
+        install: () => Promise<void>;
+        onStateChanged: (callback: (state: UpdateState) => void) => () => void;
       };
 
       // System information

@@ -27,6 +27,7 @@ import { EditableNumberInput } from './components/FormControls';
 import { HelpModal } from './components/HelpModal';
 import { StageBackgroundDialog } from './components/StageBackgroundDialog';
 import { ProductGuide } from './components/ProductGuide';
+import { UpdateNotification } from './components/UpdateNotification';
 import { useTheme } from './contexts/ThemeContext';
 import { DEFAULT_COLORS, STAGE_ASPECT_RATIO } from './constants';
 import { createOfflineScene, preloadPropTextures, preloadLEDVideo, preloadStageBackground, type CameraAngle } from './utils/OfflineRenderer3D';
@@ -3956,6 +3957,8 @@ const App: React.FC = () => {
     <div className={`min-h-[100dvh] h-[100dvh] w-screen flex flex-col safe-top safe-bottom ${theme === 'dark' ? 'bg-slate-950 text-slate-200' : 'bg-gray-50 text-gray-900'} overflow-hidden`}>
       {/* Help Modal */}
       <HelpModal isOpen={showHelp} onClose={() => setShowHelp(false)} />
+      {/* Update Notification */}
+      <UpdateNotification />
       <StageBackgroundDialog
         isOpen={pendingStageBackground !== null}
         fileName={pendingStageBackground?.fileName ?? ''}
