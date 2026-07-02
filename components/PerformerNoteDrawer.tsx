@@ -49,12 +49,8 @@ export const PerformerNoteDrawer: React.FC<PerformerNoteDrawerProps> = ({
         frameNoteMap.set(n.frameId, arr);
       }
     }
-    // Sort frames by startTime, current frame first
-    const sortedFrames = [...frames].sort((a, b) => {
-      if (a.id === currentFrameId) return -1;
-      if (b.id === currentFrameId) return 1;
-      return a.startTime - b.startTime;
-    });
+    // Sort frames by startTime (formation order)
+    const sortedFrames = [...frames].sort((a, b) => a.startTime - b.startTime);
     return sortedFrames
       .filter(f => frameNoteMap.has(f.id))
       .map(f => ({
