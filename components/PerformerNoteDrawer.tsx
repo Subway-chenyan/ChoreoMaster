@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { X, Plus, StickyNote, Trash2 } from 'lucide-react';
+import { X, Plus, StickyNote, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
 import { Performer, PerformerNote, NoteItem, Frame } from '../types';
 import { NoteItemRow } from './NoteItemRow';
 
@@ -39,17 +39,35 @@ export const PerformerNoteDrawer: React.FC<PerformerNoteDrawerProps> = ({
     [notes]
   );
 
-  const frameNotes = useMemo(
-    () => notes.filter(n => n.frameId === currentFrameId),
-    [notes, currentFrameId]
-  );
+  // All frame-level notes grouped by frame, ordered by frame startTime
+  const frameGroups = useMemo(() => {
+    const frameNoteMap = new Map<string, PerformerNote[]>();
+    for (const n of notes) {
+      if (n.frameId) {
+        const arr = frameNoteMap.get(n.frameId) || [];
+        arr.push(n);
+        frameNoteMap.set(n.frameId, arr);
+      }
+    }
+    // Sort frames by startTime, current frame first
+    const sortedFrames = [...frames].sort((a, b) => {
+      if (a.id === currentFrameId) return -1;
+      if (b.id === currentFrameId) return 1;
+      return a.startTime - b.startTime;
+    });
+    return sortedFrames
+      .filter(f => frameNoteMap.has(f.id))
+      .map(f => ({
+        frame: f,
+        notes: frameNoteMap.get(f.id)!,
+        isCurrent: f.id === currentFrameId,
+      }));
+  }, [notes, frames, currentFrameId]);
 
-  const currentFrame = useMemo(
-    () => frames.find(f => f.id === currentFrameId),
-    [frames, currentFrameId]
+  const totalFrameNotes = useMemo(
+    () => notes.filter(n => n.frameId).length,
+    [notes]
   );
-
-  const displayedNotes = activeTab === 'global' ? globalNotes : frameNotes;
 
   if (!open || !performer) return null;
 
@@ -105,42 +123,54 @@ export const PerformerNoteDrawer: React.FC<PerformerNoteDrawerProps> = ({
                 : 'border-transparent text-slate-500 hover:text-slate-300'
             }`}
           >
-            当前帧笔记
-            {frameNotes.length > 0 && (
+            帧级笔记
+            {totalFrameNotes > 0 && (
               <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400">
-                {frameNotes.length}
+                {totalFrameNotes}
               </span>
             )}
           </button>
         </div>
 
-        {/* Frame label for frame tab */}
-        {activeTab === 'frame' && currentFrame && (
-          <div className="px-4 py-2 text-[10px] text-slate-500 bg-slate-800/50 border-b border-slate-800 shrink-0">
-            当前帧: {currentFrame.name}
-          </div>
-        )}
-
         {/* Notes list */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
-          {displayedNotes.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-slate-600">
-              <StickyNote size={32} className="mb-3 opacity-50" />
-              <p className="text-sm">暂无{activeTab === 'global' ? '全局' : '当前帧'}笔记</p>
-              <p className="text-xs mt-1">点击下方按钮添加第一条笔记</p>
-            </div>
+          {activeTab === 'global' ? (
+            // --- Global notes ---
+            globalNotes.length === 0 ? (
+              <EmptyState message="暂无全局笔记" hint="点击下方按钮添加第一条笔记" />
+            ) : (
+              globalNotes.map(note => (
+                <NoteCard
+                  key={note.id}
+                  note={note}
+                  onUpdate={(updates) => onUpdateNote(note.id, updates)}
+                  onDelete={() => onDeleteNote(note.id)}
+                  onAddItem={() => handleAddItem(note.id)}
+                  onUpdateItem={(itemId, updates) => onUpdateNoteItem(note.id, itemId, updates)}
+                  onDeleteItem={(itemId) => onDeleteNoteItem(note.id, itemId)}
+                />
+              ))
+            )
           ) : (
-            displayedNotes.map(note => (
-              <NoteCard
-                key={note.id}
-                note={note}
-                onUpdate={(updates) => onUpdateNote(note.id, updates)}
-                onDelete={() => onDeleteNote(note.id)}
-                onAddItem={() => handleAddItem(note.id)}
-                onUpdateItem={(itemId, updates) => onUpdateNoteItem(note.id, itemId, updates)}
-                onDeleteItem={(itemId) => onDeleteNoteItem(note.id, itemId)}
-              />
-            ))
+            // --- Frame notes grouped by frame ---
+            frameGroups.length === 0 ? (
+              <EmptyState message="暂无帧级笔记" hint="点击下方按钮为当前帧添加笔记" />
+            ) : (
+              frameGroups.map(group => (
+                <FrameGroup
+                  key={group.frame.id}
+                  frame={group.frame}
+                  notes={group.notes}
+                  isCurrent={group.isCurrent}
+                  defaultExpanded={group.isCurrent}
+                  onUpdateNote={onUpdateNote}
+                  onDeleteNote={onDeleteNote}
+                  onAddItem={handleAddItem}
+                  onUpdateNoteItem={onUpdateNoteItem}
+                  onDeleteNoteItem={onDeleteNoteItem}
+                />
+              ))
+            )
           )}
         </div>
 
@@ -150,10 +180,92 @@ export const PerformerNoteDrawer: React.FC<PerformerNoteDrawerProps> = ({
             onClick={handleAddNote}
             className="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium transition-colors"
           >
-            <Plus size={14} /> 添加笔记
+            <Plus size={14} /> {activeTab === 'frame' ? '为当前帧添加笔记' : '添加笔记'}
           </button>
         </div>
       </div>
+    </div>
+  );
+};
+
+// --- EmptyState sub-component ---
+
+const EmptyState: React.FC<{ message: string; hint: string }> = ({ message, hint }) => (
+  <div className="flex flex-col items-center justify-center py-12 text-slate-600">
+    <StickyNote size={32} className="mb-3 opacity-50" />
+    <p className="text-sm">{message}</p>
+    <p className="text-xs mt-1">{hint}</p>
+  </div>
+);
+
+// --- FrameGroup sub-component ---
+
+interface FrameGroupProps {
+  frame: Frame;
+  notes: PerformerNote[];
+  isCurrent: boolean;
+  defaultExpanded: boolean;
+  onUpdateNote: (noteId: string, updates: Partial<PerformerNote>) => void;
+  onDeleteNote: (noteId: string) => void;
+  onAddItem: (noteId: string) => void;
+  onUpdateNoteItem: (noteId: string, itemId: string, updates: Partial<NoteItem>) => void;
+  onDeleteNoteItem: (noteId: string, itemId: string) => void;
+}
+
+const FrameGroup: React.FC<FrameGroupProps> = ({
+  frame,
+  notes,
+  isCurrent,
+  defaultExpanded,
+  onUpdateNote,
+  onDeleteNote,
+  onAddItem,
+  onUpdateNoteItem,
+  onDeleteNoteItem,
+}) => {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+
+  return (
+    <div className={`rounded-lg border overflow-hidden transition-colors ${
+      isCurrent
+        ? 'border-blue-500/50 bg-blue-500/5'
+        : 'border-slate-700 bg-slate-800/20'
+    }`}>
+      {/* Frame header — clickable to expand/collapse */}
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-slate-800/40 transition-colors"
+      >
+        {expanded ? <ChevronDown size={12} className="text-slate-500 shrink-0" /> : <ChevronRight size={12} className="text-slate-500 shrink-0" />}
+        <span className={`text-xs font-medium truncate ${isCurrent ? 'text-blue-400' : 'text-slate-400'}`}>
+          {frame.name}
+        </span>
+        {isCurrent && (
+          <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 border border-blue-500/30 shrink-0">
+            当前帧
+          </span>
+        )}
+        <span className="text-[10px] text-slate-600 ml-auto shrink-0">
+          {notes.length} 条
+        </span>
+      </button>
+
+      {/* Notes (collapsed/expanded) */}
+      {expanded && (
+        <div className="px-3 pb-3 space-y-2">
+          {notes.map(note => (
+            <NoteCard
+              key={note.id}
+              note={note}
+              onUpdate={(updates) => onUpdateNote(note.id, updates)}
+              onDelete={() => onDeleteNote(note.id)}
+              onAddItem={() => onAddItem(note.id)}
+              onUpdateItem={(itemId, updates) => onUpdateNoteItem(note.id, itemId, updates)}
+              onDeleteItem={(itemId) => onDeleteNoteItem(note.id, itemId)}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 };

@@ -4346,6 +4346,7 @@ const App: React.FC = () => {
               onZoom={handleGridZoom}
               stageConfig={stageConfig}
               mediaCache={mediaCache}
+              onOpenNoteDrawer={handleOpenNoteDrawer}
             />
           ) : (
             <Stage3D

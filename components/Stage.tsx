@@ -47,6 +47,7 @@ interface StageProps {
   onZoom?: (delta: number) => void;
   stageConfig: StageConfig;
   mediaCache?: Record<string, string>;
+  onOpenNoteDrawer?: (performerId: string) => void;
 }
 
 const ShapeIcon: React.FC<{ shape: string; color: string; size: number; className?: string }> = ({ shape, color, size, className }) => {
@@ -159,6 +160,7 @@ export const Stage: React.FC<StageProps> = ({
   onZoom,
   stageConfig,
   mediaCache = {},
+  onOpenNoteDrawer,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -919,6 +921,7 @@ export const Stage: React.FC<StageProps> = ({
                 key={performer.id}
                 data-performer-id={performer.id}
                 onPointerDown={(e) => handlePerformerPointerDown(e, performer.id)}
+                onDoubleClick={() => onOpenNoteDrawer?.(performer.id)}
                 className={`absolute cursor-grab active:cursor-grabbing z-10 group flex items-center justify-center`}
                 style={{
                   left: `${stageXToViewPercent(displayPos.x, stageConfig)}%`,
@@ -984,6 +987,7 @@ export const Stage: React.FC<StageProps> = ({
               key={performer.id}
               data-performer-id={performer.id}
               onPointerDown={(e) => handlePerformerPointerDown(e, performer.id)}
+              onDoubleClick={() => onOpenNoteDrawer?.(performer.id)}
               className={`absolute min-w-11 min-h-11 flex items-center justify-center transform -translate-x-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing z-10 group touch-none`}
               style={{
                 left: `${stageXToViewPercent(pos.x, stageConfig)}%`,
