@@ -28,6 +28,7 @@ import { Timeline } from './components/Timeline';
 import { EditableNumberInput } from './components/FormControls';
 import { HelpModal } from './components/HelpModal';
 import { StageBackgroundDialog } from './components/StageBackgroundDialog';
+import { PerformerNoteDrawer } from './components/PerformerNoteDrawer';
 import { ProductGuide } from './components/ProductGuide';
 import { UpdateNotification } from './components/UpdateNotification';
 import { useTheme } from './contexts/ThemeContext';
@@ -305,6 +306,8 @@ const App: React.FC = () => {
   const [performers, setPerformers] = useState<Performer[]>([]);
   const [performerGroups, setPerformerGroups] = useState<PerformerGroup[]>([]);
   const [performerNotes, setPerformerNotes] = useState<PerformerNote[]>([]);
+  const [noteDrawerOpen, setNoteDrawerOpen] = useState(false);
+  const [noteDrawerPerformerId, setNoteDrawerPerformerId] = useState<string | null>(null);
   const [frames, setFrames] = useState<Frame[]>([DEFAULT_FRAME]);
   const [transitions, setTransitions] = useState<TransitionSegment[]>([]);
   const [currentFrameId, setCurrentFrameId] = useState<string>(DEFAULT_FRAME.id);
@@ -870,6 +873,11 @@ const App: React.FC = () => {
       if (n.id !== noteId) return n;
       return { ...n, items: n.items.filter(i => i.id !== itemId), updatedAt: Date.now() };
     }));
+  };
+
+  const handleOpenNoteDrawer = (performerId: string) => {
+    setNoteDrawerPerformerId(performerId);
+    setNoteDrawerOpen(true);
   };
 
   // --- Group Management ---
@@ -4020,6 +4028,21 @@ const App: React.FC = () => {
     <div className={`min-h-[100dvh] h-[100dvh] w-screen flex flex-col safe-top safe-bottom ${theme === 'dark' ? 'bg-slate-950 text-slate-200' : 'bg-gray-50 text-gray-900'} overflow-hidden`}>
       {/* Help Modal */}
       <HelpModal isOpen={showHelp} onClose={() => setShowHelp(false)} />
+      {/* Performer Note Drawer */}
+      <PerformerNoteDrawer
+        open={noteDrawerOpen}
+        performer={performers.find(p => p.id === noteDrawerPerformerId) || null}
+        notes={performerNotes.filter(n => n.performerId === noteDrawerPerformerId)}
+        currentFrameId={currentFrameId}
+        frames={frames}
+        onClose={() => { setNoteDrawerOpen(false); setNoteDrawerPerformerId(null); }}
+        onAddNote={handleAddNote}
+        onUpdateNote={handleUpdateNote}
+        onDeleteNote={handleDeleteNote}
+        onAddNoteItem={handleAddNoteItem}
+        onUpdateNoteItem={handleUpdateNoteItem}
+        onDeleteNoteItem={handleDeleteNoteItem}
+      />
       {/* Update Notification */}
       <UpdateNotification />
       <StageBackgroundDialog
@@ -4222,6 +4245,9 @@ const App: React.FC = () => {
             onSaveProject={handleSaveProject}
             projectHasChanges={projectHasChanges}
             isCompactLayout={isCompactLayout}
+            // Note Drawer props
+            onOpenNoteDrawer={handleOpenNoteDrawer}
+            performerNotes={performerNotes}
           />)}
         {!sidebarCollapsed && !isCompactLayout && (
           <div
