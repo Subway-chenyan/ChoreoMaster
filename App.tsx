@@ -2447,12 +2447,10 @@ const App: React.FC = () => {
       newPerformers.push(newPerformer);
 
       frames.forEach(f => {
-        const originalPos = item.positions[f.id] || { x: 50, y: 50 };
+        const originalPos = item.positions[f.id];
+        if (!originalPos) return; // 跳过没有位置数据的帧
         if (!frameUpdates[f.id]) frameUpdates[f.id] = {};
-        frameUpdates[f.id][newId] = {
-          x: Math.min(getStageXBounds(stageConfig).max, Math.max(getStageXBounds(stageConfig).min, originalPos.x + 2)),
-          y: Math.min(100, Math.max(0, originalPos.y + 2))
-        };
+        frameUpdates[f.id][newId] = { x: originalPos.x, y: originalPos.y };
       });
     });
 
