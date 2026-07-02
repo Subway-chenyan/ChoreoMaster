@@ -67,7 +67,7 @@ export const PerformerNoteDrawer: React.FC<PerformerNoteDrawerProps> = ({
       <div className="fixed inset-0 bg-black/30" onClick={onClose} />
 
       {/* Drawer */}
-      <div className="relative ml-auto w-[360px] bg-slate-900 border-l border-slate-700 shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
+      <div className="relative ml-auto w-[360px] max-w-[calc(100vw-40px)] bg-slate-900 border-l border-slate-700 shadow-2xl flex flex-col animate-in slide-in-from-right duration-200 h-full overflow-hidden">
         {/* Header */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-700 shrink-0">
           <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: performer.color }} />
@@ -171,16 +171,15 @@ interface NoteCardProps {
 
 const NoteCard: React.FC<NoteCardProps> = ({ note, onUpdate, onDelete, onAddItem, onUpdateItem, onDeleteItem }) => {
   return (
-    <div className="rounded-lg border border-slate-700 bg-slate-800/30 overflow-hidden">
+    <div className="rounded-lg border border-slate-700 bg-slate-800/30 overflow-hidden min-w-0">
       {/* Header with delete */}
-      <div className="flex items-start gap-2 px-3 pt-3">
+      <div className="flex items-start gap-2 px-3 pt-3 min-w-0">
         <textarea
           value={note.content}
           onChange={(e) => onUpdate({ content: e.target.value })}
           placeholder="输入笔记内容..."
           rows={2}
-          className="flex-1 text-xs bg-transparent text-slate-300 placeholder:text-slate-600 resize-none focus:outline-none min-h-[40px]"
-          style={{ fieldSizing: 'content' } as React.CSSProperties}
+          className="flex-1 text-xs bg-transparent text-slate-300 placeholder:text-slate-600 resize-none focus:outline-none min-h-[40px] max-h-[120px] overflow-y-auto min-w-0"
         />
         <button
           onClick={onDelete}
@@ -193,7 +192,7 @@ const NoteCard: React.FC<NoteCardProps> = ({ note, onUpdate, onDelete, onAddItem
 
       {/* Items list */}
       {note.items.length > 0 && (
-        <div className="px-3 pb-2 space-y-1.5">
+        <div className="px-3 pb-2 space-y-1.5 min-w-0">
           {note.items.map(item => (
             <NoteItemRow
               key={item.id}
