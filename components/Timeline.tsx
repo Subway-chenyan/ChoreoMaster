@@ -37,6 +37,8 @@ interface TimelineProps {
     isExporting?: boolean;
     exportProgress?: number;
     showTransitionEditor?: boolean;
+    performerNotes?: import('../types').PerformerNote[];
+    onOpenNoteDrawer?: (performerId: string) => void;
 }
 
 export const Timeline: React.FC<TimelineProps> = ({
@@ -69,7 +71,9 @@ export const Timeline: React.FC<TimelineProps> = ({
     onExportVideo,
     isExporting,
     exportProgress,
-    showTransitionEditor = false
+    showTransitionEditor = false,
+    performerNotes = [],
+    onOpenNoteDrawer,
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -664,6 +668,17 @@ export const Timeline: React.FC<TimelineProps> = ({
                                         )}
                                     </div>
                                     <div className="text-[9px] text-slate-400 pointer-events-none">{(frame.duration / 1000).toFixed(1)}秒</div>
+
+                                    {(() => {
+                                        const frameNoteCount = performerNotes.filter(n => n.frameId === frame.id).length;
+                                        if (frameNoteCount === 0) return null;
+                                        return (
+                                            <div className="absolute top-1 right-1 flex items-center gap-0.5 px-1 py-0.5 rounded bg-blue-500/20 border border-blue-500/40 z-20">
+                                                <span className="text-[8px]">📝</span>
+                                                <span className="text-[8px] text-blue-300 font-medium">{frameNoteCount}</span>
+                                            </div>
+                                        );
+                                    })()}
 
                                         {/* Resize Handle (Right) */}
                                         <div
