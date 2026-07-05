@@ -38,3 +38,36 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 2: 跨项目复制演员与队形
+
+**Date**: 2026-07-06
+**Task**: 跨项目复制演员与队形
+**Branch**: `codex/project-save-reliability`
+
+### Summary
+
+实现跨项目复制选中演员和完整队形，保留坐标、旋转、分组、隐藏对象与便携贴图，并补充回归测试和前端状态契约。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `30ec30f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
