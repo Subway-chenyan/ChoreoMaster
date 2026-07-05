@@ -38,6 +38,17 @@ function sanitizeName(value: string): string {
   return safe || 'CosStage Project';
 }
 
+async function writeJsonAtomically(filePath: string, value: unknown): Promise<void> {
+  const content = JSON.stringify(value, null, 2);
+  const temporaryPath = `${filePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  try {
+    await fs.writeFile(temporaryPath, content, 'utf8');
+    await fs.rename(temporaryPath, filePath);
+  } finally {
+    await fs.rm(temporaryPath, { force: true }).catch(() => undefined);
+  }
+}
+
 function parseAudioMarkers(value: unknown): AudioMarker[] {
   if (!Array.isArray(value)) return [];
 
@@ -396,7 +407,7 @@ export async function createManagedProject(
       ledContent: { type: 'none' },
     },
   };
-  await fs.writeFile(path.join(projectDir, PROJECT_FILE_NAME), JSON.stringify(project, null, 2), 'utf8');
+  await writeJsonAtomically(path.join(projectDir, PROJECT_FILE_NAME), project);
   return { id, path: projectDir };
 }
 
@@ -430,7 +441,7 @@ export async function saveManagedProject(
       )),
     },
   };
-  await fs.writeFile(projectPath, JSON.stringify(document, null, 2), 'utf8');
+  await writeJsonAtomically(projectPath, document);
   return document;
 }
 

@@ -67,8 +67,10 @@ interface SidebarProps {
     onCreateProject?: (name: string) => Promise<string>;
     onCreateFromTemplate?: (templateData: any) => Promise<string>;
     onLoadTemplate?: (templateData: any) => void;
-    onSaveProject?: () => void;
+    onSaveProject?: () => Promise<boolean>;
     projectHasChanges?: boolean;
+    isProjectSaving?: boolean;
+    lastSavedAt?: number | null;
     performerNotes?: import('../types').PerformerNote[];
     onOpenNoteDrawer?: (performerId: string) => void;
 }
@@ -214,6 +216,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     onLoadTemplate,
     onSaveProject,
     projectHasChanges,
+    isProjectSaving = false,
+    lastSavedAt = null,
     performerNotes = [],
     onOpenNoteDrawer,
 }) => {
@@ -692,20 +696,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 {/* PROJECT TAB */}
                 {activeTab === 'project' && (
                     <div className="space-y-6">
-                        {/* Save Button - Show when project has changes */}
+                        {/* Save Button */}
                         {currentProjectId && onSaveProject && (
-                            <button
-                                onClick={onSaveProject}
-                                className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded text-sm font-medium transition-colors ${
-                                    projectHasChanges
-                                        ? 'bg-green-600 hover:bg-green-500 text-white'
-                                        : 'bg-slate-800 text-slate-400 cursor-default'
-                                }`}
-                                disabled={!projectHasChanges}
-                            >
-                                <Save size={16} />
-                                {projectHasChanges ? '保存项目' : '已保存'}
-                            </button>
+                            <div className="space-y-2">
+                                <button
+                                    type="button"
+                                    onClick={() => { void onSaveProject(); }}
+                                    className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded text-sm font-medium transition-colors ${
+                                        projectHasChanges
+                                            ? 'bg-green-600 hover:bg-green-500 text-white'
+                                            : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                                    } disabled:cursor-wait disabled:opacity-70`}
+                                    disabled={isProjectSaving}
+                                >
+                                    <Save size={16} />
+                                    {isProjectSaving ? '保存中…' : projectHasChanges ? '保存项目' : '已保存'}
+                                </button>
+                                <div className="text-center text-xs text-slate-500">
+                                    {lastSavedAt
+                                        ? `上次保存：${new Date(lastSavedAt).toLocaleString('zh-CN')}`
+                                        : '尚未保存'}
+                                </div>
+                            </div>
                         )}
                         
                         <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">舞台设置</h2>
