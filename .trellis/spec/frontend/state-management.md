@@ -426,4 +426,72 @@ export function useTabs(): TabsContextValue {
 
 ---
 
+## Scenario: Cross-Project Scene Clipboard
+
+### 1. Scope / Trigger
+
+- Use this contract for copying performers or a complete formation between projects.
+- Clipboard state must live above project-loading state and must not be cleared when the active project changes.
+
+### 2. Signatures
+
+```typescript
+type AppClipboard = PerformerClipboardPayload | FormationClipboardPayload;
+
+pastePerformerPayload(payload, targetFrameId): PerformerPasteResult;
+pasteFormationPayload(payload): FormationPasteResult;
+makePerformersPortable(performers, loadAssetAsDataUrl): Promise<Performer[]>;
+```
+
+### 3. Contracts
+
+- `PerformerClipboardPayload` contains copied performers, their referenced groups, and scene entries keyed independently of source frame IDs.
+- `FormationClipboardPayload` contains every project performer, every group, and the copied frame. This includes objects hidden or unpositioned in that frame.
+- Paste generates new entity, group, and frame IDs, then remaps `groupId`, `boundToId`, positions, rotations, and `hiddenGroupIds` consistently.
+- Performer and prop names remain unchanged. A pasted formation frame may add the localized copy suffix.
+- File-backed textures must be converted to portable `data:` URLs before entering the clipboard. Source-project asset paths must not remain in the payload.
+- Selected-performer paste targets the current frame. Missing source coordinates receive a visible fallback position rather than remaining hidden at the origin.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required behavior |
+| --- | --- |
+| No active target frame for selected paste | Do not mutate project state; show an actionable error |
+| Asset cannot be read | Abort clipboard creation; preserve the previous clipboard; report the failure |
+| Source relationship points outside selected performers | Clear that relationship instead of retaining a dangling source ID |
+| Hidden/unpositioned object in formation copy | Create the object and preserve its hidden/unpositioned scene state |
+| Source and target IDs collide | Always allocate new IDs and remap all references |
+
+### 5. Good/Base/Bad Cases
+
+- Good: Copy a formation with actors, props, bindings, rotations, hidden groups, and textures; paste it into another project with identical names and scene coordinates.
+- Base: Copy one selected actor and paste it into the current frame at the copied coordinates, visible by default.
+- Bad: Store coordinates under source frame IDs or keep `assetPath` references; both make the clipboard dependent on the source project.
+
+### 6. Tests Required
+
+- Unit: selected paste preserves name, position, rotation, visibility, and remaps group IDs.
+- Unit: formation paste creates all source performers and props, including hidden/unpositioned objects, and remaps every scene reference.
+- Unit: asset conversion embeds legacy, box, and extruded texture fields as `data:` URLs and removes source paths.
+- Desktop regression: keyboard copy/paste dispatches by clipboard kind and the clipboard survives project switching.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```typescript
+clipboard.positions[sourceFrameId] = selectedPositions;
+performer.assetPath = sourceProjectRelativePath;
+```
+
+#### Correct
+
+```typescript
+clipboard.sceneEntries = selectedEntriesWithoutFrameIdentity;
+performer.dataUrl = await loadAssetAsDataUrl(sourceProjectRelativePath);
+delete performer.assetPath;
+```
+
+---
+
 **Language**: All documentation must be written in **English**.

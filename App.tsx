@@ -64,6 +64,14 @@ import {
   getLedStageYPercent,
   resolveStageBackgroundUrl,
 } from './utils/stage-config';
+import {
+  makePerformersPortable,
+  pasteFormationPayload,
+  pastePerformerPayload,
+  type FormationClipboardPayload,
+  type FrameClipboardUpdate,
+  type PerformerClipboardPayload,
+} from './utils/cross-project-clipboard';
 
 const DEFAULT_FRAME: Frame = {
   id: 'start-frame',
@@ -119,15 +127,19 @@ function loadImageDimensions(url: string): Promise<{ width: number; height: numb
   });
 }
 
-function readFileAsDataUrl(file: File): Promise<string> {
+function readBlobAsDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => typeof reader.result === 'string'
       ? resolve(reader.result)
       : reject(new Error('无法读取图片'));
     reader.onerror = () => reject(reader.error ?? new Error('无法读取图片'));
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(blob);
   });
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return readBlobAsDataUrl(file);
 }
 
 const normalizeAudioMarkers = (value: unknown): AudioMarker[] => {
@@ -151,11 +163,7 @@ const normalizeAudioMarkers = (value: unknown): AudioMarker[] => {
   }).sort((a, b) => a.timeMs - b.timeMs);
 };
 
-// Clipboard Item Structure
-interface ClipboardItem {
-  performer: Performer;
-  positions: Record<string, Position>; // Map FrameID -> Position
-}
+type AppClipboard = PerformerClipboardPayload | FormationClipboardPayload;
 
 type MovePerformersUndoAction = {
   type: 'move-performers';
@@ -168,7 +176,8 @@ type MovePerformersUndoAction = {
 type PastePerformersUndoAction = {
   type: 'paste-performers';
   performers: Performer[];
-  frameUpdates: Record<string, Record<string, Position>>;
+  groups: PerformerGroup[];
+  frameUpdates: Record<string, FrameClipboardUpdate>;
   previousSelectedIds: string[];
 };
 
@@ -176,6 +185,15 @@ type PasteFrameUndoAction = {
   type: 'paste-frame';
   frame: Frame;
   previousCurrentFrameId: string | null;
+};
+
+type PasteFormationUndoAction = {
+  type: 'paste-formation';
+  performers: Performer[];
+  groups: PerformerGroup[];
+  frame: Frame;
+  previousCurrentFrameId: string | null;
+  previousSelectedIds: string[];
 };
 
 type RotatePerformerUndoAction = {
@@ -186,7 +204,11 @@ type RotatePerformerUndoAction = {
   after: number;
 };
 
-type UndoAction = MovePerformersUndoAction | PastePerformersUndoAction | PasteFrameUndoAction | RotatePerformerUndoAction;
+type UndoAction = MovePerformersUndoAction
+  | PastePerformersUndoAction
+  | PasteFrameUndoAction
+  | PasteFormationUndoAction
+  | RotatePerformerUndoAction;
 
 const getSupportedVideoEncoderConfig = async (
   width: number,
@@ -453,8 +475,7 @@ const App: React.FC = () => {
   const { theme } = useTheme();
 
   // Clipboard State
-  const [clipboard, setClipboard] = useState<ClipboardItem[]>([]);
-  const [frameClipboard, setFrameClipboard] = useState<Frame | null>(null);
+  const [appClipboard, setAppClipboard] = useState<AppClipboard | null>(null);
 
   // Playback State
   const [currentTime, setCurrentTime] = useState(0);
@@ -571,13 +592,14 @@ const App: React.FC = () => {
     }));
   }, []);
 
-  const restoreFrameUpdates = useCallback((frameUpdates: Record<string, Record<string, Position>>) => {
+  const restoreFrameUpdates = useCallback((frameUpdates: Record<string, FrameClipboardUpdate>) => {
     setFrames((prev) => prev.map((frame) => {
       const updates = frameUpdates[frame.id];
       if (!updates) return frame;
       return {
         ...frame,
-        positions: { ...frame.positions, ...clonePositionMap(updates) }
+        positions: { ...frame.positions, ...clonePositionMap(updates.positions) },
+        rotations: { ...(frame.rotations ?? {}), ...updates.rotations },
       };
     }));
   }, []);
@@ -2298,7 +2320,9 @@ const App: React.FC = () => {
       )));
     } else if (last.type === 'paste-performers') {
       const pastedIds = last.performers.map((performer) => performer.id);
+      const pastedGroupIds = new Set(last.groups.map((group) => group.id));
       setPerformers((prev) => prev.filter((performer) => !pastedIds.includes(performer.id)));
+      setPerformerGroups((prev) => prev.filter((group) => !pastedGroupIds.has(group.id)));
       removePerformerIdsFromFrames(pastedIds);
       setSelectedPerformerIds(last.previousSelectedIds);
     } else if (last.type === 'paste-frame') {
@@ -2306,6 +2330,14 @@ const App: React.FC = () => {
       if (last.previousCurrentFrameId) {
         setCurrentFrameId(last.previousCurrentFrameId);
       }
+    } else if (last.type === 'paste-formation') {
+      const pastedIds = new Set(last.performers.map((performer) => performer.id));
+      const pastedGroupIds = new Set(last.groups.map((group) => group.id));
+      setPerformers((prev) => prev.filter((performer) => !pastedIds.has(performer.id)));
+      setPerformerGroups((prev) => prev.filter((group) => !pastedGroupIds.has(group.id)));
+      setFrames((prev) => prev.filter((frame) => frame.id !== last.frame.id));
+      setSelectedPerformerIds(last.previousSelectedIds);
+      if (last.previousCurrentFrameId) setCurrentFrameId(last.previousCurrentFrameId);
     }
     setRedoStack(prev => [...prev, last]);
   };
@@ -2330,6 +2362,7 @@ const App: React.FC = () => {
           : frame
       )));
     } else if (last.type === 'paste-performers') {
+      setPerformerGroups((prev) => [...prev, ...last.groups.map((group) => ({ ...group }))]);
       setPerformers((prev) => [...prev, ...last.performers.map((performer) => ({ ...performer }))]);
       restoreFrameUpdates(last.frameUpdates);
       setSelectedPerformerIds(last.performers.map((performer) => performer.id));
@@ -2340,6 +2373,16 @@ const App: React.FC = () => {
         return nextFrames;
       });
       setCurrentFrameId(last.frame.id);
+    } else if (last.type === 'paste-formation') {
+      setPerformerGroups((prev) => [...prev, ...structuredClone(last.groups)]);
+      setPerformers((prev) => [...prev, ...structuredClone(last.performers)]);
+      setFrames((prev) => {
+        const nextFrames = [...prev, structuredClone(last.frame)];
+        nextFrames.sort((a, b) => a.startTime - b.startTime);
+        return nextFrames;
+      });
+      setCurrentFrameId(last.frame.id);
+      setSelectedPerformerIds(last.performers.map((performer) => performer.id));
     }
     setUndoStack(prev => [...prev, last]);
   };
@@ -2557,87 +2600,152 @@ const App: React.FC = () => {
 
   // --- Copy / Paste / Duplicate Logic ---
 
-  const copyPerformersToClipboard = useCallback(() => {
-    if (selectedPerformerIds.length === 0) return;
+  const resolveClipboardAssetUrl = useCallback((source: string): string => {
+    if (/^(data:|blob:|https?:|choreo-asset:)/i.test(source)) return source;
+    if (!currentProjectId) {
+      throw new Error(`无法解析项目贴图：${source}`);
+    }
+    const encodedPath = source
+      .replace(/\\/g, '/')
+      .replace(/^\/+/, '')
+      .split('/')
+      .map(encodeURIComponent)
+      .join('/');
+    return `choreo-asset://asset/${encodeURIComponent(currentProjectId)}/${encodedPath}`;
+  }, [currentProjectId]);
 
-    const items: ClipboardItem[] = [];
-    selectedPerformerIds.forEach(id => {
-      const performer = performers.find(p => p.id === id);
-      if (performer) {
-        const positions: Record<string, Position> = {};
-        frames.forEach(f => {
-          if (f.positions[id]) {
-            positions[f.id] = { ...f.positions[id] };
-          }
-        });
-        items.push({ performer: { ...performer }, positions });
-      }
-    });
-    setClipboard(items);
-    console.log(`Copied ${items.length} performers.`);
-  }, [selectedPerformerIds, performers, frames]);
+  const loadClipboardAssetAsDataUrl = useCallback(async (source: string): Promise<string> => {
+    const response = await fetch(resolveClipboardAssetUrl(source));
+    if (!response.ok) throw new Error(`贴图读取失败：HTTP ${response.status}`);
+    return readBlobAsDataUrl(await response.blob());
+  }, [resolveClipboardAssetUrl]);
 
-  const pastePerformers = useCallback((items: ClipboardItem[] = clipboard) => {
-    if (items.length === 0) return;
+  const createPerformerClipboardPayload = useCallback(async (): Promise<PerformerClipboardPayload | null> => {
+    if (selectedPerformerIds.length === 0) return null;
+    const selectedIdSet = new Set(selectedPerformerIds);
+    const sourcePerformers = performers.filter((performer) => selectedIdSet.has(performer.id));
+    const portablePerformers = await makePerformersPortable(sourcePerformers, loadClipboardAssetAsDataUrl);
+    const referencedGroupIds = new Set(sourcePerformers.flatMap((performer) => (
+      performer.groupId ? [performer.groupId] : []
+    )));
+    const groups = performerGroups
+      .filter((group) => referencedGroupIds.has(group.id))
+      .map((group) => structuredClone(group));
+    const scene = Object.fromEntries(sourcePerformers.map((performer) => [
+      performer.id,
+      {
+        position: {
+          ...(currentSceneState.positions[performer.id] ?? { x: 50, y: 50 }),
+        },
+        rotation: currentSceneState.rotations[performer.id] ?? performer.rotation ?? 0,
+      },
+    ]));
 
-    const newPerformers: Performer[] = [];
-    const frameUpdates: Record<string, Record<string, Position>> = {}; // frameId -> { perfId: pos }
-    const previousSelectedIds = [...selectedPerformerIds];
+    return { kind: 'performers', performers: portablePerformers, groups, scene };
+  }, [
+    selectedPerformerIds,
+    performers,
+    performerGroups,
+    currentSceneState.positions,
+    currentSceneState.rotations,
+    loadClipboardAssetAsDataUrl,
+  ]);
 
-    items.forEach(item => {
-      const newId = generateId();
-      const newPerformer: Performer = {
-        ...item.performer,
-        id: newId,
-        name: `${item.performer.name} (Copy)`
-      };
-      newPerformers.push(newPerformer);
+  const copyPerformersToClipboard = useCallback(async (): Promise<void> => {
+    try {
+      const payload = await createPerformerClipboardPayload();
+      if (!payload) return;
+      setAppClipboard(payload);
+      setProjectMessages([`已复制 ${payload.performers.length} 个演员/道具，可跨项目粘贴`]);
+    } catch (error) {
+      console.error('Failed to copy performers:', error);
+      setProjectMessages(['复制失败：无法完整读取演员或道具贴图']);
+    }
+  }, [createPerformerClipboardPayload]);
 
-      frames.forEach(f => {
-        const originalPos = item.positions[f.id];
-        if (!originalPos) return; // 跳过没有位置数据的帧
-        if (!frameUpdates[f.id]) frameUpdates[f.id] = {};
-        frameUpdates[f.id][newId] = { x: originalPos.x, y: originalPos.y };
+  const copyFormationToClipboard = useCallback(async (): Promise<void> => {
+    const sourceFrame = frames.find((frame) => frame.id === currentFrameId);
+    if (!sourceFrame) return;
+    try {
+      const portablePerformers = await makePerformersPortable(performers, loadClipboardAssetAsDataUrl);
+      setAppClipboard({
+        kind: 'formation',
+        performers: portablePerformers,
+        groups: performerGroups.map((group) => structuredClone(group)),
+        frame: structuredClone(sourceFrame),
       });
-    });
+      setProjectMessages([`已复制队形“${sourceFrame.name}”及全部 ${portablePerformers.length} 个演员/道具`]);
+    } catch (error) {
+      console.error('Failed to copy formation:', error);
+      setProjectMessages(['复制队形失败：无法完整读取演员或道具贴图']);
+    }
+  }, [frames, currentFrameId, performers, performerGroups, loadClipboardAssetAsDataUrl]);
 
-    setPerformers(prev => [...prev, ...newPerformers]);
-    setFrames(prev => prev.map(f => {
-      if (frameUpdates[f.id]) {
-        return {
-          ...f,
-          positions: { ...f.positions, ...frameUpdates[f.id] }
-        };
-      }
-      return f;
+  const pastePerformers = useCallback((payload?: PerformerClipboardPayload): void => {
+    const source = payload ?? (appClipboard?.kind === 'performers' ? appClipboard : null);
+    if (!source) return;
+    if (!currentFrameId || !frames.some((frame) => frame.id === currentFrameId)) {
+      setProjectMessages(['请先创建或选择一个队形，再粘贴演员']);
+      return;
+    }
+
+    const previousSelectedIds = [...selectedPerformerIds];
+    const pasted = pastePerformerPayload(source, currentFrameId, generateId);
+    setPerformerGroups((prev) => [...prev, ...pasted.groups]);
+    setPerformers((prev) => [...prev, ...pasted.performers]);
+    setFrames((prev) => prev.map((frame) => {
+      const updates = pasted.frameUpdates[frame.id];
+      if (!updates) return frame;
+      return {
+        ...frame,
+        positions: { ...frame.positions, ...updates.positions },
+        rotations: { ...(frame.rotations ?? {}), ...updates.rotations },
+      };
     }));
-
-    setSelectedPerformerIds(newPerformers.map(p => p.id));
+    setSelectedPerformerIds(pasted.performers.map((performer) => performer.id));
     pushUndoAction({
       type: 'paste-performers',
-      performers: newPerformers.map((performer) => ({ ...performer })),
-      frameUpdates: Object.fromEntries(
-        Object.entries(frameUpdates).map(([frameId, updates]) => [frameId, clonePositionMap(updates)])
-      ),
+      performers: structuredClone(pasted.performers),
+      groups: structuredClone(pasted.groups),
+      frameUpdates: structuredClone(pasted.frameUpdates),
       previousSelectedIds,
     });
-  }, [clipboard, frames, selectedPerformerIds, pushUndoAction, stageConfig]);
+  }, [appClipboard, currentFrameId, frames, selectedPerformerIds, pushUndoAction]);
 
-  const handleDuplicateSelected = () => {
-    const items: ClipboardItem[] = [];
-    selectedPerformerIds.forEach(id => {
-      const performer = performers.find(p => p.id === id);
-      if (performer) {
-        const positions: Record<string, Position> = {};
-        frames.forEach(f => {
-          if (f.positions[id]) {
-            positions[f.id] = { ...f.positions[id] };
-          }
-        });
-        items.push({ performer: { ...performer }, positions });
-      }
+  const pasteFormation = useCallback((payload?: FormationClipboardPayload): void => {
+    const source = payload ?? (appClipboard?.kind === 'formation' ? appClipboard : null);
+    if (!source) return;
+    const previousSelectedIds = [...selectedPerformerIds];
+    const pasted = pasteFormationPayload(source, currentTime, generateId);
+    setPerformerGroups((prev) => [...prev, ...pasted.groups]);
+    setPerformers((prev) => [...prev, ...pasted.performers]);
+    setFrames((prev) => {
+      const nextFrames = [...prev, pasted.frame];
+      nextFrames.sort((a, b) => a.startTime - b.startTime);
+      return nextFrames;
     });
-    pastePerformers(items);
+    setCurrentFrameId(pasted.frame.id);
+    setSelectedTransitionId(null);
+    setSelectedTransitionPerformerId(null);
+    setSelectedPerformerIds(pasted.performers.map((performer) => performer.id));
+    pushUndoAction({
+      type: 'paste-formation',
+      performers: structuredClone(pasted.performers),
+      groups: structuredClone(pasted.groups),
+      frame: structuredClone(pasted.frame),
+      previousCurrentFrameId: currentFrameId,
+      previousSelectedIds,
+    });
+  }, [appClipboard, selectedPerformerIds, currentTime, currentFrameId, pushUndoAction]);
+
+  const handleDuplicateSelected = async (): Promise<void> => {
+    try {
+      const payload = await createPerformerClipboardPayload();
+      if (payload) pastePerformers(payload);
+    } catch (error) {
+      console.error('Failed to duplicate performers:', error);
+      setProjectMessages(['复制失败：无法完整读取演员或道具贴图']);
+    }
   };
 
   const getPlaybackEndMs = useCallback(() => {
@@ -2728,39 +2836,20 @@ const App: React.FC = () => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
         if (selectedPerformerIds.length > 0) {
           e.preventDefault();
-          copyPerformersToClipboard();
-          setFrameClipboard(null);
+          void copyPerformersToClipboard();
         } else if (currentFrameId) {
-          // Copy the current frame only when no performer is selected.
-          const f = frames.find(fr => fr.id === currentFrameId);
-          if (f) {
-            e.preventDefault();
-            setClipboard([]);
-            setFrameClipboard(JSON.parse(JSON.stringify(f)));
-          }
+          e.preventDefault();
+          void copyFormationToClipboard();
         }
       }
 
       if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
-        if (clipboard.length > 0) {
+        if (appClipboard?.kind === 'performers') {
           e.preventDefault();
           pastePerformers();
-        } else if (frameClipboard) {
-          // Paste a frame only when the performer clipboard is empty.
+        } else if (appClipboard?.kind === 'formation') {
           e.preventDefault();
-          const newFrame = createFrameCopy(frameClipboard, {
-            name: `${frameClipboard.name} (复制)`,
-            startTime: currentTime,
-          });
-          const newFrames = [...frames, newFrame];
-          newFrames.sort((a, b) => a.startTime - b.startTime);
-          setFrames(newFrames);
-          setCurrentFrameId(newFrame.id);
-          pushUndoAction({
-            type: 'paste-frame',
-            frame: createFrameCopy(newFrame, { id: newFrame.id }),
-            previousCurrentFrameId: currentFrameId,
-          });
+          pasteFormation();
         }
       }
 
@@ -2780,7 +2869,16 @@ const App: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedPerformerIds, clipboard, frameClipboard, copyPerformersToClipboard, pastePerformers, handlePlayPause, frames, currentTime, currentFrameId, createFrameCopy, pushUndoAction]);
+  }, [
+    selectedPerformerIds,
+    appClipboard,
+    copyPerformersToClipboard,
+    copyFormationToClipboard,
+    pastePerformers,
+    pasteFormation,
+    handlePlayPause,
+    currentFrameId,
+  ]);
 
 
   // --- Audio Logic ---

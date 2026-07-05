@@ -308,3 +308,23 @@ test('sidebar moves compatible multi-selection through menu and drag-and-drop', 
   assert.match(sidebar, /dragState\.performerIds\.length/);
   assert.match(app, /handleRemovePerformersFromGroup/);
 });
+
+test('cross-project clipboard carries entities, scene state, and portable assets', async () => {
+  const [app, helper, help] = await Promise.all([
+    read('App.tsx'),
+    read('utils/cross-project-clipboard.ts'),
+    read('components/HelpModal.tsx'),
+  ]);
+
+  assert.doesNotMatch(app, /interface ClipboardItem/);
+  assert.doesNotMatch(app, /positions: Record<string, Position>; \/\/ Map FrameID/);
+  assert.match(app, /currentSceneState\.positions/);
+  assert.match(app, /currentSceneState\.rotations/);
+  assert.match(app, /kind: 'formation'/);
+  assert.match(app, /performers: portablePerformers/);
+  assert.match(app, /groups: performerGroups/);
+  assert.match(app, /pastePerformerPayload/);
+  assert.match(app, /pasteFormationPayload/);
+  assert.match(helper, /makePerformersPortable/);
+  assert.match(help, /跨项目/);
+});

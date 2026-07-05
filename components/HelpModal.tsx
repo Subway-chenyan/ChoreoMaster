@@ -135,6 +135,9 @@ export const HelpModal: React.FC<HelpModalProps> = ({ isOpen, onClose }) => {
                                 <span>粘贴队形</span>
                                 <kbd className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 font-mono text-xs">Ctrl/⌘ + V（未选中演员）</kbd>
                             </li>
+                            <li className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                                支持跨项目复制：框选演员会保留复制瞬间的位置；复制队形会携带源项目全部演员、道具、分组和贴图。
+                            </li>
                             <li className="flex justify-between">
                                 <span>重命名队形</span>
                                 <div className="flex gap-1">
