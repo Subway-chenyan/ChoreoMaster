@@ -675,3 +675,62 @@ const response = await fetch(`${config.backendUrl}/api/auth/validate`, {
   headers: { Authorization: `Bearer ${config.memberToken}` },
 });
 ```
+
+## Scenario: Managed Project Save Boundary
+
+### 1. Scope / Trigger
+
+- Trigger: any renderer action that persists the currently edited managed project through Electron IPC.
+
+### 2. Signatures
+
+- Preload API: `project.save(projectId: string, projectData: ProjectDocument): Promise<void>`
+- Main handler: `ipcMain.handle('project:save', (_, projectId: string, projectData: ProjectDocument): Promise<void>)`
+- Storage service: `saveManagedProject(storagePath: string, projectId: string, projectData: ProjectDocument): Promise<ProjectDocument>`
+
+### 3. Contracts
+
+- The renderer state is the editing source of truth. A save captures and persists a complete immutable snapshot.
+- A successful save updates only persistence metadata such as dirty state and last-saved time. It must not replace performers, frames, transitions, or stage state with a post-save readback.
+- The IPC save response is an acknowledgement only. Explicit project loading is the only operation allowed to hydrate and replace renderer editing state.
+- Manual save, keyboard save, navigation guards, and timed auto-save must share one serialized save coordinator.
+- `project.json` must be written to a same-directory temporary file and renamed into place; failure must preserve the previous readable project file.
+
+### 4. Validation & Error Matrix
+
+- Missing current project ID -> do not invoke IPC and report save as unavailable.
+- File write or rename failure -> reject IPC, keep renderer dirty state, and show a retryable error.
+- Repeated save while one is active -> reuse the active promise and queue the latest changed snapshot; never overlap writes.
+- Edit during an active save -> mark the project dirty after the older snapshot completes.
+- Save with no changes -> avoid unnecessary disk I/O but still allow explicit user feedback.
+
+### 5. Good/Base/Bad Cases
+
+- Good: a project with performers and frames saves, remains unchanged on screen, and reopens with the same data.
+- Base: `Ctrl/Cmd+S` on a clean project shows acknowledgement without rewriting the file.
+- Bad: `setPerformers(saved.data.performers)` runs after save and clears valid editor state when normalization or readback differs.
+
+### 6. Tests Required
+
+- Desktop regression asserts the save handler contains no editor-state hydration setters.
+- Desktop regression asserts preload and main-process save signatures both return `Promise<void>` and the IPC handler does not call the load service.
+- Project service test asserts the atomic temporary-write and rename path is used.
+- Type-check Electron, run desktop/project tests, and run the renderer production build.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```typescript
+const saved = await window.electronAPI.project.save(projectId, projectData);
+setPerformers(saved.data.performers);
+setFrames(saved.data.frames);
+```
+
+#### Correct
+
+```typescript
+await window.electronAPI.project.save(projectId, snapshot.document);
+setLastSavedState(snapshot.state);
+setLastSavedAt(Date.now());
+```

@@ -201,7 +201,6 @@ export function registerIpcHandlers(mainWindow) {
         // Update recent projects
         settings.recentProjects = [projectId, ...settings.recentProjects.filter(p => p !== projectId)].slice(0, settings.maxRecentProjects);
         await saveSettings(settings);
-        return loadManagedProject(settings.storagePath, projectId);
     });
     ipcMain.handle('project:ingestAsset', async (_, projectId, sourcePath, kind) => {
         const settings = await loadSettings();

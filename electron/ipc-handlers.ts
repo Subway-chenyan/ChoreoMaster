@@ -267,14 +267,13 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   });
 
   // Save a project
-  ipcMain.handle('project:save', async (_, projectId: string, projectData: ProjectDocument) => {
+  ipcMain.handle('project:save', async (_, projectId: string, projectData: ProjectDocument): Promise<void> => {
     const settings = await loadSettings();
     await saveManagedProject(settings.storagePath, projectId, projectData);
     
     // Update recent projects
     settings.recentProjects = [projectId, ...settings.recentProjects.filter(p => p !== projectId)].slice(0, settings.maxRecentProjects);
     await saveSettings(settings);
-    return loadManagedProject(settings.storagePath, projectId);
   });
 
   ipcMain.handle(

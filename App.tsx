@@ -75,6 +75,8 @@ const DEFAULT_FRAME: Frame = {
 };
 
 const WINDOWS_DESKTOP_DOWNLOAD_URL = 'https://beat.cosdrama.cn/downloads/CosStage-Setup-x64.exe';
+const AUTO_SAVE_INTERVAL_MS = 5 * 60 * 1000;
+const SAVE_SUCCESS_DURATION_MS = 2000;
 
 const createDefaultStageConfig = (): StageConfig => ({
   width: 20,
@@ -94,6 +96,12 @@ interface PendingStageBackground {
   pixelWidth: number;
   pixelHeight: number;
   mediaUrl?: string;
+}
+
+interface ProjectSaveSnapshot {
+  projectId: string | null;
+  document: ProjectDocument;
+  state: string;
 }
 
 function loadImageDimensions(url: string): Promise<{ width: number; height: number }> {
@@ -412,6 +420,15 @@ const App: React.FC = () => {
   const [projectHasChanges, setProjectHasChanges] = useState(false);
   const [lastSavedState, setLastSavedState] = useState<string>('');
   const [projectMessages, setProjectMessages] = useState<string[]>([]);
+  const [isProjectSaving, setIsProjectSaving] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
+  const [saveSuccessVisible, setSaveSuccessVisible] = useState(false);
+  const latestProjectSnapshotRef = useRef<ProjectSaveSnapshot | null>(null);
+  const lastSavedStateRef = useRef('');
+  const saveInFlightRef = useRef<Promise<boolean> | null>(null);
+  const saveRequestedRef = useRef(false);
+  const saveHandlerRef = useRef<() => Promise<boolean>>(async () => false);
+  const saveToastTimerRef = useRef<number | null>(null);
   
   const [aiConfig, setAiConfig] = useState<AIConfig>(() => {
     const saved = localStorage.getItem('choreo-ai-config');
@@ -1168,6 +1185,8 @@ const App: React.FC = () => {
       musicAsset: data.musicAsset || null,
       performerNotes: data.performerNotes || [],
     }));
+    const loadedUpdatedAt = data.updatedAt ? Date.parse(data.updatedAt) : Number.NaN;
+    setLastSavedAt(Number.isFinite(loadedUpdatedAt) ? loadedUpdatedAt : null);
     setProjectHasChanges(false);
     setProjectMessages(messages.length > 0 ? messages : ['项目已完整恢复']);
   }, []);
@@ -1187,13 +1206,20 @@ const App: React.FC = () => {
     });
   }, [performers, performerGroups, frames, transitions, audioMarkers, stageConfig, musicName, musicAsset, performerNotes]);
 
+  const currentProjectStateString = useMemo(() => getProjectStateString(), [getProjectStateString]);
+  lastSavedStateRef.current = lastSavedState;
+  latestProjectSnapshotRef.current = {
+    projectId: currentProjectId,
+    document: buildProjectDocument(),
+    state: currentProjectStateString,
+  };
+
   // Track changes to project
   useEffect(() => {
     if (currentProjectId && lastSavedState) {
-      const currentState = getProjectStateString();
-      setProjectHasChanges(currentState !== lastSavedState);
+      setProjectHasChanges(currentProjectStateString !== lastSavedState);
     }
-  }, [performers, performerGroups, frames, transitions, audioMarkers, stageConfig, musicName, musicAsset, performerNotes, currentProjectId, lastSavedState, getProjectStateString]);
+  }, [currentProjectId, currentProjectStateString, lastSavedState]);
 
   // Create a new project
   const handleCreateProject = async (name: string): Promise<string> => {
@@ -1202,8 +1228,7 @@ const App: React.FC = () => {
     // Auto-save current project before creating new one
     if (currentProjectId && projectHasChanges) {
       try {
-        const projectData = buildProjectDocument();
-        await window.electronAPI.project.save(currentProjectId, projectData);
+        if (!await saveHandlerRef.current()) return '';
         console.log('Auto-saved current project before creating new');
       } catch (error) {
         console.error('Failed to auto-save before creating:', error);
@@ -1240,6 +1265,7 @@ const App: React.FC = () => {
       setMediaCache({});
       setMusicName(null);
       setMusicAsset(null);
+      setPerformerNotes([]);
       setAudioBuffer(null);
       setMusicUrl(null);
       setCurrentTime(0);
@@ -1255,7 +1281,9 @@ const App: React.FC = () => {
         stageConfig: newStageConfig,
         musicName: null,
         musicAsset: null,
+        performerNotes: [],
       }));
+      setLastSavedAt(Date.now());
       setProjectHasChanges(false);
       
       return id;
@@ -1271,8 +1299,7 @@ const App: React.FC = () => {
     // Auto-save current project before switching
     if (currentProjectId && projectHasChanges) {
       try {
-        const projectData = buildProjectDocument();
-        await window.electronAPI.project.save(currentProjectId, projectData);
+        if (!await saveHandlerRef.current()) return '';
       } catch (error) {
         console.error('Failed to auto-save before creating template project:', error);
         setProjectMessages(['当前项目自动保存失败，已取消创建模板项目']);
@@ -1314,6 +1341,7 @@ const App: React.FC = () => {
       setSelectedTransitionPerformerId(null);
       setMusicName(null);
       setMusicAsset(null);
+      setPerformerNotes([]);
       setAudioBuffer(null);
       setMusicUrl(null);
       setCurrentTime(0);
@@ -1328,7 +1356,9 @@ const App: React.FC = () => {
         stageConfig: saveData.stageConfig,
         musicName: null,
         musicAsset: null,
+        performerNotes: [],
       }));
+      setLastSavedAt(Date.now());
       setProjectHasChanges(false);
 
       return id;
@@ -1356,10 +1386,12 @@ const App: React.FC = () => {
     setSelectedTransitionPerformerId(null);
     setMusicName(null);
     setMusicAsset(null);
+    setPerformerNotes([]);
     setAudioBuffer(null);
     setMusicUrl(null);
     setCurrentTime(0);
     setSelectedPerformerIds([]);
+    setLastSavedAt(null);
     setProjectHasChanges(true);
   };
 
@@ -1370,8 +1402,7 @@ const App: React.FC = () => {
     // Auto-save current project before switching
     if (currentProjectId && projectHasChanges) {
       try {
-        const projectData = buildProjectDocument();
-        await window.electronAPI.project.save(currentProjectId, projectData);
+        if (!await saveHandlerRef.current()) return;
         console.log('Auto-saved current project before switching');
       } catch (error) {
         console.error('Failed to auto-save before switching:', error);
@@ -1390,36 +1421,71 @@ const App: React.FC = () => {
   };
 
   // Save current project
-  const handleSaveProject = useCallback(async (): Promise<boolean> => {
-    if (!window.electronAPI?.isElectron || !currentProjectId) return false;
-    
-    try {
-      const projectData = buildProjectDocument();
-      
-      const saved = await window.electronAPI.project.save(currentProjectId, projectData);
-      setPerformers(saved.data.performers);
-      setTransitions(saved.data.transitions || []);
-      setAudioMarkers(saved.data.audioMarkers || []);
-      setStageConfig(saved.data.stageConfig);
-      setMediaCache(saved.mediaUrls);
-      setLastSavedState(JSON.stringify({
-        performers: saved.data.performers,
-        performerGroups: saved.data.performerGroups,
-        frames: saved.data.frames,
-        transitions: saved.data.transitions || [],
-        audioMarkers: saved.data.audioMarkers || [],
-        stageConfig: saved.data.stageConfig,
-        musicName: saved.data.musicName || null,
-        musicAsset: saved.data.musicAsset || null,
-      }));
-      setProjectHasChanges(false);
-      return true;
-    } catch (error) {
-      console.error('Failed to save project:', error);
-      setProjectMessages(['项目保存失败，请检查磁盘空间和目录权限']);
-      return false;
+  const showSaveSuccess = useCallback((): void => {
+    setSaveSuccessVisible(true);
+    if (saveToastTimerRef.current !== null) {
+      window.clearTimeout(saveToastTimerRef.current);
     }
-  }, [buildProjectDocument, currentProjectId]);
+    saveToastTimerRef.current = window.setTimeout(() => {
+      setSaveSuccessVisible(false);
+      saveToastTimerRef.current = null;
+    }, SAVE_SUCCESS_DURATION_MS);
+  }, []);
+
+  const handleSaveProject = useCallback(async (): Promise<boolean> => {
+    const projectApi = window.electronAPI?.isElectron ? window.electronAPI.project : null;
+    const initialSnapshot = latestProjectSnapshotRef.current;
+    if (!projectApi || !initialSnapshot?.projectId) return false;
+
+    if (saveInFlightRef.current) {
+      saveRequestedRef.current = true;
+      return saveInFlightRef.current;
+    }
+
+    const operation = Promise.resolve().then(async (): Promise<boolean> => {
+      setIsProjectSaving(true);
+      let snapshot: ProjectSaveSnapshot | null = initialSnapshot;
+      try {
+        while (snapshot?.projectId) {
+          saveRequestedRef.current = false;
+          if (snapshot.state !== lastSavedStateRef.current) {
+            await projectApi.save(snapshot.projectId, snapshot.document);
+            lastSavedStateRef.current = snapshot.state;
+            setLastSavedState(snapshot.state);
+            setLastSavedAt(Date.now());
+          }
+
+          const latestSnapshot = latestProjectSnapshotRef.current;
+          const hasNewerChanges = latestSnapshot?.projectId === snapshot.projectId
+            && latestSnapshot.state !== snapshot.state;
+          setProjectHasChanges(hasNewerChanges);
+          showSaveSuccess();
+
+          if (!saveRequestedRef.current || !hasNewerChanges || !latestSnapshot) break;
+          snapshot = latestSnapshot;
+        }
+        return true;
+      } catch (error) {
+        console.error('Failed to save project:', error);
+        setProjectHasChanges(true);
+        setProjectMessages(['项目保存失败，请检查磁盘空间和目录权限']);
+        return false;
+      } finally {
+        setIsProjectSaving(false);
+        saveInFlightRef.current = null;
+      }
+    });
+
+    saveInFlightRef.current = operation;
+    return operation;
+  }, [showSaveSuccess]);
+  saveHandlerRef.current = handleSaveProject;
+
+  useEffect(() => () => {
+    if (saveToastTimerRef.current !== null) {
+      window.clearTimeout(saveToastTimerRef.current);
+    }
+  }, []);
 
   const handleImportProjectPackage = async () => {
     if (!window.electronAPI?.isElectron) return;
@@ -1458,20 +1524,28 @@ const App: React.FC = () => {
     }
   };
 
-  // Auto-save on Ctrl+S
+  // Save on Ctrl/Cmd+S using the latest project snapshot.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
-        if (currentProjectId && projectHasChanges) {
-          handleSaveProject();
-        }
+        void saveHandlerRef.current();
       }
     };
     
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentProjectId, projectHasChanges]);
+  }, []);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      const snapshot = latestProjectSnapshotRef.current;
+      if (snapshot?.projectId && snapshot.state !== lastSavedStateRef.current) {
+        void saveHandlerRef.current();
+      }
+    }, AUTO_SAVE_INTERVAL_MS);
+    return () => window.clearInterval(intervalId);
+  }, []);
 
   const handleDeleteSelectedPerformers = () => {
     if (selectedPerformerIds.length === 0) return;
@@ -4244,6 +4318,8 @@ const App: React.FC = () => {
             onLoadTemplate={handleLoadTemplate}
             onSaveProject={handleSaveProject}
             projectHasChanges={projectHasChanges}
+            isProjectSaving={isProjectSaving}
+            lastSavedAt={lastSavedAt}
             isCompactLayout={isCompactLayout}
             // Note Drawer props
             onOpenNoteDrawer={handleOpenNoteDrawer}
@@ -4775,6 +4851,12 @@ const App: React.FC = () => {
               <X size={14} />
             </button>
           </div>
+        </div>
+      )}
+
+      {saveSuccessVisible && (
+        <div role="status" aria-live="polite" className="fixed right-4 top-4 z-[60001] rounded-lg border border-emerald-400/40 bg-emerald-950/95 px-4 py-3 text-sm font-medium text-emerald-100 shadow-2xl">
+          保存成功
         </div>
       )}
 

@@ -150,12 +150,44 @@ test('stage background upload uses a custom width dialog and sidebar controls', 
 
   assert.match(app, /StageBackgroundDialog/);
   assert.match(app, /calculateStageDimensionsFromImage/);
-  assert.match(app, /setStageConfig\(saved\.data\.stageConfig\)/);
+  assert.match(app, /setStageConfig\(data\.stageConfig\)/);
   assert.match(dialog, /role="dialog"/);
   assert.doesNotMatch(`${app}\n${dialog}`, /\bprompt\s*\(/);
   assert.match(sidebar, /舞台底图/);
   assert.match(sidebar, /舞台划线/);
   assert.match(sidebar, /LED 距舞台后沿/);
+});
+
+test('project saving preserves editor state and exposes autosave feedback', async () => {
+  const [app, sidebar, ipc, preload] = await Promise.all([
+    read('App.tsx'),
+    read('components/Sidebar.tsx'),
+    read('electron/ipc-handlers.ts'),
+    read('electron/preload.ts'),
+  ]);
+  const saveHandler = app.slice(
+    app.indexOf('const handleSaveProject'),
+    app.indexOf('const handleImportProjectPackage'),
+  );
+
+  assert.doesNotMatch(saveHandler, /setPerformers\(saved\.data\.performers\)/);
+  assert.doesNotMatch(saveHandler, /setFrames\(saved\.data\.frames\)/);
+  assert.doesNotMatch(saveHandler, /setStageConfig\(saved\.data\.stageConfig\)/);
+  assert.match(app, /AUTO_SAVE_INTERVAL_MS = 5 \* 60 \* 1000/);
+  assert.match(app, /SAVE_SUCCESS_DURATION_MS = 2000/);
+  assert.match(app, /saveInFlightRef/);
+  assert.match(app, /saveRequestedRef/);
+  assert.match(app, /window\.setInterval/);
+  assert.match(app, /保存成功/);
+  assert.match(app, /role="status"/);
+  assert.match(sidebar, /上次保存/);
+  assert.match(sidebar, /保存中/);
+  const ipcSaveHandler = ipc.slice(
+    ipc.indexOf("ipcMain.handle('project:save'"),
+    ipc.indexOf("ipcMain.handle('project:ingestAsset'"),
+  );
+  assert.doesNotMatch(ipcSaveHandler, /loadManagedProject/);
+  assert.match(preload, /save: \(projectId: string, projectData: ProjectDocument\) => Promise<void>/);
 });
 
 test('2D stage renders background, LED marker, arrows, and actor rotation controls', async () => {

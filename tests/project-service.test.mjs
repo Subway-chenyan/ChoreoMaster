@@ -131,6 +131,16 @@ test('saves prop textures as assets and restores them through project URLs', asy
   });
 });
 
+test('writes managed project documents through an atomic temporary file', async () => {
+  const source = await readFile(new URL('../electron/project-service.ts', import.meta.url), 'utf8');
+
+  assert.match(source, /async function writeJsonAtomically/);
+  assert.match(source, /await fs\.writeFile\(temporaryPath,/);
+  assert.match(source, /await fs\.rename\(temporaryPath, filePath\)/);
+  assert.match(source, /await writeJsonAtomically\(projectPath, document\)/);
+  assert.doesNotMatch(source, /await fs\.writeFile\(projectPath, JSON\.stringify\(document/);
+});
+
 test('persists stage background configuration and restores its project URL', async () => {
   await withTempDir(async (storagePath) => {
     const created = await createManagedProject(storagePath, 'Stage Background Project');

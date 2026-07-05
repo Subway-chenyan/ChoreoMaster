@@ -67,7 +67,7 @@ export interface ElectronAPI {
     list: () => Promise<ProjectMeta[]>;
     create: (name: string) => Promise<{ id: string; path: string }>;
     load: (projectId: string) => Promise<ProjectLoadResult>;
-    save: (projectId: string, projectData: ProjectDocument) => Promise<ProjectLoadResult>;
+    save: (projectId: string, projectData: ProjectDocument) => Promise<void>;
     ingestAsset: (projectId: string, sourcePath: string, kind: ProjectAssetKind) => Promise<ProjectAssetResult>;
     exportPackage: (projectId: string) => Promise<string | null>;
     importPackage: () => Promise<ProjectImportResult | null>;
