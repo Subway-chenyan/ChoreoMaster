@@ -150,12 +150,17 @@ function parseProjectDocument(value: unknown, fallbackName: string): ProjectDocu
     && Number.isFinite(rawStageConfig.ledDistanceFromBack)
     ? Math.max(0, Math.min(depth, rawStageConfig.ledDistanceFromBack))
     : 0;
+  const ledBottomHeight = typeof rawStageConfig.ledBottomHeight === 'number'
+    && Number.isFinite(rawStageConfig.ledBottomHeight)
+    ? Math.max(0, Math.min(30, rawStageConfig.ledBottomHeight))
+    : 0;
   const stageConfig: StageConfig = {
     width: typeof rawStageConfig.width === 'number' ? rawStageConfig.width : 20,
     depth,
     wingWidth: typeof rawStageConfig.wingWidth === 'number' ? rawStageConfig.wingWidth : undefined,
     ledWidth: typeof rawStageConfig.ledWidth === 'number' ? rawStageConfig.ledWidth : undefined,
     ledHeight: typeof rawStageConfig.ledHeight === 'number' ? rawStageConfig.ledHeight : 6,
+    ledBottomHeight,
     ledContent: isRecord(rawStageConfig.ledContent)
       ? rawStageConfig.ledContent as unknown as StageConfig['ledContent']
       : { type: 'none' },
@@ -404,6 +409,7 @@ export async function createManagedProject(
       width: 20,
       depth: 11.25,
       ledHeight: 6,
+      ledBottomHeight: 0,
       ledContent: { type: 'none' },
     },
   };
@@ -439,6 +445,7 @@ export async function saveManagedProject(
         projectData.stageConfig.depth,
         projectData.stageConfig.ledDistanceFromBack ?? 0,
       )),
+      ledBottomHeight: Math.max(0, Math.min(30, projectData.stageConfig.ledBottomHeight ?? 0)),
     },
   };
   await writeJsonAtomically(projectPath, document);

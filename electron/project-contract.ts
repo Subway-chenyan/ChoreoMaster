@@ -270,6 +270,7 @@ export interface StageConfig {
   wingWidth?: number;
   ledWidth?: number;
   ledHeight?: number;
+  ledBottomHeight?: number;
   ledContent?: LEDContent;
   background?: StageBackground;
   showStageLines?: boolean;

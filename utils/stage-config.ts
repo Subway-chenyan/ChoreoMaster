@@ -31,6 +31,13 @@ export function getLedDistanceFromBack(config: StageConfig): number {
   return Math.max(0, Math.min(config.depth, value));
 }
 
+export function getLedBottomHeight(config: StageConfig): number {
+  const value = Number.isFinite(config.ledBottomHeight)
+    ? config.ledBottomHeight as number
+    : 0;
+  return Math.max(0, Math.min(30, value));
+}
+
 export function getLedZPosition(config: StageConfig): number {
   return -config.depth / 2 + getLedDistanceFromBack(config);
 }

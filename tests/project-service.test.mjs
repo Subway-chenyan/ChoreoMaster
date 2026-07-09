@@ -152,6 +152,7 @@ test('persists stage background configuration and restores its project URL', asy
         wingWidth: 3,
         showStageLines: false,
         ledDistanceFromBack: 2.5,
+        ledBottomHeight: 1.2,
         background: {
           value: ONE_PIXEL_PNG,
           opacity: 0.35,
@@ -166,10 +167,12 @@ test('persists stage background configuration and restores its project URL', asy
     assert.equal(saved.stageConfig.background.opacity, 0.35);
     assert.equal(saved.stageConfig.showStageLines, false);
     assert.equal(saved.stageConfig.ledDistanceFromBack, 2.5);
+    assert.equal(saved.stageConfig.ledBottomHeight, 1.2);
 
     const loaded = await loadManagedProject(storagePath, created.id);
     const backgroundPath = loaded.data.stageConfig.background.value;
     assert.match(loaded.mediaUrls[backgroundPath], /^choreo-asset:\/\//);
+    assert.equal(loaded.data.stageConfig.ledBottomHeight, 1.2);
     assert.deepEqual(loaded.warnings, []);
   });
 });
@@ -182,6 +185,7 @@ test('normalizes legacy stage configuration defaults', async () => {
     const loaded = await loadManagedProject(storagePath, created.id);
     assert.equal(loaded.data.stageConfig.showStageLines, true);
     assert.equal(loaded.data.stageConfig.ledDistanceFromBack, 0);
+    assert.equal(loaded.data.stageConfig.ledBottomHeight, 0);
     assert.equal(loaded.data.stageConfig.background, undefined);
   });
 });

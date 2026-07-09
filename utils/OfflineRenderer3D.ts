@@ -5,7 +5,7 @@ import { denormalizePoints } from '../components/prop-editor/PolygonUtils';
 import { buildPlatformOccupancy, isPlatformProp } from './platforms';
 import { getPropCenterFromAnchor } from './prop-pivot';
 import { createCenteredStageGridMarks, STAGE_THIRD_POSITIONS } from './stage-grid';
-import { getLedZPosition, resolveStageBackgroundUrl } from './stage-config';
+import { getLedBottomHeight, getLedZPosition, resolveStageBackgroundUrl } from './stage-config';
 
 export type CameraAngle = 'judge' | 'overhead';
 
@@ -149,6 +149,7 @@ function createStageFloor(stageConfig: StageConfig, gridScale: number, includeGr
 function createLEDMesh(stageConfig: StageConfig): THREE.Mesh {
   const height = stageConfig.ledHeight || 6;
   const width = stageConfig.ledWidth ?? stageConfig.width;
+  const bottomHeight = getLedBottomHeight(stageConfig);
 
   const geo = new THREE.PlaneGeometry(width, height);
   const mat = new THREE.MeshBasicMaterial({
@@ -157,7 +158,7 @@ function createLEDMesh(stageConfig: StageConfig): THREE.Mesh {
     toneMapped: false,
   });
   const mesh = new THREE.Mesh(geo, mat);
-  mesh.position.set(0, height / 2, getLedZPosition(stageConfig) - 0.1);
+  mesh.position.set(0, bottomHeight + height / 2, getLedZPosition(stageConfig) - 0.1);
   return mesh;
 }
 

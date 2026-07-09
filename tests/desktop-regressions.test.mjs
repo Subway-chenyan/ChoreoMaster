@@ -156,6 +156,8 @@ test('stage background upload uses a custom width dialog and sidebar controls', 
   assert.match(sidebar, /舞台底图/);
   assert.match(sidebar, /舞台划线/);
   assert.match(sidebar, /LED 距舞台后沿/);
+  assert.match(sidebar, /LED 底部离地高度/);
+  assert.match(sidebar, /ledBottomHeight/);
 });
 
 test('project saving preserves editor state and exposes autosave feedback', async () => {
@@ -242,6 +244,8 @@ test('live 3D stage uses the background, LED depth, and direction arrows', async
   assert.match(floor, /resolveStageBackgroundUrl/);
   assert.match(floor, /showStageLines/);
   assert.match(led, /getLedZPosition/);
+  assert.match(led, /getLedBottomHeight/);
+  assert.match(led, /bottomHeight \+ height \/ 2/);
   assert.match(performer, /DirectionArrow3D/);
   assert.match(prop, /DirectionArrow3D/);
   assert.match(scene, /showDirectionArrows = true/);
@@ -257,6 +261,8 @@ test('offline 3D renderer includes stage background, LED depth, and arrows', asy
 
   assert.match(offline, /resolveStageBackgroundUrl/);
   assert.match(offline, /getLedZPosition/);
+  assert.match(offline, /getLedBottomHeight/);
+  assert.match(offline, /bottomHeight \+ height \/ 2/);
   assert.match(offline, /createDirectionArrow/);
   assert.match(offline, /includeDirectionArrows: boolean = true/);
   assert.match(offline, /createPropMesh\(p, includeDirectionArrows\)/);

@@ -214,6 +214,7 @@ test('derives stage dimensions from a full-stage background width', async () => 
 test('normalizes stage background opacity and LED distance', async () => {
   const {
     clampStageBackgroundOpacity,
+    getLedBottomHeight,
     getLedDistanceFromBack,
     getLedStageYPercent,
     getLedZPosition,
@@ -221,6 +222,9 @@ test('normalizes stage background opacity and LED distance', async () => {
 
   assert.equal(clampStageBackgroundOpacity(2), 1);
   assert.equal(clampStageBackgroundOpacity(Number.NaN), 0.5);
+  assert.equal(getLedBottomHeight({ width: 20, depth: 10, ledBottomHeight: -1 }), 0);
+  assert.equal(getLedBottomHeight({ width: 20, depth: 10, ledBottomHeight: 4.5 }), 4.5);
+  assert.equal(getLedBottomHeight({ width: 20, depth: 10, ledBottomHeight: 40 }), 30);
   assert.equal(getLedDistanceFromBack({ width: 20, depth: 10, ledDistanceFromBack: 12 }), 10);
   assert.equal(getLedStageYPercent({ width: 20, depth: 10, ledDistanceFromBack: 3 }), 30);
   assert.equal(getLedZPosition({ width: 20, depth: 10, ledDistanceFromBack: 3 }), -2);

@@ -897,6 +897,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             </div>
 
                             <div className="space-y-2 mb-3">
+                                <label className="text-xs text-slate-400">LED 底部离地高度</label>
+                                <div className="flex items-center gap-2">
+                                    <EditableNumberInput
+                                        step={0.1}
+                                        min={0}
+                                        max={30}
+                                        value={stageConfig?.ledBottomHeight ?? 0}
+                                        onChange={(value) => onStageConfigChange({ ledBottomHeight: value })}
+                                        className="flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                                    />
+                                    <span className="text-xs text-slate-500">米</span>
+                                </div>
+                                <p className="text-[10px] leading-4 text-slate-500">0 米表示 LED 底边贴着舞台地面，数值增大时整体向上抬高。</p>
+                            </div>
+
+                            <div className="space-y-2 mb-3">
                                 <label className="text-xs text-slate-400">LED 距舞台后沿</label>
                                 <div className="flex items-center gap-2">
                                     <EditableNumberInput

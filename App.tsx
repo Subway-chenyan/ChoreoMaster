@@ -92,6 +92,7 @@ const createDefaultStageConfig = (): StageConfig => ({
   wingWidth: 4,
   ledWidth: 20,
   ledHeight: 6,
+  ledBottomHeight: 0,
   ledContent: { type: 'none' },
   showStageLines: true,
   ledDistanceFromBack: 0,
@@ -1121,6 +1122,7 @@ const App: React.FC = () => {
       width: dimensions.width,
       depth: dimensions.depth,
       ledDistanceFromBack: Math.min(getLedDistanceFromBack(current), dimensions.depth),
+      ledBottomHeight: Math.max(0, Math.min(30, current.ledBottomHeight ?? 0)),
       background: {
         value: pendingStageBackground.value,
         opacity: clampStageBackgroundOpacity(current.background?.opacity),
@@ -1151,6 +1153,7 @@ const App: React.FC = () => {
       return {
         ...next,
         ledDistanceFromBack: getLedDistanceFromBack(next),
+        ledBottomHeight: Math.max(0, Math.min(30, next.ledBottomHeight ?? 0)),
         background: next.background
           ? { ...next.background, opacity: clampStageBackgroundOpacity(next.background.opacity) }
           : undefined,

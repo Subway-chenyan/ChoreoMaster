@@ -95,9 +95,11 @@ interface StageConfig {
   background?: StageBackground;
   showStageLines?: boolean;
   ledDistanceFromBack?: number;
+  ledBottomHeight?: number;
 }
 
 calculateStageDimensionsFromImage(totalWidth, wingWidth, pixelWidth, pixelHeight);
+getLedBottomHeight(stageConfig);
 getLedDistanceFromBack(stageConfig);
 getLedStageYPercent(stageConfig);
 getLedZPosition(stageConfig);
@@ -111,6 +113,7 @@ getLedZPosition(stageConfig);
 - Managed projects externalize data URLs to `assets/stage-backgrounds/` and hydrate the relative path into `mediaUrls` on load.
 - `showStageLines !== false` is the compatibility default. It gates wing boundary lines and the two horizontal third-division lines, but not the vertical meter grid.
 - `ledDistanceFromBack` uses meters, defaults to `0`, and is clamped to `0..stage depth`.
+- `ledBottomHeight` uses meters, defaults to `0`, is clamped to `0..30`, and means the LED screen bottom edge height above the stage floor. Live 3D and offline 3D position the LED center at `getLedBottomHeight(stageConfig) + ledHeight / 2`.
 - Performer and prop direction arrows consume the same per-frame rotation used by geometry in live 2D/3D and exports.
 - Rotation `0deg` means facing the stage front. In the 2D editor/canvas this is visually downward; in 3D it is the same world direction used by `mapTo3D` for the front edge. Do not flip only one renderer.
 - Direction indicators are operational cues, not decorative marks. Keep them legible at the default zoom: use a fixed SVG arrow in the 2D editor, a thicker canvas arrow in 2D export, and matching larger geometry in live/offline 3D.
@@ -123,6 +126,7 @@ getLedZPosition(stageConfig);
 - Total width less than or equal to both wings -> disable confirmation and retain the previous stage dimensions.
 - Non-finite opacity -> `0.5`; finite opacity -> clamp to `0..1`.
 - Missing/non-finite LED distance -> `0`; out-of-range value -> clamp to `0..depth`.
+- Missing/non-finite LED bottom height -> `0`; out-of-range value -> clamp to `0..30`.
 - Missing managed background asset -> return a `missing_asset` warning and continue loading the project.
 - 3D export texture load failure -> warn once and continue with the dark floor.
 
@@ -136,7 +140,7 @@ getLedZPosition(stageConfig);
 
 - Pure utility tests assert dimension derivation, invalid widths, opacity normalization, and LED clamping/coordinate conversion.
 - Project-service tests assert data URL externalization, `mediaUrls` hydration, exact option persistence, and legacy defaults.
-- Desktop regression tests assert all four renderer paths reference the shared URL/LED helpers and both actor/prop components include direction arrows.
+- Desktop regression tests assert all four renderer paths reference the shared URL/LED helpers, LED bottom-height positioning, and both actor/prop components include direction arrows.
 - Desktop regression tests assert 2D direction arrows default toward the stage front and canvas export rotates arrows with the same sign as the editor.
 - Desktop regression tests assert the 2D arrow uses a visible SVG size/stroke and the live/offline 3D arrows use matching enlarged geometry.
 - Desktop regression tests assert the toolbar toggle state gates 2D arrows, live 3D arrows, and offline 3D export arrows without touching rotation values.
@@ -158,5 +162,6 @@ This duplicates clamping and fails for managed project asset paths.
 
 ```typescript
 const ledZ = getLedZPosition(stageConfig);
+const ledY = getLedBottomHeight(stageConfig) + (stageConfig.ledHeight ?? 6) / 2;
 const backgroundUrl = resolveStageBackgroundUrl(stageConfig, mediaCache);
 ```

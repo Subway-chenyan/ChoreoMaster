@@ -2,7 +2,7 @@ import React, { useRef, useEffect, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { StageConfig } from '../types';
-import { getLedZPosition } from '../utils/stage-config';
+import { getLedBottomHeight, getLedZPosition } from '../utils/stage-config';
 
 interface LEDTVProps {
   config: StageConfig;
@@ -22,6 +22,7 @@ const LEDTV: React.FC<LEDTVProps> = ({ config, mediaCache = {}, currentTime = 0,
 
   const height = config.ledHeight || 6;
   const width = config.ledWidth ?? config.width;
+  const bottomHeight = getLedBottomHeight(config);
   const content = config.ledContent;
 
   useEffect(() => {
@@ -205,7 +206,7 @@ const LEDTV: React.FC<LEDTVProps> = ({ config, mediaCache = {}, currentTime = 0,
   const materialKey = `${content?.type || 'none'}-${content?.value || 'empty'}-${texture?.uuid || 'no-texture'}`;
 
   return (
-    <mesh ref={meshRef} position={[0, height / 2, getLedZPosition(config) - 0.1]} receiveShadow>
+    <mesh ref={meshRef} position={[0, bottomHeight + height / 2, getLedZPosition(config) - 0.1]} receiveShadow>
       <planeGeometry args={[width, height]} />
       <meshBasicMaterial
         key={materialKey}
