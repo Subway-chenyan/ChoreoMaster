@@ -4,6 +4,7 @@ import {
   makePerformersPortable,
   pasteFormationPayload,
   pastePerformerPayload,
+  pasteSameProjectFormationPayload,
   type FormationClipboardPayload,
   type PerformerClipboardPayload,
 } from '../utils/cross-project-clipboard.ts';
@@ -119,6 +120,56 @@ test('pastes a formation with every source object and remapped hidden state', ()
   assert.equal(pasted.frame.id, 'frame-new');
   assert.equal(pasted.frame.name, 'Opening (复制)');
   assert.equal(pasted.frame.startTime, 9000);
+});
+
+test('pastes a same-project formation without duplicating performers or props', () => {
+  const payload: FormationClipboardPayload = {
+    kind: 'formation',
+    sourceProjectKey: 'project:same',
+    groups: [
+      { id: 'group-a', name: 'A group', color: '#ffffff', collapsed: false },
+      { id: 'group-missing', name: 'Missing group', color: '#000000', collapsed: false },
+    ],
+    performers: [
+      { id: 'actor-a', name: 'A', color: '#ffffff', label: 'A', shape: 'circle', groupId: 'group-a' },
+      { id: 'prop-door', name: 'Door', color: '#999999', label: 'D', shape: 'square', type: 'prop' },
+    ],
+    frame: {
+      id: 'source-frame',
+      name: 'Opening',
+      startTime: 0,
+      duration: 2000,
+      positions: {
+        'actor-a': { x: 10, y: 20 },
+        'prop-door': { x: 30, y: 40 },
+        'deleted-actor': { x: 50, y: 60 },
+      },
+      rotations: {
+        'actor-a': 0.5,
+        'prop-door': 1,
+        'deleted-actor': 2,
+      },
+      hiddenGroupIds: ['group-a', 'group-missing'],
+    },
+  };
+
+  const pasted = pasteSameProjectFormationPayload(
+    payload,
+    9000,
+    createIds('frame-new'),
+    new Set(['actor-a', 'prop-door']),
+    new Set(['group-a']),
+  );
+
+  assert.deepEqual(pasted.performers, []);
+  assert.deepEqual(pasted.groups, []);
+  assert.equal(pasted.frame.id, 'frame-new');
+  assert.equal(pasted.frame.startTime, 9000);
+  assert.deepEqual(Object.keys(pasted.frame.positions).sort(), ['actor-a', 'prop-door']);
+  assert.deepEqual(pasted.frame.positions['actor-a'], { x: 10, y: 20 });
+  assert.deepEqual(pasted.frame.positions['prop-door'], { x: 30, y: 40 });
+  assert.deepEqual(pasted.frame.rotations, { 'actor-a': 0.5, 'prop-door': 1 });
+  assert.deepEqual(pasted.frame.hiddenGroupIds, ['group-a']);
 });
 
 test('makes performer textures self-contained for another project', async () => {

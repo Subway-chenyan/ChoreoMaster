@@ -68,6 +68,7 @@ import {
   makePerformersPortable,
   pasteFormationPayload,
   pastePerformerPayload,
+  pasteSameProjectFormationPayload,
   type FormationClipboardPayload,
   type FrameClipboardUpdate,
   type PerformerClipboardPayload,
@@ -141,6 +142,13 @@ function readBlobAsDataUrl(blob: Blob): Promise<string> {
 
 function readFileAsDataUrl(file: File): Promise<string> {
   return readBlobAsDataUrl(file);
+}
+
+function createLocalProjectClipboardKey(): string {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return `local:${crypto.randomUUID()}`;
+  }
+  return `local:${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
 }
 
 const normalizeAudioMarkers = (value: unknown): AudioMarker[] => {
@@ -477,6 +485,10 @@ const App: React.FC = () => {
 
   // Clipboard State
   const [appClipboard, setAppClipboard] = useState<AppClipboard | null>(null);
+  const [localProjectClipboardKey, setLocalProjectClipboardKey] = useState(createLocalProjectClipboardKey);
+  const activeProjectClipboardKey = currentProjectId
+    ? `project:${currentProjectId}`
+    : localProjectClipboardKey;
 
   // Playback State
   const [currentTime, setCurrentTime] = useState(0);
@@ -1400,6 +1412,9 @@ const App: React.FC = () => {
     const transitions = normalizeTransitions(templateData.transitions);
     const config = templateData.stageConfig || stageConfig;
 
+    setCurrentProjectId(null);
+    setCurrentProjectPath(null);
+    setLocalProjectClipboardKey(createLocalProjectClipboardKey());
     setPerformers(performers);
     setPerformerGroups(groups);
     setFrames(frames);
@@ -2494,6 +2509,8 @@ const App: React.FC = () => {
     setCurrentTime(0);
     setSelectedPerformerIds([]);
     setCurrentProjectId(null);
+    setCurrentProjectPath(null);
+    setLocalProjectClipboardKey(createLocalProjectClipboardKey());
     setProjectHasChanges(false);
   };
 
@@ -2520,6 +2537,9 @@ const App: React.FC = () => {
           setTransitions(normalizeTransitions(json.transitions));
           setAudioMarkers(normalizeAudioMarkers(json.audioMarkers));
           setMusicName(json.musicName || null);
+          setCurrentProjectId(null);
+          setCurrentProjectPath(null);
+          setLocalProjectClipboardKey(createLocalProjectClipboardKey());
 
           // 恢复舞台配置
           if (json.stageConfig) {
@@ -2568,6 +2588,9 @@ const App: React.FC = () => {
         setTransitions(normalizeTransitions(json.transitions));
         setAudioMarkers(normalizeAudioMarkers(json.audioMarkers));
         setMusicName(json.musicName || null);
+        setCurrentProjectId(null);
+        setCurrentProjectPath(null);
+        setLocalProjectClipboardKey(createLocalProjectClipboardKey());
 
         // 恢复舞台配置
         if (json.stageConfig) {
@@ -2644,7 +2667,13 @@ const App: React.FC = () => {
       },
     ]));
 
-    return { kind: 'performers', performers: portablePerformers, groups, scene };
+    return {
+      kind: 'performers',
+      sourceProjectKey: activeProjectClipboardKey,
+      performers: portablePerformers,
+      groups,
+      scene,
+    };
   }, [
     selectedPerformerIds,
     performers,
@@ -2652,6 +2681,7 @@ const App: React.FC = () => {
     currentSceneState.positions,
     currentSceneState.rotations,
     loadClipboardAssetAsDataUrl,
+    activeProjectClipboardKey,
   ]);
 
   const copyPerformersToClipboard = useCallback(async (): Promise<void> => {
@@ -2673,6 +2703,7 @@ const App: React.FC = () => {
       const portablePerformers = await makePerformersPortable(performers, loadClipboardAssetAsDataUrl);
       setAppClipboard({
         kind: 'formation',
+        sourceProjectKey: activeProjectClipboardKey,
         performers: portablePerformers,
         groups: performerGroups.map((group) => structuredClone(group)),
         frame: structuredClone(sourceFrame),
@@ -2682,7 +2713,7 @@ const App: React.FC = () => {
       console.error('Failed to copy formation:', error);
       setProjectMessages(['复制队形失败：无法完整读取演员或道具贴图']);
     }
-  }, [frames, currentFrameId, performers, performerGroups, loadClipboardAssetAsDataUrl]);
+  }, [frames, currentFrameId, performers, performerGroups, loadClipboardAssetAsDataUrl, activeProjectClipboardKey]);
 
   const pastePerformers = useCallback((payload?: PerformerClipboardPayload): void => {
     const source = payload ?? (appClipboard?.kind === 'performers' ? appClipboard : null);
@@ -2719,7 +2750,16 @@ const App: React.FC = () => {
     const source = payload ?? (appClipboard?.kind === 'formation' ? appClipboard : null);
     if (!source) return;
     const previousSelectedIds = [...selectedPerformerIds];
-    const pasted = pasteFormationPayload(source, currentTime, generateId);
+    const isSameProject = source.sourceProjectKey === activeProjectClipboardKey;
+    const pasted = isSameProject
+      ? pasteSameProjectFormationPayload(
+        source,
+        currentTime,
+        generateId,
+        new Set(performers.map((performer) => performer.id)),
+        new Set(performerGroups.map((group) => group.id)),
+      )
+      : pasteFormationPayload(source, currentTime, generateId);
     setPerformerGroups((prev) => [...prev, ...pasted.groups]);
     setPerformers((prev) => [...prev, ...pasted.performers]);
     setFrames((prev) => {
@@ -2730,7 +2770,9 @@ const App: React.FC = () => {
     setCurrentFrameId(pasted.frame.id);
     setSelectedTransitionId(null);
     setSelectedTransitionPerformerId(null);
-    setSelectedPerformerIds(pasted.performers.map((performer) => performer.id));
+    setSelectedPerformerIds(isSameProject
+      ? Object.keys(pasted.frame.positions)
+      : pasted.performers.map((performer) => performer.id));
     pushUndoAction({
       type: 'paste-formation',
       performers: structuredClone(pasted.performers),
@@ -2739,7 +2781,16 @@ const App: React.FC = () => {
       previousCurrentFrameId: currentFrameId,
       previousSelectedIds,
     });
-  }, [appClipboard, selectedPerformerIds, currentTime, currentFrameId, pushUndoAction]);
+  }, [
+    appClipboard,
+    selectedPerformerIds,
+    currentTime,
+    currentFrameId,
+    performers,
+    performerGroups,
+    activeProjectClipboardKey,
+    pushUndoAction,
+  ]);
 
   const handleDuplicateSelected = async (): Promise<void> => {
     try {

@@ -15,6 +15,7 @@ export interface SceneClipboardEntry {
 
 export interface PerformerClipboardPayload {
   kind: 'performers';
+  sourceProjectKey?: string;
   performers: Performer[];
   groups: PerformerGroup[];
   scene: Record<string, SceneClipboardEntry>;
@@ -94,6 +95,7 @@ export function pastePerformerPayload(
 
 export interface FormationClipboardPayload {
   kind: 'formation';
+  sourceProjectKey?: string;
   performers: Performer[];
   groups: PerformerGroup[];
   frame: Frame;
@@ -159,6 +161,38 @@ export function pasteFormationPayload(
   };
 
   return { performers, groups, frame };
+}
+
+export function pasteSameProjectFormationPayload(
+  payload: FormationClipboardPayload,
+  startTime: number,
+  createId: () => string,
+  existingPerformerIds: Set<string>,
+  existingGroupIds: Set<string>,
+): FormationPasteResult {
+  const frame: Frame = {
+    ...cloneValue(payload.frame),
+    id: createId(),
+    name: `${payload.frame.name} (复制)`,
+    startTime,
+    positions: Object.fromEntries(
+      Object.entries(payload.frame.positions).flatMap(([performerId, position]) => (
+        existingPerformerIds.has(performerId) ? [[performerId, { ...position }]] : []
+      )),
+    ),
+    rotations: payload.frame.rotations
+      ? Object.fromEntries(
+        Object.entries(payload.frame.rotations).flatMap(([performerId, rotation]) => (
+          existingPerformerIds.has(performerId) ? [[performerId, rotation]] : []
+        )),
+      )
+      : {},
+    hiddenGroupIds: (payload.frame.hiddenGroupIds ?? []).filter((groupId) => (
+      existingGroupIds.has(groupId)
+    )),
+  };
+
+  return { performers: [], groups: [], frame };
 }
 
 export type LoadAssetAsDataUrl = (url: string) => Promise<string>;
