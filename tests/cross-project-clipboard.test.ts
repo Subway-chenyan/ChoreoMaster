@@ -5,6 +5,7 @@ import {
   pasteFormationPayload,
   pastePerformerPayload,
   pasteSameProjectFormationPayload,
+  pasteSameProjectPerformerPayload,
   type FormationClipboardPayload,
   type PerformerClipboardPayload,
 } from '../utils/cross-project-clipboard.ts';
@@ -61,6 +62,54 @@ test('pastes selected performers into the target frame at copied scene coordinat
   );
   assert.equal(
     pasted.frameUpdates['target-frame'].rotations['actor-new'],
+    1.25,
+  );
+});
+
+test('pastes same-project selected performers into their existing group', () => {
+  const payload: PerformerClipboardPayload = {
+    kind: 'performers',
+    sourceProjectKey: 'project:same',
+    performers: [{
+      id: 'prop-left-board',
+      name: 'Left board',
+      color: '#99cc33',
+      label: 'L',
+      shape: 'square',
+      type: 'prop',
+      groupId: 'deck-group',
+    }],
+    groups: [{
+      id: 'deck-group',
+      name: '挡板',
+      color: '#99cc33',
+      collapsed: false,
+      type: 'prop',
+    }],
+    scene: {
+      'prop-left-board': {
+        position: { x: 24, y: 61 },
+        rotation: 1.25,
+      },
+    },
+  };
+
+  const pasted = pasteSameProjectPerformerPayload(
+    payload,
+    'target-frame',
+    createIds('prop-left-board-copy'),
+    new Set(['deck-group']),
+  );
+
+  assert.deepEqual(pasted.groups, []);
+  assert.equal(pasted.performers[0].id, 'prop-left-board-copy');
+  assert.equal(pasted.performers[0].groupId, 'deck-group');
+  assert.deepEqual(
+    pasted.frameUpdates['target-frame'].positions['prop-left-board-copy'],
+    { x: 24, y: 61 },
+  );
+  assert.equal(
+    pasted.frameUpdates['target-frame'].rotations['prop-left-board-copy'],
     1.25,
   );
 });

@@ -69,6 +69,7 @@ import {
   pasteFormationPayload,
   pastePerformerPayload,
   pasteSameProjectFormationPayload,
+  pasteSameProjectPerformerPayload,
   type FormationClipboardPayload,
   type FrameClipboardUpdate,
   type PerformerClipboardPayload,
@@ -2724,7 +2725,15 @@ const App: React.FC = () => {
     }
 
     const previousSelectedIds = [...selectedPerformerIds];
-    const pasted = pastePerformerPayload(source, currentFrameId, generateId);
+    const isSameProject = source.sourceProjectKey === activeProjectClipboardKey;
+    const pasted = isSameProject
+      ? pasteSameProjectPerformerPayload(
+        source,
+        currentFrameId,
+        generateId,
+        new Set(performerGroups.map((group) => group.id)),
+      )
+      : pastePerformerPayload(source, currentFrameId, generateId);
     setPerformerGroups((prev) => [...prev, ...pasted.groups]);
     setPerformers((prev) => [...prev, ...pasted.performers]);
     setFrames((prev) => prev.map((frame) => {
@@ -2744,7 +2753,15 @@ const App: React.FC = () => {
       frameUpdates: structuredClone(pasted.frameUpdates),
       previousSelectedIds,
     });
-  }, [appClipboard, currentFrameId, frames, selectedPerformerIds, pushUndoAction]);
+  }, [
+    appClipboard,
+    currentFrameId,
+    frames,
+    selectedPerformerIds,
+    performerGroups,
+    activeProjectClipboardKey,
+    pushUndoAction,
+  ]);
 
   const pasteFormation = useCallback((payload?: FormationClipboardPayload): void => {
     const source = payload ?? (appClipboard?.kind === 'formation' ? appClipboard : null);

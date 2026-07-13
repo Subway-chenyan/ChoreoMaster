@@ -93,6 +93,50 @@ export function pastePerformerPayload(
   };
 }
 
+export function pasteSameProjectPerformerPayload(
+  payload: PerformerClipboardPayload,
+  targetFrameId: string,
+  createId: () => string,
+  existingGroupIds: Set<string>,
+): PerformerPasteResult {
+  const performerIdMap = new Map(payload.performers.map((performer) => [performer.id, createId()]));
+  const performers = payload.performers.map((performer) => {
+    const next = cloneValue(performer);
+    next.id = performerIdMap.get(performer.id) ?? performer.id;
+
+    if (performer.groupId && existingGroupIds.has(performer.groupId)) {
+      next.groupId = performer.groupId;
+    } else {
+      delete next.groupId;
+    }
+
+    const nextBoundToId = performer.boundToId ? performerIdMap.get(performer.boundToId) : undefined;
+    if (nextBoundToId) {
+      next.boundToId = nextBoundToId;
+    } else {
+      delete next.boundToId;
+    }
+
+    return next;
+  });
+  const frameUpdate: FrameClipboardUpdate = { positions: {}, rotations: {} };
+
+  Object.entries(payload.scene).forEach(([sourceId, entry]) => {
+    const targetId = performerIdMap.get(sourceId);
+    if (!targetId) return;
+    frameUpdate.positions[targetId] = { ...entry.position };
+    if (typeof entry.rotation === 'number' && Number.isFinite(entry.rotation)) {
+      frameUpdate.rotations[targetId] = entry.rotation;
+    }
+  });
+
+  return {
+    performers,
+    groups: [],
+    frameUpdates: { [targetFrameId]: frameUpdate },
+  };
+}
+
 export interface FormationClipboardPayload {
   kind: 'formation';
   sourceProjectKey?: string;

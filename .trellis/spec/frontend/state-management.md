@@ -431,7 +431,7 @@ export function useTabs(): TabsContextValue {
 ### 1. Scope / Trigger
 
 - Use this contract for copying performers or a complete formation between projects.
-- Use a same-project paste path when the copied formation originated from the currently active project.
+- Use a same-project paste path when copied performers or a copied formation originated from the currently active project.
 - Clipboard state must live above project-loading state and must not be cleared when the active project changes.
 
 ### 2. Signatures
@@ -440,6 +440,7 @@ export function useTabs(): TabsContextValue {
 type AppClipboard = PerformerClipboardPayload | FormationClipboardPayload;
 
 pastePerformerPayload(payload, targetFrameId): PerformerPasteResult;
+pasteSameProjectPerformerPayload(payload, targetFrameId): PerformerPasteResult;
 pasteFormationPayload(payload): FormationPasteResult;
 pasteSameProjectFormationPayload(payload): FormationPasteResult;
 makePerformersPortable(performers, loadAssetAsDataUrl): Promise<Performer[]>;
@@ -450,6 +451,8 @@ makePerformersPortable(performers, loadAssetAsDataUrl): Promise<Performer[]>;
 - `PerformerClipboardPayload` contains copied performers, their referenced groups, and scene entries keyed independently of source frame IDs.
 - `FormationClipboardPayload` contains every project performer, every group, and the copied frame. This includes objects hidden or unpositioned in that frame.
 - Clipboard payloads carry a source project key. Saved projects use the project ID; local/imported states without a project ID use a generated session-local key that is refreshed when the editor resets or imports another local project.
+- Same-project selected-performer paste creates new performer/prop IDs but reuses existing `groupId` values when the source group still exists. It must not append cloned groups to the project list.
+- Cross-project selected-performer paste creates new performer/prop IDs and new group IDs, then remaps `groupId` and selected-internal `boundToId` references consistently.
 - Cross-project formation paste generates new entity, group, and frame IDs, then remaps `groupId`, `boundToId`, positions, rotations, and `hiddenGroupIds` consistently.
 - Same-project formation paste must only create a new frame. It reuses existing performer/prop/group IDs, filters references to entities/groups that still exist, and must not append actors, props, or groups to the project lists.
 - Performer and prop names remain unchanged. A pasted formation frame may add the localized copy suffix.
@@ -464,6 +467,7 @@ makePerformersPortable(performers, loadAssetAsDataUrl): Promise<Performer[]>;
 | Asset cannot be read | Abort clipboard creation; preserve the previous clipboard; report the failure |
 | Source relationship points outside selected performers | Clear that relationship instead of retaining a dangling source ID |
 | Hidden/unpositioned object in formation copy | Create the object and preserve its hidden/unpositioned scene state |
+| Source and target project keys match for selected-performer paste | Create copied performers/props in the target frame, reuse existing groups, and do not create empty duplicate groups |
 | Source and target project keys match for formation paste | Create only a copied frame and reuse existing IDs; filter deleted actors/props/groups |
 | Source and target project keys differ, or a legacy payload has no source key | Treat as cross-project; allocate new IDs and remap all references |
 
@@ -471,13 +475,16 @@ makePerformersPortable(performers, loadAssetAsDataUrl): Promise<Performer[]>;
 
 - Good: Copy a formation with actors, props, bindings, rotations, hidden groups, and textures; paste it into another project with identical names and scene coordinates.
 - Good: Copy a formation inside one project and paste it later in the same project; the actor/prop list remains unchanged and only a new frame appears.
+- Good: Copy a grouped prop inside one project; the duplicated prop appears in the original group instead of a newly cloned group.
 - Base: Copy one selected actor and paste it into the current frame at the copied coordinates, visible by default.
+- Bad: Treat same-project selected-performer paste as cross-project import; this creates an empty duplicate group and places the copy there.
 - Bad: Treat same-project formation paste as cross-project import; this duplicates the actor and prop pages/lists.
 - Bad: Store coordinates under source frame IDs or keep `assetPath` references; both make the clipboard dependent on the source project.
 
 ### 6. Tests Required
 
 - Unit: selected paste preserves name, position, rotation, visibility, and remaps group IDs.
+- Unit: same-project selected paste creates no groups and preserves existing `groupId` for grouped actors/props.
 - Unit: formation paste creates all source performers and props, including hidden/unpositioned objects, and remaps every scene reference.
 - Unit: same-project formation paste creates no performers/groups, preserves existing IDs in the copied frame, and filters deleted actors/props/groups.
 - Unit: asset conversion embeds legacy, box, and extruded texture fields as `data:` URLs and removes source paths.
