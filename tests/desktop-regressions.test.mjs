@@ -301,6 +301,24 @@ test('timeline native scrollbar is isolated from seeking and wheel input scrolls
   assert.doesNotMatch(source, /ref=\{containerRef\}[\s\S]{0,160}onPointerDown=\{handlePointerDown\}/);
 });
 
+test('short formation frames render as keyframes in timeline and sidebar', async () => {
+  const [timeline, sidebar, helper] = await Promise.all([
+    read('components/Timeline.tsx'),
+    read('components/Sidebar.tsx'),
+    read('utils/frame-keyframes.ts'),
+  ]);
+
+  assert.match(helper, /KEYFRAME_DURATION_THRESHOLD_MS = 500/);
+  assert.match(helper, /MIN_FRAME_DURATION_MS = 100/);
+  assert.match(timeline, /normalizeFrameDuration\(draggingState\.originalDuration \+ deltaTime\)/);
+  assert.match(timeline, /KEYFRAME_MIN_VISUAL_WIDTH_PX/);
+  assert.match(timeline, /isKeyframeFrame\(frame\)/);
+  assert.match(timeline, /关键帧/);
+  assert.match(sidebar, /isKeyframeFrame\(f\)/);
+  assert.match(sidebar, /关键帧/);
+  assert.match(sidebar, /formatFrameDuration\(f\.duration\)/);
+});
+
 test('sidebar moves compatible multi-selection through menu and drag-and-drop', async () => {
   const [sidebar, app] = await Promise.all([
     read('components/Sidebar.tsx'),

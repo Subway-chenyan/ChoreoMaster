@@ -7,6 +7,13 @@ import {
   snapStagePosition,
 } from '../utils/stage-grid.ts';
 import { getTimelineHorizontalWheelDelta } from '../utils/timeline-scroll.ts';
+import {
+  KEYFRAME_DURATION_THRESHOLD_MS,
+  MIN_FRAME_DURATION_MS,
+  formatFrameDuration,
+  isKeyframeFrame,
+  normalizeFrameDuration,
+} from '../utils/frame-keyframes.ts';
 
 test('grid spacing uses 0.1m increments and hides labels below 0.5m', () => {
   assert.equal(normalizeStageGridSpacing(0.14), 0.1);
@@ -47,4 +54,14 @@ test('timeline wheel converts vertical input and preserves dominant horizontal i
     getTimelineHorizontalWheelDelta({ deltaX: 0, deltaY: 1, deltaMode: 2 }, 500),
     500,
   );
+});
+
+test('short formation durations are treated as keyframes', () => {
+  assert.equal(KEYFRAME_DURATION_THRESHOLD_MS, 500);
+  assert.equal(MIN_FRAME_DURATION_MS, 100);
+  assert.equal(isKeyframeFrame({ duration: 499 }), true);
+  assert.equal(isKeyframeFrame({ duration: 500 }), false);
+  assert.equal(normalizeFrameDuration(42), 100);
+  assert.equal(normalizeFrameDuration(375.4), 375);
+  assert.equal(formatFrameDuration(375), '0.4秒');
 });

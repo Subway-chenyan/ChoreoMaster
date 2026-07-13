@@ -11,6 +11,7 @@ import { ChoreoAgentModal } from './ChoreoAgentModal';
 import { EditableNumberInput, SelectField, StepperNumberField } from './FormControls';
 import { validateAgentAccess } from '../services/choreoAgentService';
 import { isPerformerGroupCompatible, resolveGroupAction, type GroupablePerformerType } from '../utils/performer-grouping';
+import { formatFrameDuration, isKeyframeFrame } from '../utils/frame-keyframes';
 
 interface SidebarProps {
     performers: Performer[];
@@ -970,7 +971,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         </div>
 
                         <div className="flex-1 space-y-3 overflow-y-auto pr-1">
-                            {sortedFrames.map((f, idx) => (
+                            {sortedFrames.map((f, idx) => {
+                                const isKeyframe = isKeyframeFrame(f);
+                                const isSelectedFrame = f.id === currentFrameId && selectedPerformerIds.length === 0;
+                                return (
                                 <div
                                     key={f.id}
                                     onClick={() => onSelectFrame(f.id)}
@@ -979,8 +983,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                         setEditingFrameId(f.id);
                                         setEditingFrameName(f.name);
                                     }}
-                                    className={`group relative flex gap-3 p-2 rounded-lg border transition-all cursor-pointer ${f.id === currentFrameId && selectedPerformerIds.length === 0 ? 'bg-slate-800 border-blue-500 shadow-md' : 'bg-slate-900 border-slate-800 hover:bg-slate-800'}`}
+                                    className={`group relative flex gap-3 p-2 rounded-lg border transition-all cursor-pointer ${
+                                        isSelectedFrame
+                                            ? isKeyframe
+                                                ? 'bg-fuchsia-950/60 border-fuchsia-400 shadow-md shadow-fuchsia-950/30'
+                                                : 'bg-slate-800 border-blue-500 shadow-md'
+                                            : isKeyframe
+                                                ? 'bg-fuchsia-950/30 border-fuchsia-500/40 hover:bg-fuchsia-950/50'
+                                                : 'bg-slate-900 border-slate-800 hover:bg-slate-800'
+                                    }`}
                                 >
+                                    {isKeyframe && (
+                                        <div className="absolute left-0 top-2 bottom-2 w-1 rounded-r-full bg-fuchsia-400 shadow-[0_0_12px_rgba(217,70,239,0.65)]" />
+                                    )}
                                     {/* Thumbnail */}
                                     <div className="w-16 h-12 shrink-0">
                                         <FormationThumbnail positions={f.positions} />
@@ -988,7 +1003,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
                                     {/* Info */}
                                     <div className="flex-1 min-w-0 flex flex-col justify-center">
-                                        <div className={`text-sm font-medium truncate ${f.id === currentFrameId && selectedPerformerIds.length === 0 ? 'text-blue-400' : 'text-slate-300'}`}>
+                                        <div className={`text-sm font-medium truncate ${isSelectedFrame ? (isKeyframe ? 'text-fuchsia-200' : 'text-blue-400') : 'text-slate-300'}`}>
                                             {editingFrameId === f.id ? (
                                                 <input
                                                     autoFocus
@@ -1008,15 +1023,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                                             setEditingFrameId(null);
                                                         }
                                                     }}
-                                                    className={`w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs ${f.id === currentFrameId && selectedPerformerIds.length === 0 ? 'text-blue-400' : 'text-slate-300'}`}
+                                                    className={`w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs ${isSelectedFrame ? (isKeyframe ? 'text-fuchsia-200' : 'text-blue-400') : 'text-slate-300'}`}
                                                 />
                                             ) : (
                                                 f.name
                                             )}
                                         </div>
-                                        <div className="text-[10px] text-slate-500 flex gap-2">
+                                        <div className="text-[10px] text-slate-500 flex flex-wrap items-center gap-2">
                                             <span>Start: {(f.startTime / 1000).toFixed(1)}s</span>
-                                            <span>Dur: {(f.duration / 1000).toFixed(1)}s</span>
+                                            <span>Dur: {formatFrameDuration(f.duration)}</span>
+                                            {isKeyframe && (
+                                                <span className="rounded-full border border-fuchsia-400/40 bg-fuchsia-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-fuchsia-200">
+                                                    关键帧
+                                                </span>
+                                            )}
                                         </div>
                                     </div>
 
@@ -1026,7 +1046,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                         <button onClick={(e) => { e.stopPropagation(); onDeleteFrame(f.id); }} className="p-1 bg-slate-800 hover:bg-red-900 rounded text-slate-400 hover:text-red-400"><Trash2 size={12} /></button>
                                     </div>
                                 </div>
-                            ))}
+                                );
+                            })}
                         </div>
 
                         <button onClick={onAddFrame} className="mt-4 w-full py-3 bg-green-600 hover:bg-green-500 rounded font-bold text-sm text-white shadow-lg shadow-green-900/20 uppercase tracking-wide">

@@ -5,6 +5,9 @@ import { Flag, Pause, Play, PlusCircle, SkipBack, Trash2, X, ZoomIn, ZoomOut } f
 import { EditableNumberInput } from './FormControls';
 import { createTransitionId, getDefaultBezierControlPoints, getGapSelectionId } from '../utils/transitions';
 import { getTimelineHorizontalWheelDelta } from '../utils/timeline-scroll';
+import { formatFrameDuration, isKeyframeFrame, normalizeFrameDuration } from '../utils/frame-keyframes';
+
+const KEYFRAME_MIN_VISUAL_WIDTH_PX = 24;
 
 interface TimelineProps {
     performers: Performer[];
@@ -408,7 +411,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                     return { ...f, startTime: newStart };
                 } else {
                     // Resize
-                    const newDur = Math.max(500, draggingState.originalDuration + deltaTime);
+                    const newDur = normalizeFrameDuration(draggingState.originalDuration + deltaTime);
                     return { ...f, duration: newDur };
                 }
             }
@@ -611,7 +614,13 @@ export const Timeline: React.FC<TimelineProps> = ({
                         ))}
 
                         {/* Render Frames */}
-                        {frames.map((frame) => (
+                        {frames.map((frame) => {
+                            const isKeyframe = isKeyframeFrame(frame);
+                            const frameWidth = (frame.duration / 1000) * zoom;
+                            const visualWidth = isKeyframe
+                                ? Math.max(KEYFRAME_MIN_VISUAL_WIDTH_PX, frameWidth)
+                                : frameWidth;
+                            return (
                             <div
                                 key={frame.id}
                                 className="absolute top-0 group"
@@ -628,15 +637,23 @@ export const Timeline: React.FC<TimelineProps> = ({
                                         }}
                                         className={`timeline-clip relative h-full rounded-lg flex flex-col items-center justify-center cursor-grab active:cursor-grabbing overflow-hidden transition-all border select-none shadow-lg
                                 ${selectedFrameId === frame.id
-                                            ? 'bg-slate-700 border-blue-400 shadow-blue-900/20 z-20'
-                                            : 'bg-slate-800/90 border-slate-600 hover:bg-slate-700 z-10'
+                                            ? isKeyframe
+                                                ? 'bg-fuchsia-500/20 border-fuchsia-300 shadow-fuchsia-900/30 z-20'
+                                                : 'bg-slate-700 border-blue-400 shadow-blue-900/20 z-20'
+                                            : isKeyframe
+                                                ? 'bg-fuchsia-950/80 border-fuchsia-500/70 hover:bg-fuchsia-900/70 shadow-fuchsia-950/30 z-10'
+                                                : 'bg-slate-800/90 border-slate-600 hover:bg-slate-700 z-10'
                                         }
+                                ${isKeyframe ? 'rounded-full ring-1 ring-fuchsia-400/20' : ''}
                             `}
                                         style={{
-                                            width: (frame.duration / 1000) * zoom
+                                            width: visualWidth
                                         }}
                                         onDoubleClick={() => { setEditingId(frame.id); setEditingName(frame.name); }}
                                     >
+                                    {isKeyframe && (
+                                        <div className="pointer-events-none absolute inset-y-1 left-1 w-1 rounded-full bg-fuchsia-300 shadow-[0_0_10px_rgba(217,70,239,0.75)]" />
+                                    )}
                                     <div className="font-bold text-xs text-slate-200 truncate px-2 mb-1">
                                         {editingId === frame.id ? (
                                             <input
@@ -667,7 +684,9 @@ export const Timeline: React.FC<TimelineProps> = ({
                                             frame.name
                                         )}
                                     </div>
-                                    <div className="text-[9px] text-slate-400 pointer-events-none">{(frame.duration / 1000).toFixed(1)}秒</div>
+                                    <div className={`text-[9px] pointer-events-none ${isKeyframe ? 'text-fuchsia-200 font-semibold' : 'text-slate-400'}`}>
+                                        {isKeyframe ? '关键帧' : formatFrameDuration(frame.duration)}
+                                    </div>
 
                                     {(() => {
                                         const frameNoteCount = performerNotes.filter(n => n.frameId === frame.id).length;
@@ -681,16 +700,17 @@ export const Timeline: React.FC<TimelineProps> = ({
                                     })()}
 
                                         {/* Resize Handle (Right) */}
-                                        <div
-                                            className="absolute right-0 top-0 bottom-0 w-6 md:w-3 cursor-ew-resize hover:bg-blue-500/30 z-30 flex items-center justify-center group/handle touch-none"
+                                    <div
+                                            className={`absolute right-0 top-0 bottom-0 w-6 md:w-3 cursor-ew-resize z-30 flex items-center justify-center group/handle touch-none ${isKeyframe ? 'hover:bg-fuchsia-400/20' : 'hover:bg-blue-500/30'}`}
                                             onPointerDown={(e) => handleFrameDragStart(e, frame, 'resize')}
                                             title="拖动调整时长"
                                         >
-                                            <div className="w-1 h-4 bg-slate-500 rounded-full group-hover/handle:bg-blue-400" />
+                                            <div className={`w-1 h-4 rounded-full ${isKeyframe ? 'bg-fuchsia-300 group-hover/handle:bg-fuchsia-200' : 'bg-slate-500 group-hover/handle:bg-blue-400'}`} />
                                         </div>
                                     </div>
                             </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 </div>
             </div>
