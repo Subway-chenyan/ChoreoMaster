@@ -50,7 +50,7 @@ declare global {
   interface Window {
     electronAPI: {
       // Dialog operations
-      saveFile: (defaultName: string) => Promise<string | null>;
+      saveFile: (defaultName: string, filters?: Electron.FileFilter[]) => Promise<string | null>;
       openFile: (filters: Electron.FileFilter[]) => Promise<string | null>;
       openMultipleFiles: (filters: Electron.FileFilter[]) => Promise<string[]>;
       selectDirectory: () => Promise<string | null>;
@@ -58,6 +58,7 @@ declare global {
       // File system operations
       readFile: (filePath: string) => Promise<string>;
       writeFile: (filePath: string, content: string) => Promise<void>;
+      writeBinaryFile: (filePath: string, content: Uint8Array) => Promise<void>;
 
       // Project storage operations
       project: {
@@ -67,7 +68,7 @@ declare global {
         list: () => Promise<ProjectMeta[]>;
         create: (name: string) => Promise<{ id: string; path: string }>;
         load: (projectId: string) => Promise<ProjectLoadResult>;
-        save: (projectId: string, projectData: ProjectDocument) => Promise<ProjectLoadResult>;
+        save: (projectId: string, projectData: ProjectDocument) => Promise<void>;
         ingestAsset: (projectId: string, sourcePath: string, kind: ProjectAssetKind) => Promise<ProjectAssetResult>;
         exportPackage: (projectId: string) => Promise<string | null>;
         importPackage: () => Promise<ProjectImportResult | null>;

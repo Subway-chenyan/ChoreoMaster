@@ -277,7 +277,7 @@ async function makeTextureMapPortable<T extends BoxTextures | ExtrudedTextures>(
       await makeFaceTexturePortable(texture, loadAssetAsDataUrl),
     ] as const),
   );
-  return Object.fromEntries(entries) as T;
+  return Object.fromEntries(entries) as unknown as T;
 }
 
 export async function makePerformersPortable(

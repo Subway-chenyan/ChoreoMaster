@@ -288,11 +288,12 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     const settings = await loadSettings();
     const projectDir = path.join(settings.storagePath, 'projects', projectId);
     const content = JSON.parse(await fs.readFile(path.join(projectDir, 'project.json'), 'utf8')) as { name?: string };
-    const defaultName = `${content.name || 'CosStage-project'}.choreo`;
+    const defaultName = `${content.name || 'CosStage-project'}.zip`;
     const { filePath } = await dialog.showSaveDialog(mainWindow, {
       defaultPath: defaultName,
       filters: [
-        { name: 'CosStage Project Package', extensions: ['choreo'] },
+        { name: '项目压缩包 (*.zip)', extensions: ['zip'] },
+        { name: 'CosStage 项目包 (*.choreo)', extensions: ['choreo'] },
         { name: 'All Files', extensions: ['*'] },
       ],
     });
@@ -305,7 +306,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     const { filePaths } = await dialog.showOpenDialog(mainWindow, {
       properties: ['openFile'],
       filters: [
-        { name: 'CosStage Project Package', extensions: ['choreo'] },
+        { name: '项目压缩包 / CosStage 项目包', extensions: ['zip', 'choreo'] },
         { name: 'All Files', extensions: ['*'] },
       ],
     });

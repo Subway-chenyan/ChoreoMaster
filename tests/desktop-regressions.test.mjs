@@ -10,6 +10,44 @@ test('tutorial example resolves beside the current document for packaged Electro
   assert.doesNotMatch(source, /fetch\('\/tutorial-project\.json'\)/);
 });
 
+test('desktop project import and export use portable packages instead of loose JSON', async () => {
+  const [app, ipc, browser] = await Promise.all([
+    read('App.tsx'),
+    read('electron/ipc-handlers.ts'),
+    read('components/ProjectBrowser.tsx'),
+  ]);
+
+  assert.match(app, /const handleExportProject = async \(\): Promise<boolean> => \{[\s\S]{0,160}handleExportProjectPackage\(\)/);
+  assert.match(app, /const handleImportProject = async \(e: React\.ChangeEvent<HTMLInputElement>\) => \{[\s\S]{0,160}handleImportProjectPackage\(\)/);
+  assert.doesNotMatch(app, /window\.electronAPI\.saveFile\(defaultName\)/);
+  assert.doesNotMatch(app, /window\.electronAPI\.openFile\(\[\s*\{\s*name: 'CosStage Project', extensions: \['json'\]/);
+  assert.match(ipc, /defaultName = `\$\{content\.name \|\| 'CosStage-project'\}\.zip`/);
+  assert.match(ipc, /name: '项目压缩包 \(\*\.zip\)', extensions: \['zip'\]/);
+  assert.match(ipc, /extensions: \['zip', 'choreo'\]/);
+  assert.match(browser, /导出项目压缩包/);
+});
+
+test('project reset backup prompt is localized and does not use browser confirm', async () => {
+  const app = await read('App.tsx');
+
+  assert.match(app, /type ResetProjectDialogMode = 'backup-choice' \| 'backup-failed'/);
+  assert.match(app, /const handleExportProjectPackage = async \(\): Promise<boolean>/);
+  assert.match(app, /const handleExportProject = async \(\): Promise<boolean>/);
+  assert.match(app, /const handleExportProjectJsonBackup = async \(\): Promise<boolean>/);
+  assert.match(app, /const handleExportResetBackup = async \(\): Promise<boolean>/);
+  assert.match(app, /window\.electronAPI\.writeFile\(filePath, JSON\.stringify\(projectData, null, 2\)\)/);
+  assert.match(app, /const exported = await handleExportResetBackup\(\)/);
+  assert.match(app, /resetProjectDialogMode === 'backup-choice' \? '清空前是否先导出备份？' : '备份尚未完成'/);
+  assert.match(app, /如果当前项目包无法导出，会自动改为 JSON 备份/);
+  assert.match(app, /备份文件没有成功导出/);
+  assert.match(app, /返回编辑/);
+  assert.match(app, /放弃备份并清空/);
+  assert.doesNotMatch(
+    app,
+    /Do you want to export the current project before resetting|Click OK to Export|Click Cancel to reset without exporting/
+  );
+});
+
 test('project asset protocol forwards media request headers', async () => {
   const source = await read('electron/main.ts');
   assert.match(source, /request\.headers\.get\('range'\)/);

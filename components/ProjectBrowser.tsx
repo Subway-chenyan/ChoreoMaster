@@ -327,7 +327,7 @@ export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
             onClick={onImportPackage}
             className="px-2 py-2 rounded bg-blue-900/40 hover:bg-blue-900/60 text-xs text-blue-200"
           >
-            导入项目包
+            导入项目压缩包
           </button>
           <button
             type="button"
@@ -342,7 +342,7 @@ export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
             disabled={!currentProjectId}
             className="px-2 py-2 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-xs text-slate-300"
           >
-            导出项目包
+            导出项目压缩包
           </button>
         </div>
       )}

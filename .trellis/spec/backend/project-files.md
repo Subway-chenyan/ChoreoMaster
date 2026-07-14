@@ -6,7 +6,7 @@
 
 Use this contract whenever project content references binary assets or crosses the renderer, preload, main-process, and filesystem boundaries.
 
-The live editing format is a managed directory. A portable `.choreo` file is a ZIP archive of that directory and is only created for import/export.
+The live editing format is a managed directory. A portable `.choreo` file is a ZIP archive of that directory and is only created for import/export. Desktop export defaults to a `.zip` package so users can recognize it as a compressed archive, while `.choreo` remains supported. Desktop import dialogs may also accept `.zip` files with the same archive layout.
 
 ### 2. Signatures
 
@@ -37,6 +37,8 @@ All filesystem and archive operations belong in the main process. IPC handlers m
 - prop textures: `assetPath` references
 
 Binary assets must not be embedded in IPC payloads or portable JSON as base64 after migration. The renderer receives `choreo-asset://` URLs for playback/rendering.
+
+Desktop's primary import/export controls must call `project.importPackage()` and `project.exportPackage(projectId)` so project JSON and all managed assets move together. Legacy loose JSON import is compatibility-only and must remain visually separate from the primary package path.
 
 Import always creates a new managed project ID and automatically opens that project. It never overwrites the active project.
 
@@ -91,4 +93,71 @@ document.musicAsset = asset.relativePath;
 ```
 
 The renderer uses the returned project URL, while the manifest keeps only the relative asset path.
+
+## Scenario: Reset-Time Project Backup
+
+### 1. Scope / Trigger
+
+Use this contract when the renderer offers to back up the current editor state before clearing/resetting it.
+
+### 2. Signatures
+
+```typescript
+project.exportPackage(projectId: string): Promise<string | null>;
+saveFile(defaultName: string, filters?: Electron.FileFilter[]): Promise<string | null>;
+writeFile(filePath: string, content: string): Promise<void>;
+```
+
+### 3. Contracts
+
+- Reset-time backup must be a user-confirmed step. Closing/canceling the backup dialog returns to editing and must not clear state.
+- If the editor is attached to a valid managed desktop project, try `project.exportPackage(projectId)` first so JSON and assets are preserved together.
+- If there is no current managed project ID, or the package export fails, offer a JSON backup using the current renderer `ProjectDocument` snapshot.
+- JSON backup is a fallback safety copy only; it may not include managed binary assets as files.
+- Clearing/resetting is allowed only after a backup succeeds or after the user explicitly clicks a destructive "clear without backup" action.
+
+### 4. Validation & Error Matrix
+
+| Condition | Behavior |
+| --- | --- |
+| User closes the reset backup prompt | Keep editing state; do not clear |
+| User cancels native package save dialog | Keep editing state; offer/allow fallback JSON backup |
+| Missing `currentProjectId` | Skip package export and offer JSON backup |
+| Package export throws | Surface the real error message and offer JSON backup |
+| JSON backup save path is canceled | Keep editing state; show the backup-incomplete prompt |
+| User explicitly confirms clear without backup | Clear editor state |
+
+### 5. Good / Base / Bad Cases
+
+- Good: managed project exports a `.zip`; reset then clears the editor.
+- Base: unsaved/local editor state exports a `.json`; reset then clears the editor.
+- Bad: user cancels the backup path and the editor clears anyway.
+
+### 6. Tests Required
+
+- Desktop regression asserts reset backup uses a dedicated backup function rather than the primary package export directly.
+- Desktop regression asserts JSON backup uses `saveFile(..., json filter)` plus `writeFile`.
+- Desktop regression asserts cancel/return text is non-destructive and legacy English `window.confirm` copy is absent.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```typescript
+if (window.confirm('Export before reset?')) {
+  handleExportProject();
+}
+resetProject();
+```
+
+#### Correct
+
+```typescript
+const exported = await exportResetBackup();
+if (exported) {
+  resetProject();
+} else {
+  showBackupIncompletePrompt();
+}
+```
 

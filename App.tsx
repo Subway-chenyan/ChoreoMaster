@@ -109,11 +109,17 @@ interface PendingStageBackground {
   mediaUrl?: string;
 }
 
+type ResetProjectDialogMode = 'backup-choice' | 'backup-failed';
+
 interface ProjectSaveSnapshot {
   projectId: string | null;
   document: ProjectDocument;
   state: string;
 }
+
+const getErrorMessage = (error: unknown): string => (
+  error instanceof Error ? error.message : String(error)
+);
 
 function loadImageDimensions(url: string): Promise<{ width: number; height: number }> {
   return new Promise((resolve, reject) => {
@@ -455,6 +461,8 @@ const App: React.FC = () => {
   const [isProjectSaving, setIsProjectSaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [saveSuccessVisible, setSaveSuccessVisible] = useState(false);
+  const [resetProjectDialogMode, setResetProjectDialogMode] = useState<ResetProjectDialogMode | null>(null);
+  const [isResetBackupExporting, setIsResetBackupExporting] = useState(false);
   const latestProjectSnapshotRef = useRef<ProjectSaveSnapshot | null>(null);
   const lastSavedStateRef = useRef('');
   const saveInFlightRef = useRef<Promise<boolean> | null>(null);
@@ -1550,18 +1558,21 @@ const App: React.FC = () => {
     }
   };
 
-  const handleExportProjectPackage = async () => {
+  const handleExportProjectPackage = async (): Promise<boolean> => {
     if (!window.electronAPI?.isElectron || !currentProjectId) {
-      setProjectMessages(['请先打开需要导出的项目']);
-      return;
+      setProjectMessages(['当前内容还不是已打开的桌面项目，无法导出项目压缩包。请先在项目管理中打开或创建项目。']);
+      return false;
     }
     try {
-      if (projectHasChanges && !await handleSaveProject()) return;
+      if (projectHasChanges && !await handleSaveProject()) return false;
       const exportedPath = await window.electronAPI.project.exportPackage(currentProjectId);
-      if (exportedPath) setProjectMessages([`项目包已导出：${exportedPath}`]);
+      if (!exportedPath) return false;
+      setProjectMessages([`项目包已导出：${exportedPath}`]);
+      return true;
     } catch (error) {
       console.error('Project package export failed:', error);
-      setProjectMessages(['项目包导出失败，请检查目标目录权限和磁盘空间']);
+      setProjectMessages([`项目包导出失败：${getErrorMessage(error)}`]);
+      return false;
     }
   };
 
@@ -2428,33 +2439,12 @@ const App: React.FC = () => {
 
   // --- Project Export / Import ---
 
-  const handleExportProject = async () => {
-    const projectData = {
-      version: "1.2",
-      createdAt: new Date().toISOString(),
-      name: "CosStage Project",
-      musicName,
-      performers,
-      performerGroups,
-      frames,
-      transitions,
-      audioMarkers,
-      stageConfig,
-    };
-
-    // Check if running in Electron
+  const handleExportProject = async (): Promise<boolean> => {
     if (window.electronAPI?.isElectron) {
-      try {
-        const defaultName = `CosStage-project-${new Date().toISOString().slice(0, 10)}.json`;
-        const filePath = await window.electronAPI.saveFile(defaultName);
-        if (filePath) {
-          await window.electronAPI.writeFile(filePath, JSON.stringify(projectData, null, 2));
-          return;
-        }
-      } catch (error) {
-        console.error('Electron export failed, falling back to web:', error);
-      }
+      return handleExportProjectPackage();
     }
+
+    const projectData = buildProjectDocument('CosStage Project');
 
     // Fallback to web version (blob download)
     const blob = new Blob([JSON.stringify(projectData, null, 2)], { type: 'application/json' });
@@ -2466,28 +2456,58 @@ const App: React.FC = () => {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    return true;
   };
 
-  const handleResetProject = () => {
-    const hasData = audioMarkers.length > 0
-      || performers.length > 0
-      || frames.length > 1
-      || (frames[0] && Object.keys(frames[0].positions).length > 0);
+  const handleExportProjectJsonBackup = async (): Promise<boolean> => {
+    const projectData = buildProjectDocument('CosStage Project');
+    const fileName = `CosStage-backup-${new Date().toISOString().slice(0, 10)}.json`;
 
-    if (hasData) {
-      // Logic: Prompt to export. 
-      // If Confirm -> Export -> Reset.
-      // If Cancel -> No Export -> Reset.
-      if (window.confirm("Do you want to export the current project before resetting?\n\nClick OK to Export.\nClick Cancel to reset without exporting.")) {
-        try {
-          handleExportProject();
-        } catch (e) {
-          console.error("Export failed", e);
-        }
+    if (window.electronAPI?.isElectron) {
+      try {
+        const filePath = await window.electronAPI.saveFile(fileName, [
+          { name: 'CosStage JSON 备份 (*.json)', extensions: ['json'] },
+          { name: 'All Files', extensions: ['*'] },
+        ]);
+        if (!filePath) return false;
+        await window.electronAPI.writeFile(filePath, JSON.stringify(projectData, null, 2));
+        setProjectMessages([`JSON 备份已导出：${filePath}`]);
+        return true;
+      } catch (error) {
+        console.error('Project JSON backup export failed:', error);
+        setProjectMessages([`JSON 备份导出失败：${getErrorMessage(error)}`]);
+        return false;
       }
     }
 
-    // Perform Reset
+    const blob = new Blob([JSON.stringify(projectData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    return true;
+  };
+
+  const handleExportResetBackup = async (): Promise<boolean> => {
+    if (!window.electronAPI?.isElectron) return handleExportProjectJsonBackup();
+
+    if (!currentProjectId) {
+      setProjectMessages(['当前内容还没有关联到桌面项目，将改为导出 JSON 备份。']);
+      return handleExportProjectJsonBackup();
+    }
+
+    const exportedPackage = await handleExportProjectPackage();
+    if (exportedPackage) return true;
+
+    setProjectMessages(['项目压缩包没有导出成功。为避免清空前丢失内容，请先导出 JSON 备份。']);
+    return handleExportProjectJsonBackup();
+  };
+
+  const performResetProject = () => {
     const newFrameId = generateId();
     setPerformers([]);
     setPerformerGroups([]);
@@ -2515,59 +2535,55 @@ const App: React.FC = () => {
     setProjectHasChanges(false);
   };
 
-  const handleImportProject = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    // Check if running in Electron
-    if (window.electronAPI?.isElectron) {
-      try {
-        const filePath = await window.electronAPI.openFile([
-          { name: 'CosStage Project', extensions: ['json'] },
-          { name: 'JSON Files', extensions: ['json'] },
-        ]);
+  const handleResetProject = () => {
+    const hasData = audioMarkers.length > 0
+      || performers.length > 0
+      || frames.length > 1
+      || (frames[0] && Object.keys(frames[0].positions).length > 0);
 
-        if (filePath) {
-          const content = await window.electronAPI.readFile(filePath);
-          const json = JSON.parse(content);
+    if (!hasData) {
+      performResetProject();
+      return;
+    }
 
-          // Basic validation
-          if (!json.performers || !Array.isArray(json.performers)) throw new Error("Invalid project file: missing performers");
-          if (!json.frames || !Array.isArray(json.frames)) throw new Error("Invalid project file: missing frames");
+    setResetProjectDialogMode('backup-choice');
+  };
 
-          setPerformers(normalizePerformers(json.performers));
-          setPerformerGroups(json.performerGroups || []);
-          setFrames(normalizeFrames(json.frames));
-          setTransitions(normalizeTransitions(json.transitions));
-          setAudioMarkers(normalizeAudioMarkers(json.audioMarkers));
-          setMusicName(json.musicName || null);
-          setCurrentProjectId(null);
-          setCurrentProjectPath(null);
-          setLocalProjectClipboardKey(createLocalProjectClipboardKey());
+  const handleResetWithoutBackup = () => {
+    if (isResetBackupExporting) return;
+    setResetProjectDialogMode(null);
+    performResetProject();
+  };
 
-          // 恢复舞台配置
-          if (json.stageConfig) {
-            setStageConfig(json.stageConfig);
-            if (json.stageConfig.ledContent?.value) {
-              setMediaCache({});
-            }
-          }
+  const handleCancelResetProject = () => {
+    if (isResetBackupExporting) return;
+    setResetProjectDialogMode(null);
+  };
 
-          // Reset Playback
-          setCurrentTime(0);
-          setAudioBuffer(null);
-          setMusicUrl(null);
-          setSelectedPerformerIds([]);
-          setSelectedTransitionId(null);
-          setSelectedTransitionPerformerId(null);
-
-          if (json.frames.length > 0) {
-            setCurrentFrameId(json.frames[0].id);
-          }
-
-          alert(`Project loaded successfully. Please re-import audio file "${json.musicName || 'if needed'}"`);
-          return;
-        }
-      } catch (error) {
-        console.error('Electron import failed, falling back to web:', error);
+  const handleResetWithBackup = async () => {
+    if (isResetBackupExporting) return;
+    setIsResetBackupExporting(true);
+    try {
+      const exported = await handleExportResetBackup();
+      if (exported) {
+        setResetProjectDialogMode(null);
+        performResetProject();
+      } else {
+        setResetProjectDialogMode('backup-failed');
       }
+    } catch (error) {
+      console.error('Project backup before reset failed:', error);
+      setProjectMessages([`项目备份失败：${getErrorMessage(error)}`]);
+      setResetProjectDialogMode('backup-failed');
+    } finally {
+      setIsResetBackupExporting(false);
+    }
+  };
+
+  const handleImportProject = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (window.electronAPI?.isElectron) {
+      await handleImportProjectPackage();
+      return;
     }
 
     // Fallback to web version (file input)
@@ -4299,6 +4315,71 @@ const App: React.FC = () => {
         onConfirm={handleConfirmStageBackground}
         onCancel={() => setPendingStageBackground(null)}
       />
+      {resetProjectDialogMode && (
+        <div className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reset-project-dialog-title"
+            className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-6 text-slate-100 shadow-2xl"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-300">清空项目</p>
+                <h2 id="reset-project-dialog-title" className="mt-2 text-xl font-bold">
+                  {resetProjectDialogMode === 'backup-choice' ? '清空前是否先导出备份？' : '备份尚未完成'}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={handleCancelResetProject}
+                disabled={isResetBackupExporting}
+                className="rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label="取消清空项目"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            {resetProjectDialogMode === 'backup-choice' ? (
+              <p className="mt-4 text-sm leading-6 text-slate-300">
+                当前项目已有内容。建议先导出备份；如果当前项目包无法导出，会自动改为 JSON 备份。点击“返回编辑”不会清空任何内容。
+              </p>
+            ) : (
+              <p className="mt-4 text-sm leading-6 text-slate-300">
+                备份文件没有成功导出，可能是你取消了保存位置，或目标目录权限/磁盘空间异常。点击“返回编辑”会保留当前项目，只有点击红色按钮才会清空。
+              </p>
+            )}
+            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={handleCancelResetProject}
+                disabled={isResetBackupExporting}
+                className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                返回编辑
+              </button>
+              <button
+                type="button"
+                onClick={handleResetWithoutBackup}
+                disabled={isResetBackupExporting}
+                className="rounded-lg border border-red-500/50 px-4 py-2 text-sm font-medium text-red-200 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {resetProjectDialogMode === 'backup-choice' ? '不备份，直接清空' : '放弃备份并清空'}
+              </button>
+              {resetProjectDialogMode === 'backup-choice' && (
+                <button
+                  type="button"
+                  onClick={handleResetWithBackup}
+                  disabled={isResetBackupExporting}
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:cursor-wait disabled:opacity-70"
+                >
+                  {isResetBackupExporting ? '正在导出备份…' : '先导出备份'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       {showWebSaveReminder && (
         <div className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
           <div
