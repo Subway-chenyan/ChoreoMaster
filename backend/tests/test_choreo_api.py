@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from app.auth import _allowed_agent_keys
 from app.main import app
 
 
@@ -11,6 +12,13 @@ def test_health():
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_dev_member_token_is_disabled_without_an_explicit_opt_in(monkeypatch):
+    monkeypatch.delenv("AGENT_ACCESS_KEYS", raising=False)
+    monkeypatch.delenv("ALLOW_DEV_MEMBER_TOKEN", raising=False)
+
+    assert _allowed_agent_keys() == []
 
 
 def test_agent_access_key_validation(monkeypatch):
@@ -42,7 +50,8 @@ def test_choreo_plan_requires_member_credential():
     assert response.status_code == 401
 
 
-def test_debug_endpoint_returns_agent_steps():
+def test_debug_endpoint_returns_agent_steps(monkeypatch):
+    monkeypatch.setenv("ALLOW_DEV_MEMBER_TOKEN", "true")
     response = client.post(
         "/api/agent/choreo/debug",
         headers={"Authorization": "Bearer dev-member-token"},
@@ -58,7 +67,8 @@ def test_debug_endpoint_returns_agent_steps():
     assert len(body["steps"]) == 6
 
 
-def test_chinese_initialization_sample_over_http():
+def test_chinese_initialization_sample_over_http(monkeypatch):
+    monkeypatch.setenv("ALLOW_DEV_MEMBER_TOKEN", "true")
     response = client.post(
         "/api/ai/choreo-plan",
         headers={"Authorization": "Bearer dev-member-token"},

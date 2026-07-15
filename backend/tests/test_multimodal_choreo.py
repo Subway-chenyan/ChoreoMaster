@@ -25,6 +25,11 @@ from app.multimodal_models import (
 )
 
 
+@pytest.fixture(autouse=True)
+def enable_dev_member_token_for_multimodal_tests(monkeypatch):
+    monkeypatch.setenv("ALLOW_DEV_MEMBER_TOKEN", "true")
+
+
 class FakeGeminiProvider:
     flash_model = "gemini-2.5-flash"
     pro_model = "gemini-2.5-pro"
@@ -335,6 +340,10 @@ def test_multimodal_session_interrupts_resume_and_creates_draft(
         "get_multimodal_provider",
         lambda: FakeGeminiProvider(),
     )
+    monkeypatch.setattr(
+        "app.main.validate_multimodal_configuration",
+        lambda: None,
+    )
     audio = tmp_path / "music.wav"
     sketch = tmp_path / "sketch.jpg"
     audio.write_bytes(b"fake-audio")
@@ -568,3 +577,32 @@ def test_multimodal_session_reports_missing_gemini_key(monkeypatch, tmp_path):
 
     assert response.status_code == 400
     assert "GEMINI_API_KEY" in response.json()["detail"]
+
+
+def test_multimodal_upload_rejects_unsupported_file_suffix(monkeypatch):
+    monkeypatch.setattr("app.main.validate_multimodal_configuration", lambda: None)
+
+    response = TestClient(app).post(
+        "/api/choreo/sessions",
+        headers={"Authorization": "Bearer dev-member-token"},
+        data={"prompt": "设计队形"},
+        files={"audio": ("music.exe", b"fake-audio", "audio/wav")},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Unsupported upload file type."
+
+
+def test_multimodal_upload_rejects_files_over_the_size_limit(monkeypatch):
+    monkeypatch.setattr("app.main.validate_multimodal_configuration", lambda: None)
+    monkeypatch.setattr("app.main.MAX_UPLOAD_BYTES", 4)
+
+    response = TestClient(app).post(
+        "/api/choreo/sessions",
+        headers={"Authorization": "Bearer dev-member-token"},
+        data={"prompt": "设计队形"},
+        files={"audio": ("music.wav", b"12345", "audio/wav")},
+    )
+
+    assert response.status_code == 413
+    assert response.json()["detail"] == "Upload exceeds the 50 MB limit."

@@ -30,6 +30,10 @@ from app.multimodal_models import (
 )
 
 app = FastAPI(title="CosStage AI Backend")
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+UPLOAD_CHUNK_BYTES = 1024 * 1024
+ALLOWED_AUDIO_SUFFIXES = {".aac", ".flac", ".m4a", ".mp3", ".ogg", ".wav", ".webm"}
+ALLOWED_IMAGE_SUFFIXES = {".gif", ".jpeg", ".jpg", ".png", ".webp"}
 
 app.add_middleware(
     CORSMiddleware,
@@ -79,12 +83,30 @@ async def create_multimodal_test_session(
     return get_test_session(session_id)
 
 
-async def _save_upload(upload: UploadFile, directory: Path, fallback: str) -> str:
+async def _save_upload(
+    upload: UploadFile,
+    directory: Path,
+    fallback: str,
+    allowed_suffixes: set[str],
+) -> str:
     suffix = Path(upload.filename or "").suffix or fallback
+    suffix = suffix.lower()
+    if suffix not in allowed_suffixes:
+        raise HTTPException(status_code=400, detail="Unsupported upload file type.")
     target = directory / f"{uuid.uuid4().hex}{suffix}"
-    with target.open("wb") as output:
-        shutil.copyfileobj(upload.file, output)
-    await upload.close()
+    total_bytes = 0
+    try:
+        with target.open("wb") as output:
+            while chunk := await upload.read(UPLOAD_CHUNK_BYTES):
+                total_bytes += len(chunk)
+                if total_bytes > MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail="Upload exceeds the 50 MB limit.")
+                output.write(chunk)
+    finally:
+        await upload.close()
+    if total_bytes == 0:
+        target.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
     return str(target)
 
 
@@ -117,8 +139,8 @@ async def create_multimodal_session(
     )
     upload_dir.mkdir(parents=True, exist_ok=True)
     try:
-        audio_path = await _save_upload(audio, upload_dir, ".audio") if audio else None
-        sketch_path = await _save_upload(sketch, upload_dir, ".jpg") if sketch else None
+        audio_path = await _save_upload(audio, upload_dir, ".audio", ALLOWED_AUDIO_SUFFIXES) if audio else None
+        sketch_path = await _save_upload(sketch, upload_dir, ".jpg", ALLOWED_IMAGE_SUFFIXES) if sketch else None
         request = TestSessionCreateRequest(
             audioPath=audio_path,
             sketchPath=sketch_path,

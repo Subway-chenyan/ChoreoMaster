@@ -10,7 +10,7 @@ def _allowed_agent_keys() -> list[str]:
         for key in os.getenv("AGENT_ACCESS_KEYS", "").split(",")
         if key.strip()
     ]
-    if os.getenv("ALLOW_DEV_MEMBER_TOKEN", "true").lower() == "true":
+    if os.getenv("ALLOW_DEV_MEMBER_TOKEN", "false").lower() == "true":
         configured.append("dev-member-token")
     return configured
 
