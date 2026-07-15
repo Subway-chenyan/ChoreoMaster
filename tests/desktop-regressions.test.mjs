@@ -432,3 +432,31 @@ test('cross-project clipboard carries entities, scene state, and portable assets
   assert.match(helper, /makePerformersPortable/);
   assert.match(help, /跨项目/);
 });
+
+test('product guide renders release history with explicit async states and no web bundled fallback', async () => {
+  const [guide, versions, releaseHistory] = await Promise.all([
+    read('components/ProductGuide.tsx'),
+    read('components/ProductGuideVersions.tsx'),
+    read('utils/release-history.ts'),
+  ]);
+
+  assert.match(guide, /import \{ ProductGuideVersions \} from '\.\/ProductGuideVersions'/);
+  assert.match(guide, /scrollToSection\('operations'\)[\s\S]*scrollToSection\('versions'\)[\s\S]*scrollToSection\('terms'\)/);
+  assert.match(guide, /<ProductGuideOperations \/>[\s\S]*<ProductGuideVersions \/>[\s\S]*<section id="terms"/);
+  assert.match(versions, /view\.status === 'loading'/);
+  assert.match(versions, /view\.status === 'error'/);
+  assert.match(versions, /view\.status === 'success'/);
+  assert.match(versions, /let active = true/);
+  assert.match(versions, /return \(\) => \{ active = false; \}/);
+  assert.match(versions, /aria-label="版本更新"/);
+  assert.match(versions, /view\.data\.history\.latestVisibleVersion &&/);
+  assert.doesNotMatch(versions, /view\.data\.history\.currentVersion/);
+  assert.match(versions, /shouldStripDedicatedMajorSections\(release, change\)/);
+  assert.match(versions, /ordinaryReleaseChangeText/);
+  assert.match(versions, /重大变化/);
+  assert.match(versions, /迁移说明/);
+
+  const webBranch = releaseHistory.slice(releaseHistory.indexOf('let response: ReleaseHistoryResponse'));
+  assert.match(webBranch, /fetchImpl\(PUBLISHED_RELEASES_URL, \{ cache: 'no-store' \}\)/);
+  assert.doesNotMatch(webBranch, /bundledHistory/);
+});

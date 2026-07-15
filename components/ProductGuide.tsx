@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { ProductGuideOperations } from './ProductGuideOperations';
+import { ProductGuideVersions } from './ProductGuideVersions';
 
 interface ProductGuideProps {
   onClose: () => void;
@@ -97,6 +98,7 @@ export const ProductGuide: React.FC<ProductGuideProps> = ({ onClose }) => {
   const panelClass = isDark
     ? 'border-slate-800 bg-slate-900/70'
     : 'border-slate-200 bg-white/80';
+  const navClass = `focus-ring whitespace-nowrap rounded-lg px-3 py-2 transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-200'}`;
   const scrollToSection = (sectionId: string) => {
     const container = scrollContainerRef.current;
     const section = document.getElementById(sectionId);
@@ -125,19 +127,22 @@ export const ProductGuide: React.FC<ProductGuideProps> = ({ onClose }) => {
             CosStage
           </button>
           <nav className="product-guide__nav flex items-center gap-1 overflow-x-auto text-sm">
-            <button type="button" onClick={() => scrollToSection('overview')} className={`whitespace-nowrap rounded-lg px-3 py-2 transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-200'}`}>
+            <button type="button" onClick={() => scrollToSection('overview')} className={navClass}>
               产品介绍
             </button>
-            <button type="button" onClick={() => scrollToSection('features')} className={`whitespace-nowrap rounded-lg px-3 py-2 transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-200'}`}>
+            <button type="button" onClick={() => scrollToSection('features')} className={navClass}>
               功能速览
             </button>
-            <button type="button" onClick={() => scrollToSection('guide')} className={`whitespace-nowrap rounded-lg px-3 py-2 transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-200'}`}>
+            <button type="button" onClick={() => scrollToSection('guide')} className={navClass}>
               使用说明
             </button>
-            <button type="button" onClick={() => scrollToSection('operations')} className={`whitespace-nowrap rounded-lg px-3 py-2 transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-200'}`}>
+            <button type="button" onClick={() => scrollToSection('operations')} className={navClass}>
               详细操作
             </button>
-            <button type="button" onClick={() => scrollToSection('terms')} className={`whitespace-nowrap rounded-lg px-3 py-2 transition-colors ${isDark ? 'hover:bg-slate-800' : 'hover:bg-slate-200'}`}>
+            <button type="button" onClick={() => scrollToSection('versions')} className={navClass}>
+              版本更新
+            </button>
+            <button type="button" onClick={() => scrollToSection('terms')} className={navClass}>
               权益声明
             </button>
           </nav>
@@ -284,6 +289,8 @@ export const ProductGuide: React.FC<ProductGuideProps> = ({ onClose }) => {
         </section>
 
         <ProductGuideOperations />
+
+        <ProductGuideVersions />
 
         <section id="terms" className={`scroll-mt-16 border-t ${lineClass}`}>
           <div className="mx-auto max-w-7xl px-4 py-20 sm:px-6 lg:px-8">
