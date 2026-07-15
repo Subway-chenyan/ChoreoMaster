@@ -97,7 +97,6 @@ function extractSection(body, heading) {
   const escapedHeading = heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const match = new RegExp(
     `(?:^|\\r?\\n)##[ \\t]+${escapedHeading}[ \\t]*\\r?\\n([\\s\\S]*?)(?=\\r?\\n##[ \\t]+|$)`,
-    'm',
   ).exec(body);
   return match?.[1].trim() ?? '';
 }
