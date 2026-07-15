@@ -14,46 +14,54 @@ import {
   Check,
   X,
   GraduationCap,
+  History,
 } from 'lucide-react';
-
-interface ProjectMeta {
-  id: string;
-  name: string;
-  createdAt: string;
-  updatedAt: string;
-  thumbnail?: string;
-}
+import type { ProjectMeta, ProjectRecoverySnapshot, ProjectTemplateData } from '../types';
 
 interface ProjectBrowserProps {
   currentProjectId: string | null;
   onLoadProject: (projectId: string) => void;
   onCreateProject: (name: string) => Promise<string>;
-  onNewProject: () => void;
-  onCreateFromTemplate?: (templateData: any) => Promise<string>;
-  onLoadTemplate?: (templateData: any) => void;
+  onDeletedCurrentProject: () => void;
+  onCreateFromTemplate?: (templateData: ProjectTemplateData) => Promise<string>;
+  onLoadTemplate?: (templateData: ProjectTemplateData) => void;
   onImportPackage?: () => void;
+  onImportChoreography?: () => void;
   onImportLegacy?: () => void;
   onExportPackage?: () => void;
+  onExportChoreography?: () => void;
+  onRestoreRecovery?: (snapshotId: string) => Promise<boolean>;
 }
 
 export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
   currentProjectId,
   onLoadProject,
   onCreateProject,
-  onNewProject,
+  onDeletedCurrentProject,
   onCreateFromTemplate,
   onLoadTemplate,
   onImportPackage,
+  onImportChoreography,
   onImportLegacy,
   onExportPackage,
+  onExportChoreography,
+  onRestoreRecovery,
 }) => {
   const [projects, setProjects] = useState<ProjectMeta[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [showNewProjectForm, setShowNewProjectForm] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
+  const [isCreatingProject, setIsCreatingProject] = useState(false);
+  const [isUsingTemplate, setIsUsingTemplate] = useState(false);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editingProjectName, setEditingProjectName] = useState('');
+  const [recoverySnapshots, setRecoverySnapshots] = useState<ProjectRecoverySnapshot[]>([]);
+  const [showRecovery, setShowRecovery] = useState(false);
+  const [recoveryLoading, setRecoveryLoading] = useState(false);
+  const [pendingDeleteProjectId, setPendingDeleteProjectId] = useState<string | null>(null);
+  const [isDeletingProject, setIsDeletingProject] = useState(false);
+  const [restoringSnapshotId, setRestoringSnapshotId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{
     show: boolean;
     x: number;
@@ -78,9 +86,22 @@ export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
     }
   }, [isElectron]);
 
+  const loadRecoverySnapshots = useCallback(async () => {
+    if (!isElectron) return;
+    setRecoveryLoading(true);
+    try {
+      setRecoverySnapshots(await window.electronAPI.project.listRecoverySnapshots());
+    } catch (error) {
+      console.error('Failed to load project recovery snapshots:', error);
+    } finally {
+      setRecoveryLoading(false);
+    }
+  }, [isElectron]);
+
   useEffect(() => {
     loadProjects();
-  }, [loadProjects, currentProjectId]);
+    loadRecoverySnapshots();
+  }, [loadProjects, loadRecoverySnapshots, currentProjectId]);
 
   // Close context menu on click outside
   useEffect(() => {
@@ -92,8 +113,8 @@ export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
   }, [contextMenu.show]);
 
   const handleCreateProject = async () => {
-    if (!newProjectName.trim()) return;
-    
+    if (!newProjectName.trim() || isCreatingProject) return;
+    setIsCreatingProject(true);
     try {
       const projectId = await onCreateProject(newProjectName.trim());
       if (!projectId) return;
@@ -102,20 +123,30 @@ export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
       await loadProjects();
     } catch (error) {
       console.error('Failed to create project:', error);
+    } finally {
+      setIsCreatingProject(false);
     }
   };
 
-  const handleDeleteProject = async (projectId: string) => {
-    if (!window.confirm('确定要删除此项目吗？此操作不可撤销。')) return;
-    
+  const handleDeleteProject = (projectId: string): void => {
+    setPendingDeleteProjectId(projectId);
+  };
+
+  const confirmDeleteProject = async (): Promise<void> => {
+    const projectId = pendingDeleteProjectId;
+    if (!projectId || isDeletingProject) return;
+    setIsDeletingProject(true);
     try {
       await window.electronAPI.project.delete(projectId);
-      await loadProjects();
+      setPendingDeleteProjectId(null);
+      await Promise.all([loadProjects(), loadRecoverySnapshots()]);
       if (currentProjectId === projectId) {
-        onNewProject();
+        onDeletedCurrentProject();
       }
     } catch (error) {
       console.error('Failed to delete project:', error);
+    } finally {
+      setIsDeletingProject(false);
     }
   };
 
@@ -158,6 +189,8 @@ export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
   };
 
   const handleUseTemplate = async () => {
+    if (isUsingTemplate) return;
+    setIsUsingTemplate(true);
     try {
       const tutorialUrl = new URL('./tutorial-project.json', window.location.href);
       const resp = await fetch(tutorialUrl);
@@ -175,6 +208,8 @@ export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
       }
     } catch (error) {
       console.error('Failed to load template:', error);
+    } finally {
+      setIsUsingTemplate(false);
     }
   };
 
@@ -216,7 +251,8 @@ export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
             <div className="text-xs text-slate-500 uppercase tracking-wider mb-2">快速开始</div>
             <button
               onClick={handleUseTemplate}
-              className="w-full flex items-center gap-3 p-3 rounded-lg border border-emerald-700/50 bg-emerald-900/20 hover:bg-emerald-900/40 transition-colors group"
+              disabled={isUsingTemplate}
+              className="w-full flex items-center gap-3 p-3 rounded-lg border border-emerald-700/50 bg-emerald-900/20 hover:bg-emerald-900/40 disabled:opacity-50 transition-colors group"
             >
               <div className="p-2 rounded-lg bg-emerald-600/20 text-emerald-400 group-hover:bg-emerald-600/30 transition-colors">
                 <GraduationCap size={18} />
@@ -281,6 +317,7 @@ export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
             type="text"
             placeholder="项目名称"
             value={newProjectName}
+            disabled={isCreatingProject}
             onChange={(e) => setNewProjectName(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') handleCreateProject();
@@ -295,9 +332,10 @@ export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
           <div className="flex gap-2">
             <button
               onClick={handleCreateProject}
-              className="flex-1 bg-green-600 hover:bg-green-500 px-3 py-1.5 rounded text-white text-xs font-medium"
+              disabled={isCreatingProject}
+              className="flex-1 bg-green-600 hover:bg-green-500 disabled:opacity-50 px-3 py-1.5 rounded text-white text-xs font-medium"
             >
-              创建
+              {isCreatingProject ? '正在创建…' : '创建'}
             </button>
             <button
               onClick={() => {
@@ -347,13 +385,80 @@ export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
         </div>
       )}
 
+      {isElectron && (
+        <div className="mb-3 space-y-2">
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={onImportChoreography}
+              className="px-2 py-2 rounded bg-emerald-900/40 hover:bg-emerald-900/60 text-xs text-emerald-200"
+            >
+              导入编排 JSON
+            </button>
+            <button
+              type="button"
+              onClick={onExportChoreography}
+              disabled={!currentProjectId}
+              className="px-2 py-2 rounded bg-emerald-900/40 hover:bg-emerald-900/60 disabled:opacity-40 text-xs text-emerald-200"
+            >
+              导出编排 JSON
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setShowRecovery((current) => !current);
+              void loadRecoverySnapshots();
+            }}
+            className="w-full px-2 py-2 rounded bg-amber-900/30 hover:bg-amber-900/50 text-xs text-amber-200 flex items-center justify-center gap-2"
+          >
+            <History size={13} /> 项目恢复（{recoverySnapshots.length}）
+          </button>
+          {showRecovery && (
+            <div className="max-h-48 overflow-y-auto rounded border border-amber-800/40 bg-slate-950/60 p-2 space-y-1">
+              {recoveryLoading ? (
+                <div className="py-3 text-center text-xs text-slate-500">正在加载恢复版本…</div>
+              ) : recoverySnapshots.length === 0 ? (
+                <div className="py-3 text-center text-xs text-slate-500">暂无可恢复版本</div>
+              ) : recoverySnapshots.map((snapshot) => (
+                <button
+                  key={snapshot.id}
+                  type="button"
+                  onClick={async () => {
+                    if (!onRestoreRecovery || restoringSnapshotId) return;
+                    setRestoringSnapshotId(snapshot.id);
+                    try {
+                      const restored = await onRestoreRecovery(snapshot.id);
+                      if (restored) {
+                        setShowRecovery(false);
+                        await Promise.all([loadProjects(), loadRecoverySnapshots()]);
+                      }
+                    } finally {
+                      setRestoringSnapshotId(null);
+                    }
+                  }}
+                  disabled={restoringSnapshotId !== null}
+                  className="w-full rounded px-2 py-2 text-left hover:bg-slate-800 disabled:opacity-50"
+                >
+                  <div className="truncate text-xs text-slate-200">{snapshot.projectName}</div>
+                  <div className="text-[10px] text-slate-500">
+                    {new Date(snapshot.createdAt).toLocaleString('zh-CN')} · 恢复为新项目
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Template Section */}
       {(onCreateFromTemplate || onLoadTemplate) && (
         <div className="mb-3">
           <div className="text-xs text-slate-500 uppercase tracking-wider mb-2">快速开始</div>
           <button
             onClick={handleUseTemplate}
-            className="w-full flex items-center gap-3 p-3 rounded-lg border border-emerald-700/50 bg-emerald-900/20 hover:bg-emerald-900/40 transition-colors group"
+            disabled={isUsingTemplate}
+            className="w-full flex items-center gap-3 p-3 rounded-lg border border-emerald-700/50 bg-emerald-900/20 hover:bg-emerald-900/40 disabled:opacity-50 transition-colors group"
           >
             <div className="p-2 rounded-lg bg-emerald-600/20 text-emerald-400 group-hover:bg-emerald-600/30 transition-colors">
               <GraduationCap size={18} />
@@ -450,6 +555,44 @@ export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
           ))
         )}
       </div>
+
+      {pendingDeleteProjectId && (
+        <div className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-project-dialog-title"
+            onKeyDown={(event) => {
+              if (event.key === 'Escape' && !isDeletingProject) setPendingDeleteProjectId(null);
+            }}
+            className="w-full max-w-md rounded-2xl border border-red-500/30 bg-slate-900 p-5 text-white shadow-2xl"
+          >
+            <h2 id="delete-project-dialog-title" className="text-lg font-bold">删除项目？</h2>
+            <p className="mt-3 text-sm leading-6 text-slate-300">
+              将永久删除“{projects.find((project) => project.id === pendingDeleteProjectId)?.name ?? '未命名项目'}”及其项目文件。此操作不可撤销。
+            </p>
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setPendingDeleteProjectId(null)}
+                disabled={isDeletingProject}
+                autoFocus
+                className="rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmDeleteProject()}
+                disabled={isDeletingProject}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-50"
+              >
+                {isDeletingProject ? '正在删除…' : '确认删除'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Context Menu */}
       {contextMenu.show && contextMenu.projectId && (

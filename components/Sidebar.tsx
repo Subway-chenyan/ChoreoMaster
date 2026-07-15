@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Performer, Frame, PerformerShape, PerformerGroup, PerformerType, PropCategory, AIConfig, AIChoreoPlan } from '../types';
+import { Performer, Frame, PerformerShape, PerformerGroup, PerformerType, PropCategory, AIConfig, AIChoreoPlan, ProjectTemplateData } from '../types';
 import { Plus, Users, Trash2, Download, Grid, Music, Sparkles, Wand2, Film, Copy, Search, Settings, Scaling, Upload, FilePlus, Circle, Square, Triangle, UserCheck, UserX, Eye, EyeOff, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreVertical, Palette, Edit2, Box, Library, Save, StickyNote } from 'lucide-react';
 import { PRESET_SHAPES, DEFAULT_COLORS } from '../constants';
 import { StageConfig } from '../types';
@@ -29,8 +29,11 @@ interface SidebarProps {
     onExport: () => void;
     onImportProject: (e?: React.ChangeEvent<HTMLInputElement>) => void;
     onImportProjectPackage?: () => void;
+    onImportChoreography?: () => void;
     onImportLegacyProject?: () => void;
     onExportProjectPackage?: () => void;
+    onExportChoreography?: () => void;
+    onRestoreRecovery?: (snapshotId: string) => Promise<boolean>;
     selectedPerformerIds: string[];
     onSelectionChange: (ids: string[]) => void;
     musicName: string | null;
@@ -40,6 +43,7 @@ interface SidebarProps {
     onDuplicateFrame: (id: string) => void;
     onReorderFrame: (id: string, direction: 'up' | 'down') => void;
     onResetProject: () => void;
+    onDeletedCurrentProject: () => void;
     onRenameFrame: (id: string, name?: string) => void;
     widthPx?: number;
     isCompactLayout?: boolean;
@@ -66,8 +70,8 @@ interface SidebarProps {
     currentProjectId?: string | null;
     onLoadProject?: (projectId: string) => void;
     onCreateProject?: (name: string) => Promise<string>;
-    onCreateFromTemplate?: (templateData: any) => Promise<string>;
-    onLoadTemplate?: (templateData: any) => void;
+    onCreateFromTemplate?: (templateData: ProjectTemplateData) => Promise<string>;
+    onLoadTemplate?: (templateData: ProjectTemplateData) => void;
     onSaveProject?: () => Promise<boolean>;
     projectHasChanges?: boolean;
     isProjectSaving?: boolean;
@@ -177,8 +181,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
     onExport,
     onImportProject,
     onImportProjectPackage,
+    onImportChoreography,
     onImportLegacyProject,
     onExportProjectPackage,
+    onExportChoreography,
+    onRestoreRecovery,
     selectedPerformerIds,
     onSelectionChange,
     musicName,
@@ -188,6 +195,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     onDuplicateFrame,
     onReorderFrame,
     onResetProject,
+    onDeletedCurrentProject,
     onRenameFrame,
     widthPx = 320,
     isCompactLayout = false,
@@ -253,6 +261,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const [newGroupColor, setNewGroupColor] = useState(DEFAULT_COLORS[0]);
     const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
     const [editingGroupName, setEditingGroupName] = useState<string>('');
+    const [pendingDeleteGroupId, setPendingDeleteGroupId] = useState<string | null>(null);
     const [contextMenuState, setContextMenuState] = useState<{
         show: boolean;
         x: number;
@@ -661,10 +670,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             onCreateProject={onCreateProject || (async () => '')}
                             onCreateFromTemplate={onCreateFromTemplate}
                             onLoadTemplate={onLoadTemplate}
-                            onNewProject={onResetProject}
+                            onDeletedCurrentProject={onDeletedCurrentProject}
                             onImportPackage={onImportProjectPackage}
+                            onImportChoreography={onImportChoreography}
                             onImportLegacy={onImportLegacyProject}
                             onExportPackage={onExportProjectPackage}
+                            onExportChoreography={onExportChoreography}
+                            onRestoreRecovery={onRestoreRecovery}
                         />
                         
                         {/* Project Import/Export Section */}
@@ -1465,9 +1477,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 <div className="h-px bg-slate-700 my-1"></div>
                                 <button
                                     onClick={() => {
-                                        if (contextMenuState.groupId && window.confirm('确定要删除此分组吗？演员将移至未分组。')) {
-                                            onRemoveGroup(contextMenuState.groupId);
-                                        }
+                                        setPendingDeleteGroupId(contextMenuState.groupId);
                                         closeContextMenu();
                                     }}
                                     className="w-full px-3 py-2 text-left text-sm text-red-400 hover:bg-slate-700"
@@ -1476,6 +1486,46 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 </button>
                             </>
                         )}
+                    </div>,
+                    document.body
+                )}
+
+                {pendingDeleteGroupId && createPortal(
+                    <div className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+                        <div
+                            role="dialog"
+                            aria-modal="true"
+                            aria-labelledby="delete-group-dialog-title"
+                            onKeyDown={(event) => {
+                                if (event.key === 'Escape') setPendingDeleteGroupId(null);
+                            }}
+                            className="w-full max-w-md rounded-2xl border border-red-500/30 bg-slate-900 p-5 text-white shadow-2xl"
+                        >
+                            <h2 id="delete-group-dialog-title" className="text-lg font-bold">删除分组？</h2>
+                            <p className="mt-3 text-sm leading-6 text-slate-300">
+                                删除“{performerGroups.find((group) => group.id === pendingDeleteGroupId)?.name ?? '未命名分组'}”后，组内演员或道具将移至未分组。
+                            </p>
+                            <div className="mt-5 flex justify-end gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setPendingDeleteGroupId(null)}
+                                    autoFocus
+                                    className="rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-200 hover:bg-slate-800"
+                                >
+                                    取消
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        onRemoveGroup(pendingDeleteGroupId);
+                                        setPendingDeleteGroupId(null);
+                                    }}
+                                    className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500"
+                                >
+                                    确认删除
+                                </button>
+                            </div>
+                        </div>
                     </div>,
                     document.body
                 )}

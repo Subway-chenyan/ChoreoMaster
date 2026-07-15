@@ -17,8 +17,8 @@ test('desktop project import and export use portable packages instead of loose J
     read('components/ProjectBrowser.tsx'),
   ]);
 
-  assert.match(app, /const handleExportProject = async \(\): Promise<boolean> => \{[\s\S]{0,160}handleExportProjectPackage\(\)/);
-  assert.match(app, /const handleImportProject = async \(e: React\.ChangeEvent<HTMLInputElement>\) => \{[\s\S]{0,160}handleImportProjectPackage\(\)/);
+  assert.match(app, /const handleExportProject = async \(\): Promise<boolean> => \{[\s\S]{0,180}projectTransfers\.exportProjectPackage\(\)/);
+  assert.match(app, /const handleImportProject = async \(e: React\.ChangeEvent<HTMLInputElement>\) => \{[\s\S]{0,180}projectTransfers\.importProjectPackage\(\)/);
   assert.doesNotMatch(app, /window\.electronAPI\.saveFile\(defaultName\)/);
   assert.doesNotMatch(app, /window\.electronAPI\.openFile\(\[\s*\{\s*name: 'CosStage Project', extensions: \['json'\]/);
   assert.match(ipc, /defaultName = `\$\{content\.name \|\| 'CosStage-project'\}\.zip`/);
@@ -31,11 +31,11 @@ test('project reset backup prompt is localized and does not use browser confirm'
   const app = await read('App.tsx');
 
   assert.match(app, /type ResetProjectDialogMode = 'backup-choice' \| 'backup-failed'/);
-  assert.match(app, /const handleExportProjectPackage = async \(\): Promise<boolean>/);
+  assert.match(app, /const projectTransfers = useProjectTransfers\(/);
   assert.match(app, /const handleExportProject = async \(\): Promise<boolean>/);
   assert.match(app, /const handleExportProjectJsonBackup = async \(\): Promise<boolean>/);
   assert.match(app, /const handleExportResetBackup = async \(\): Promise<boolean>/);
-  assert.match(app, /window\.electronAPI\.writeFile\(filePath, JSON\.stringify\(projectData, null, 2\)\)/);
+  assert.match(app, /window\.electronAPI\.saveTextFile\(fileName, JSON\.stringify\(projectData, null, 2\)/);
   assert.match(app, /const exported = await handleExportResetBackup\(\)/);
   assert.match(app, /resetProjectDialogMode === 'backup-choice' \? '清空前是否先导出备份？' : '备份尚未完成'/);
   assert.match(app, /如果当前项目包无法导出，会自动改为 JSON 备份/);
@@ -46,6 +46,31 @@ test('project reset backup prompt is localized and does not use browser confirm'
     app,
     /Do you want to export the current project before resetting|Click OK to Export|Click Cancel to reset without exporting/
   );
+});
+
+test('desktop project lifecycle is durable, non-destructive, and uses custom dialogs', async () => {
+  const [app, browser, sidebar, service, desktopService, transfers, contract] = await Promise.all([
+    read('App.tsx'),
+    read('components/ProjectBrowser.tsx'),
+    read('components/Sidebar.tsx'),
+    read('electron/project-service.ts'),
+    read('services/desktopProjectService.ts'),
+    read('hooks/useProjectTransfers.ts'),
+    read('electron/project-contract.ts'),
+  ]);
+
+  assert.match(app, /const initialDocument: ProjectDocument = \{[\s\S]{0,260}createPersistedDesktopProject\(name, initialDocument\)/);
+  assert.match(app, /createPersistedDesktopProject\(name, initialDocument\);[\s\S]{0,100}setCurrentProjectId\(id\)/);
+  assert.match(desktopService, /await window\.electronAPI\.project\.save\(created\.id, \{ \.\.\.document, name \}\)/);
+  assert.match(desktopService, /await window\.electronAPI\.project\.delete\(created\.id\)/);
+  assert.match(service, /if \(hasRecoverableContent\(existing\)\) \{[\s\S]{0,100}createRecoverySnapshot/);
+  assert.match(service, /export async function duplicateManagedProject/);
+  assert.match(transfers, /if \(!await saveBeforeProjectOperation\(\)\) return;/);
+  assert.match(transfers, /window\.electronAPI\.project\.importChoreography\(\)/);
+  assert.match(contract, /export interface ProjectMeta/);
+  assert.match(browser, /aria-labelledby="delete-project-dialog-title"/);
+  assert.match(sidebar, /aria-labelledby="delete-group-dialog-title"/);
+  assert.doesNotMatch(`${app}\n${browser}\n${sidebar}`, /window\.(?:alert|confirm|prompt)\(/);
 });
 
 test('project asset protocol forwards media request headers', async () => {
@@ -70,7 +95,7 @@ test('3D labels stay below application overlays', async () => {
   assert.match(prop, /zIndexRange=\{\[40, 0\]\}/);
 });
 
-test('desktop export uses native binary save path and bounded recording waits', async () => {
+test('desktop export uses native binary save dialog and bounded recording waits', async () => {
   const [app, preload, ipc, offline] = await Promise.all([
     read('App.tsx'),
     read('electron/preload.ts'),
@@ -78,11 +103,11 @@ test('desktop export uses native binary save path and bounded recording waits', 
     read('utils/OfflineRenderer3D.ts'),
   ]);
 
-  assert.match(preload, /writeBinaryFile: \(filePath: string, content: Uint8Array\) => Promise<void>/);
-  assert.match(ipc, /ipcMain\.handle\('fs:writeBinaryFile'/);
+  assert.match(preload, /saveBinaryFile: \(defaultName: string, content: Uint8Array/);
+  assert.match(ipc, /ipcMain\.handle\(\s*'dialog:saveBinaryFile'/);
   assert.match(app, /const isDesktopElectron = Boolean\(window\.electronAPI\?\.isElectron\)/);
   assert.match(app, /const hasWebCodecs = typeof VideoEncoder !== 'undefined'/);
-  assert.match(app, /requestElectronExportPath\(downloadBaseName, initialExtension\)/);
+  assert.match(app, /saveBlobToElectron\(downloadBaseName, activeRealtimeFormat\.extension, blob\)/);
   assert.match(app, /const \{ Muxer, ArrayBufferTarget, FileSystemWritableFileStreamTarget \} = await import\('mp4-muxer'\)/);
   assert.match(app, /const arrayBufferTarget = !mp4Writable \? new ArrayBufferTarget\(\) : null/);
   assert.match(app, /const bytes = new Uint8Array\(arrayBufferTarget\.buffer\)/);

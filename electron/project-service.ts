@@ -1,11 +1,13 @@
 import { createReadStream, createWriteStream, promises as fs } from 'fs';
 import * as path from 'path';
+import { Transform } from 'stream';
 import { pipeline } from 'stream/promises';
 import * as archiver from 'archiver';
 import unzipper from 'unzipper';
 import { normalizeFrames, normalizePerformers, normalizeTransitions } from './project-contract.js';
 import type {
   AudioMarker,
+  ChoreographyDocument,
   FaceTexture,
   Performer,
   PerformerNote,
@@ -14,6 +16,8 @@ import type {
   ProjectDocument,
   ProjectImportResult,
   ProjectLoadResult,
+  ProjectMeta,
+  ProjectRecoverySnapshot,
   ProjectWarning,
   StageBackground,
   StageConfig,
@@ -21,6 +25,11 @@ import type {
 
 const PROJECT_VERSION = '3.0';
 const PROJECT_FILE_NAME = 'project.json';
+const MAX_PACKAGE_ENTRIES = 500;
+const MAX_PACKAGE_EXTRACTED_BYTES = 512 * 1024 * 1024;
+const RECOVERY_DIRECTORY_NAME = 'recovery';
+const MAX_RECOVERY_SNAPSHOTS = 5;
+let recoverySequence = 0;
 const ASSET_DIRECTORIES: Record<ProjectAssetKind, string> = {
   audio: 'assets/audio',
   background: 'assets/backgrounds',
@@ -28,6 +37,10 @@ const ASSET_DIRECTORIES: Record<ProjectAssetKind, string> = {
 };
 
 type UnknownRecord = Record<string, unknown>;
+
+interface RecoverySnapshotFile extends ProjectRecoverySnapshot {
+  document: ProjectDocument;
+}
 
 function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -94,6 +107,101 @@ function resolveInside(basePath: string, relativePath: string): string {
     throw new Error(`Project path escapes its root: ${relativePath}`);
   }
   return resolved;
+}
+
+export function resolveManagedProjectPath(storagePath: string, projectId: string): string {
+  if (!/^[a-zA-Z0-9\u4e00-\u9fff][a-zA-Z0-9\u4e00-\u9fff-]{0,159}$/u.test(projectId)) {
+    throw new Error('Invalid project ID');
+  }
+  return resolveInside(path.join(storagePath, 'projects'), projectId);
+}
+
+function resolveRecoveryProjectPath(storagePath: string, projectId: string): string {
+  resolveManagedProjectPath(storagePath, projectId);
+  return resolveInside(path.join(storagePath, RECOVERY_DIRECTORY_NAME), projectId);
+}
+
+function hasRecoverableContent(document: ProjectDocument): boolean {
+  return document.performers.length > 0
+    || document.frames.length > 0
+    || Boolean(document.musicAsset)
+    || Boolean(document.stageConfig.background)
+    || Boolean(document.stageConfig.ledContent?.value);
+}
+
+async function createRecoverySnapshot(
+  storagePath: string,
+  projectId: string,
+  document: ProjectDocument,
+): Promise<void> {
+  const recoveryDir = resolveRecoveryProjectPath(storagePath, projectId);
+  await fs.mkdir(recoveryDir, { recursive: true });
+  const createdAt = Date.now();
+  const fileName = `${Date.now()}-${String(recoverySequence++).padStart(6, '0')}.json`;
+  const snapshot: RecoverySnapshotFile = {
+    id: `${projectId}/${fileName}`,
+    sourceProjectId: projectId,
+    projectName: document.name,
+    createdAt,
+    document,
+  };
+  await writeJsonAtomically(path.join(recoveryDir, fileName), snapshot);
+  const entries = (await fs.readdir(recoveryDir, { withFileTypes: true }))
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+    .sort((a, b) => b.name.localeCompare(a.name));
+  await Promise.all(entries.slice(MAX_RECOVERY_SNAPSHOTS).map((entry) => (
+    fs.rm(path.join(recoveryDir, entry.name), { force: true })
+  )));
+}
+
+async function readRecoverySnapshot(storagePath: string, snapshotId: string): Promise<RecoverySnapshotFile> {
+  const normalized = normalizeRelativePath(snapshotId);
+  const parts = normalized?.split('/') ?? [];
+  if (parts.length !== 2 || !parts[1].endsWith('.json')) {
+    throw new Error('Invalid recovery snapshot ID');
+  }
+  resolveManagedProjectPath(storagePath, parts[0]);
+  const snapshotPath = resolveInside(path.join(storagePath, RECOVERY_DIRECTORY_NAME), snapshotId);
+  const raw = JSON.parse(await fs.readFile(snapshotPath, 'utf8')) as unknown;
+  if (!isRecord(raw)) throw new Error('Invalid recovery snapshot');
+  const createdAt = typeof raw.createdAt === 'number'
+    ? raw.createdAt
+    : typeof raw.createdAt === 'string'
+      ? Date.parse(raw.createdAt)
+      : Number.NaN;
+  if (raw.id !== snapshotId
+    || raw.sourceProjectId !== parts[0]
+    || typeof raw.projectName !== 'string'
+    || !Number.isFinite(createdAt)) {
+    throw new Error('Invalid recovery snapshot');
+  }
+  return {
+    id: snapshotId,
+    sourceProjectId: parts[0],
+    projectName: raw.projectName,
+    createdAt,
+    document: parseProjectDocument(raw.document, raw.projectName),
+  };
+}
+
+async function copyDirectory(source: string, destination: string): Promise<void> {
+  let entries;
+  try {
+    entries = await fs.readdir(source, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
+  await fs.mkdir(destination, { recursive: true });
+  for (const entry of entries) {
+    const sourcePath = path.join(source, entry.name);
+    const destinationPath = path.join(destination, entry.name);
+    if (entry.isDirectory()) {
+      await copyDirectory(sourcePath, destinationPath);
+    } else if (entry.isFile()) {
+      await fs.copyFile(sourcePath, destinationPath);
+    }
+  }
 }
 
 function parseStageBackground(value: unknown): StageBackground | undefined {
@@ -388,7 +496,7 @@ export async function createManagedProject(
 ): Promise<{ id: string; path: string }> {
   const safeName = sanitizeName(name);
   const id = createProjectId(safeName);
-  const projectDir = path.join(storagePath, 'projects', id);
+  const projectDir = resolveManagedProjectPath(storagePath, id);
   await fs.mkdir(path.join(projectDir, 'assets/audio'), { recursive: true });
   await fs.mkdir(path.join(projectDir, 'assets/backgrounds'), { recursive: true });
   await fs.mkdir(path.join(projectDir, 'assets/stage-backgrounds'), { recursive: true });
@@ -422,9 +530,12 @@ export async function saveManagedProject(
   projectId: string,
   projectData: ProjectDocument,
 ): Promise<ProjectDocument> {
-  const projectDir = path.join(storagePath, 'projects', projectId);
+  const projectDir = resolveManagedProjectPath(storagePath, projectId);
   const projectPath = path.join(projectDir, PROJECT_FILE_NAME);
   const existing = parseProjectDocument(JSON.parse(await fs.readFile(projectPath, 'utf8')) as unknown, projectData.name);
+  if (hasRecoverableContent(existing)) {
+    await createRecoverySnapshot(storagePath, projectId, existing);
+  }
   const performers = await Promise.all(
     projectData.performers.map((performer) => externalizePerformerTextures(projectDir, performer)),
   );
@@ -456,9 +567,91 @@ export async function loadManagedProject(
   storagePath: string,
   projectId: string,
 ): Promise<ProjectLoadResult> {
-  const projectDir = path.join(storagePath, 'projects', projectId);
+  const projectDir = resolveManagedProjectPath(storagePath, projectId);
   const raw = JSON.parse(await fs.readFile(path.join(projectDir, PROJECT_FILE_NAME), 'utf8')) as unknown;
   return hydrateProject(projectId, projectDir, parseProjectDocument(raw, projectId));
+}
+
+export async function listManagedProjects(storagePath: string): Promise<ProjectMeta[]> {
+  const projectsDir = path.join(storagePath, 'projects');
+  await fs.mkdir(projectsDir, { recursive: true });
+  const entries = await fs.readdir(projectsDir, { withFileTypes: true });
+  const projects: ProjectMeta[] = [];
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    try {
+      const projectDir = resolveManagedProjectPath(storagePath, entry.name);
+      const projectPath = path.join(projectDir, PROJECT_FILE_NAME);
+      const raw = JSON.parse(await fs.readFile(projectPath, 'utf8')) as unknown;
+      const document = parseProjectDocument(raw, entry.name);
+      const stats = await fs.stat(projectPath);
+      const createdAt = document.createdAt && Number.isFinite(Date.parse(document.createdAt))
+        ? document.createdAt
+        : stats.birthtime.toISOString();
+      const updatedAt = document.updatedAt && Number.isFinite(Date.parse(document.updatedAt))
+        ? document.updatedAt
+        : stats.mtime.toISOString();
+      projects.push({
+        id: entry.name,
+        name: document.name,
+        createdAt,
+        updatedAt,
+        thumbnail: isRecord(raw) && typeof raw.thumbnail === 'string' ? raw.thumbnail : undefined,
+      });
+    } catch {
+      // A corrupt or unrelated directory must not hide the remaining projects.
+    }
+  }
+
+  return projects.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+}
+
+export async function deleteManagedProject(storagePath: string, projectId: string): Promise<void> {
+  await Promise.all([
+    fs.rm(resolveManagedProjectPath(storagePath, projectId), { recursive: true, force: true }),
+    fs.rm(resolveRecoveryProjectPath(storagePath, projectId), { recursive: true, force: true }),
+  ]);
+}
+
+export async function renameManagedProject(
+  storagePath: string,
+  projectId: string,
+  newName: string,
+): Promise<void> {
+  const projectDir = resolveManagedProjectPath(storagePath, projectId);
+  const raw = JSON.parse(await fs.readFile(path.join(projectDir, PROJECT_FILE_NAME), 'utf8')) as unknown;
+  const document = parseProjectDocument(raw, projectId);
+  await saveManagedProject(storagePath, projectId, { ...document, name: newName });
+}
+
+export async function duplicateManagedProject(
+  storagePath: string,
+  projectId: string,
+): Promise<{ id: string; path: string }> {
+  const sourceDir = resolveManagedProjectPath(storagePath, projectId);
+  const raw = JSON.parse(await fs.readFile(path.join(sourceDir, PROJECT_FILE_NAME), 'utf8')) as unknown;
+  const sourceDocument = parseProjectDocument(raw, projectId);
+  const name = `${sourceDocument.name} (副本)`;
+  const id = createProjectId(name);
+  const destinationDir = resolveManagedProjectPath(storagePath, id);
+  const stagingDir = resolveInside(path.join(storagePath, 'projects'), `.duplicate-${id}`);
+
+  try {
+    await copyDirectory(sourceDir, stagingDir);
+    const now = new Date().toISOString();
+    await writeJsonAtomically(path.join(stagingDir, PROJECT_FILE_NAME), {
+      ...sourceDocument,
+      name: sanitizeName(name),
+      createdAt: now,
+      updatedAt: now,
+    });
+    await fs.rename(stagingDir, destinationDir);
+    return { id, path: destinationDir };
+  } catch (error) {
+    await fs.rm(stagingDir, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 export async function ingestProjectAsset(
@@ -467,7 +660,7 @@ export async function ingestProjectAsset(
   sourcePath: string,
   kind: ProjectAssetKind,
 ): Promise<ProjectAssetResult> {
-  const projectDir = path.join(storagePath, 'projects', projectId);
+  const projectDir = resolveManagedProjectPath(storagePath, projectId);
   const extension = path.extname(sourcePath);
   const baseName = path.basename(sourcePath, extension).replace(/[^a-zA-Z0-9\u4e00-\u9fff_-]+/g, '-');
   const storedName = `${baseName || kind}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${extension.toLowerCase()}`;
@@ -499,8 +692,15 @@ export async function exportProjectPackage(projectDir: string, targetPath: strin
 
 async function extractPackage(packagePath: string, targetDir: string): Promise<void> {
   const archive = createReadStream(packagePath).pipe(unzipper.Parse({ forceStream: true }));
+  let entryCount = 0;
+  let extractedBytes = 0;
   for await (const entry of archive) {
     const item = entry as unzipper.Entry;
+    entryCount += 1;
+    if (entryCount > MAX_PACKAGE_ENTRIES) {
+      item.autodrain();
+      throw new Error(`Project package contains too many files (maximum ${MAX_PACKAGE_ENTRIES})`);
+    }
     const normalized = normalizeRelativePath(item.path);
     if (!normalized) {
       item.autodrain();
@@ -510,11 +710,192 @@ async function extractPackage(packagePath: string, targetDir: string): Promise<v
     if (item.type === 'Directory') {
       await fs.mkdir(targetPath, { recursive: true });
       item.autodrain();
-    } else {
+    } else if (item.type === 'File') {
       await fs.mkdir(path.dirname(targetPath), { recursive: true });
-      await pipeline(item, createWriteStream(targetPath));
+      const byteLimit = new Transform({
+        transform(chunk: Buffer, _encoding, callback) {
+          extractedBytes += chunk.length;
+          if (extractedBytes > MAX_PACKAGE_EXTRACTED_BYTES) {
+            callback(new Error('Project package is too large after extraction'));
+            return;
+          }
+          callback(null, chunk);
+        },
+      });
+      await pipeline(item, byteLimit, createWriteStream(targetPath));
+    } else {
+      item.autodrain();
+      throw new Error(`Unsupported archive entry type: ${item.type}`);
     }
   }
+}
+
+export async function exportChoreographyDocument(
+  storagePath: string,
+  projectId: string,
+  targetPath: string,
+): Promise<void> {
+  const projectDir = resolveManagedProjectPath(storagePath, projectId);
+  const raw = JSON.parse(await fs.readFile(path.join(projectDir, PROJECT_FILE_NAME), 'utf8')) as unknown;
+  const document = parseProjectDocument(raw, projectId);
+  await writeJsonAtomically(targetPath, createChoreographyDocument(document));
+}
+
+export async function importChoreographyDocument(
+  storagePath: string,
+  jsonPath: string,
+): Promise<ProjectImportResult> {
+  const raw = JSON.parse(await fs.readFile(jsonPath, 'utf8')) as unknown;
+  const choreography = parseChoreographyDocument(
+    raw,
+    path.basename(jsonPath, path.extname(jsonPath)),
+  );
+  const created = await createManagedProject(storagePath, choreography.name);
+  try {
+    await saveManagedProject(storagePath, created.id, {
+      version: PROJECT_VERSION,
+      name: choreography.name,
+      musicName: null,
+      musicAsset: null,
+      performers: choreography.performers,
+      performerGroups: choreography.performerGroups,
+      frames: choreography.frames,
+      transitions: choreography.transitions,
+      audioMarkers: choreography.audioMarkers,
+      stageConfig: choreography.stageConfig,
+      performerNotes: choreography.performerNotes,
+    });
+    return { projectId: created.id, ...await loadManagedProject(storagePath, created.id) };
+  } catch (error) {
+    await fs.rm(created.path, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+export async function listProjectRecoverySnapshots(
+  storagePath: string,
+  projectId?: string,
+): Promise<ProjectRecoverySnapshot[]> {
+  const recoveryRoot = path.join(storagePath, RECOVERY_DIRECTORY_NAME);
+  let projectIds: string[];
+  if (projectId) {
+    resolveManagedProjectPath(storagePath, projectId);
+    projectIds = [projectId];
+  } else {
+    try {
+      projectIds = (await fs.readdir(recoveryRoot, { withFileTypes: true }))
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw error;
+    }
+  }
+
+  const snapshots: ProjectRecoverySnapshot[] = [];
+  for (const candidateProjectId of projectIds) {
+    let files;
+    try {
+      files = await fs.readdir(resolveRecoveryProjectPath(storagePath, candidateProjectId));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      throw error;
+    }
+    for (const fileName of files.filter((name) => name.endsWith('.json'))) {
+      try {
+        const snapshot = await readRecoverySnapshot(storagePath, `${candidateProjectId}/${fileName}`);
+        snapshots.push({
+          id: snapshot.id,
+          sourceProjectId: snapshot.sourceProjectId,
+          projectName: snapshot.projectName,
+          createdAt: snapshot.createdAt,
+        });
+      } catch {
+        // Ignore invalid recovery files while retaining other usable snapshots.
+      }
+    }
+  }
+  return snapshots.sort((a, b) => b.id.localeCompare(a.id));
+}
+
+export async function restoreProjectRecoverySnapshot(
+  storagePath: string,
+  snapshotId: string,
+): Promise<ProjectImportResult> {
+  const snapshot = await readRecoverySnapshot(storagePath, snapshotId);
+  const restoredName = `${snapshot.projectName} (恢复)`;
+  const created = await createManagedProject(storagePath, restoredName);
+  try {
+    const sourceProjectDir = resolveManagedProjectPath(storagePath, snapshot.sourceProjectId);
+    await copyDirectory(path.join(sourceProjectDir, 'assets'), path.join(created.path, 'assets'));
+    await saveManagedProject(storagePath, created.id, {
+      ...snapshot.document,
+      name: restoredName,
+      createdAt: undefined,
+      updatedAt: undefined,
+    });
+    return { projectId: created.id, ...await loadManagedProject(storagePath, created.id) };
+  } catch (error) {
+    await fs.rm(created.path, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+function stripPerformerAssets(performer: Performer): Performer {
+  const {
+    boxTextures: _boxTextures,
+    extrudedTextures: _extrudedTextures,
+    textureAssetPath: _textureAssetPath,
+    textureDataUrl: _textureDataUrl,
+    ...portable
+  } = performer;
+  return portable;
+}
+
+function stripStageAssets(stageConfig: StageConfig): StageConfig {
+  return {
+    width: stageConfig.width,
+    depth: stageConfig.depth,
+    wingWidth: stageConfig.wingWidth,
+    ledWidth: stageConfig.ledWidth,
+    ledHeight: stageConfig.ledHeight,
+    ledBottomHeight: stageConfig.ledBottomHeight,
+    ledContent: stageConfig.ledContent?.type === 'color'
+      ? stageConfig.ledContent
+      : { type: 'none' },
+    showStageLines: stageConfig.showStageLines,
+    ledDistanceFromBack: stageConfig.ledDistanceFromBack,
+  };
+}
+
+function createChoreographyDocument(document: ProjectDocument): ChoreographyDocument {
+  return {
+    format: 'cosstage-choreography',
+    schemaVersion: 1,
+    name: document.name,
+    performers: document.performers.map(stripPerformerAssets),
+    performerGroups: document.performerGroups,
+    frames: document.frames,
+    transitions: document.transitions ?? [],
+    audioMarkers: document.audioMarkers ?? [],
+    stageConfig: stripStageAssets(document.stageConfig),
+    performerNotes: document.performerNotes ?? [],
+  };
+}
+
+function parseChoreographyDocument(value: unknown, fallbackName: string): ChoreographyDocument {
+  if (!isRecord(value)
+    || value.format !== 'cosstage-choreography'
+    || value.schemaVersion !== 1) {
+    throw new Error('Unsupported choreography JSON format');
+  }
+  const document = parseProjectDocument({
+    ...value,
+    version: PROJECT_VERSION,
+    musicName: null,
+    musicAsset: null,
+  }, fallbackName);
+  return createChoreographyDocument(document);
 }
 
 export async function importProjectPackage(
@@ -530,7 +911,7 @@ export async function importProjectPackage(
     const raw = JSON.parse(await fs.readFile(path.join(stagingDir, PROJECT_FILE_NAME), 'utf8')) as unknown;
     const document = parseProjectDocument(raw, path.basename(packagePath, path.extname(packagePath)));
     const id = createProjectId(document.name);
-    installedDir = path.join(storagePath, 'projects', id);
+    installedDir = resolveManagedProjectPath(storagePath, id);
     await fs.mkdir(path.dirname(installedDir), { recursive: true });
     const importedDocument: ProjectDocument = {
       ...document,
@@ -578,5 +959,5 @@ export function resolveProjectAssetPath(
   projectId: string,
   relativePath: string,
 ): string {
-  return resolveInside(path.join(storagePath, 'projects', projectId), relativePath);
+  return resolveInside(resolveManagedProjectPath(storagePath, projectId), relativePath);
 }

@@ -13,6 +13,7 @@ import {
   ObjectMotion,
   ProjectDocument,
   ProjectLoadResult,
+  ProjectTemplateData,
   PropRotationPivot,
   TransitionSegment,
   PerformerNote,
@@ -57,6 +58,8 @@ import {
   getSortedFrames,
 } from './utils/transitions';
 import { getPropCenterFromAnchor, migratePropAnchor } from './utils/prop-pivot';
+import { useProjectTransfers } from './hooks/useProjectTransfers';
+import { createPersistedDesktopProject } from './services/desktopProjectService';
 import {
   calculateStageDimensionsFromImage,
   clampStageBackgroundOpacity,
@@ -463,6 +466,7 @@ const App: React.FC = () => {
   const [saveSuccessVisible, setSaveSuccessVisible] = useState(false);
   const [resetProjectDialogMode, setResetProjectDialogMode] = useState<ResetProjectDialogMode | null>(null);
   const [isResetBackupExporting, setIsResetBackupExporting] = useState(false);
+  const [pendingAIPlan, setPendingAIPlan] = useState<AIChoreoPlan | null>(null);
   const latestProjectSnapshotRef = useRef<ProjectSaveSnapshot | null>(null);
   const lastSavedStateRef = useRef('');
   const saveInFlightRef = useRef<Promise<boolean> | null>(null);
@@ -636,17 +640,9 @@ const App: React.FC = () => {
     rotations: { ...(overrides?.rotations ?? source.rotations ?? {}) },
   }), []);
 
-  const writeBlobToElectronPath = useCallback(async (filePath: string, blob: Blob) => {
+  const saveBlobToElectron = useCallback(async (baseName: string, extension: 'mp4' | 'webm', blob: Blob) => {
     const bytes = new Uint8Array(await blob.arrayBuffer());
-    await window.electronAPI.writeBinaryFile(filePath, bytes);
-  }, []);
-
-  const requestElectronExportPath = useCallback(async (
-    baseName: string,
-    extension: 'mp4' | 'webm'
-  ): Promise<string | null> => {
-    if (!window.electronAPI?.isElectron) return null;
-    return window.electronAPI.saveFile(`${baseName}.${extension}`, [
+    return window.electronAPI.saveBinaryFile(`${baseName}.${extension}`, bytes, [
       { name: extension === 'mp4' ? 'MP4 Video' : 'WebM Video', extensions: [extension] },
       { name: 'All Files', extensions: ['*'] },
     ]);
@@ -1267,27 +1263,25 @@ const App: React.FC = () => {
     }
   }, [currentProjectId, currentProjectStateString, lastSavedState]);
 
+  const saveBeforeProjectOperation = useCallback(async (): Promise<boolean> => {
+    if (!currentProjectId || !projectHasChanges) return true;
+    try {
+      const saved = await saveHandlerRef.current();
+      if (!saved) setProjectMessages(['当前项目保存失败，已取消本次操作']);
+      return saved;
+    } catch (error) {
+      console.error('Failed to save current project before switching:', error);
+      setProjectMessages(['当前项目保存失败，已取消本次操作']);
+      return false;
+    }
+  }, [currentProjectId, projectHasChanges]);
+
   // Create a new project
   const handleCreateProject = async (name: string): Promise<string> => {
     if (!window.electronAPI?.isElectron) return '';
-    
-    // Auto-save current project before creating new one
-    if (currentProjectId && projectHasChanges) {
-      try {
-        if (!await saveHandlerRef.current()) return '';
-        console.log('Auto-saved current project before creating new');
-      } catch (error) {
-        console.error('Failed to auto-save before creating:', error);
-        setProjectMessages(['当前项目自动保存失败，已取消新建项目']);
-        return '';
-      }
-    }
+    if (!await saveBeforeProjectOperation()) return '';
     
     try {
-      const { id, path } = await window.electronAPI.project.create(name);
-      setCurrentProjectId(id);
-      setCurrentProjectPath(path);
-      
       // Reset to fresh state
       const newFrameId = generateId();
       const newFrames: Frame[] = [{
@@ -1299,6 +1293,26 @@ const App: React.FC = () => {
         rotations: {},
       }];
       const newStageConfig = createDefaultStageConfig();
+      const initialEditorState = {
+        performers: [],
+        performerGroups: [],
+        frames: newFrames,
+        transitions: [],
+        audioMarkers: [],
+        stageConfig: newStageConfig,
+        musicName: null,
+        musicAsset: null,
+        performerNotes: [],
+      };
+      const initialDocument: ProjectDocument = {
+        version: '3.0',
+        name,
+        ...initialEditorState,
+      };
+      const { id, path } = await createPersistedDesktopProject(name, initialDocument);
+
+      setCurrentProjectId(id);
+      setCurrentProjectPath(path);
       setPerformers([]);
       setPerformerGroups([]);
       setFrames(newFrames);
@@ -1318,17 +1332,7 @@ const App: React.FC = () => {
       setSelectedPerformerIds([]);
       
       // Mark as saved
-      setLastSavedState(JSON.stringify({
-        performers: [],
-        performerGroups: [],
-        frames: newFrames,
-        transitions: [],
-        audioMarkers: [],
-        stageConfig: newStageConfig,
-        musicName: null,
-        musicAsset: null,
-        performerNotes: [],
-      }));
+      setLastSavedState(JSON.stringify(initialEditorState));
       setLastSavedAt(Date.now());
       setProjectHasChanges(false);
       
@@ -1339,28 +1343,17 @@ const App: React.FC = () => {
     }
   };
 
-  const handleCreateFromTemplate = async (templateData: any): Promise<string> => {
+  const handleCreateFromTemplate = async (templateData: ProjectTemplateData): Promise<string> => {
     if (!window.electronAPI?.isElectron) return '';
-
-    // Auto-save current project before switching
-    if (currentProjectId && projectHasChanges) {
-      try {
-        if (!await saveHandlerRef.current()) return '';
-      } catch (error) {
-        console.error('Failed to auto-save before creating template project:', error);
-        setProjectMessages(['当前项目自动保存失败，已取消创建模板项目']);
-        return '';
-      }
-    }
+    if (!await saveBeforeProjectOperation()) return '';
 
     try {
       const name = templateData.name || '教学示例';
-      const { id, path } = await window.electronAPI.project.create(name);
 
       // Save template data into the new project
       const saveData: ProjectDocument = {
         version: '3.0',
-        name: '',
+        name,
         performers: normalizePerformers(templateData.performers),
         performerGroups: templateData.performerGroups || [],
         frames: normalizeFrames(templateData.frames),
@@ -1370,7 +1363,7 @@ const App: React.FC = () => {
         musicName: null,
         musicAsset: null,
       };
-      await window.electronAPI.project.save(id, saveData);
+      const { id, path } = await createPersistedDesktopProject(name, saveData);
 
       setCurrentProjectId(id);
       setCurrentProjectPath(path);
@@ -1414,7 +1407,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleLoadTemplate = (templateData: any) => {
+  const handleLoadTemplate = (templateData: ProjectTemplateData) => {
     const performers = normalizePerformers(templateData.performers);
     const groups = templateData.performerGroups || [];
     const frames = normalizeFrames(templateData.frames);
@@ -1447,18 +1440,7 @@ const App: React.FC = () => {
   // Load a project
   const handleLoadProject = async (projectId: string) => {
     if (!window.electronAPI?.isElectron) return;
-    
-    // Auto-save current project before switching
-    if (currentProjectId && projectHasChanges) {
-      try {
-        if (!await saveHandlerRef.current()) return;
-        console.log('Auto-saved current project before switching');
-      } catch (error) {
-        console.error('Failed to auto-save before switching:', error);
-        setProjectMessages(['当前项目自动保存失败，已取消切换项目']);
-        return;
-      }
-    }
+    if (!await saveBeforeProjectOperation()) return;
     
     try {
       await applyLoadedProject(projectId, await window.electronAPI.project.load(projectId));
@@ -1536,45 +1518,12 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const handleImportProjectPackage = async () => {
-    if (!window.electronAPI?.isElectron) return;
-    try {
-      const result = await window.electronAPI.project.importPackage();
-      if (result) await applyLoadedProject(result.projectId, result);
-    } catch (error) {
-      console.error('Project package import failed:', error);
-      setProjectMessages(['项目包导入失败，文件可能已损坏或格式不受支持']);
-    }
-  };
-
-  const handleImportLegacyProject = async () => {
-    if (!window.electronAPI?.isElectron) return;
-    try {
-      const result = await window.electronAPI.project.importLegacy();
-      if (result) await applyLoadedProject(result.projectId, result);
-    } catch (error) {
-      console.error('Legacy project import failed:', error);
-      setProjectMessages(['旧 JSON 导入失败，文件可能已损坏或格式不受支持']);
-    }
-  };
-
-  const handleExportProjectPackage = async (): Promise<boolean> => {
-    if (!window.electronAPI?.isElectron || !currentProjectId) {
-      setProjectMessages(['当前内容还不是已打开的桌面项目，无法导出项目压缩包。请先在项目管理中打开或创建项目。']);
-      return false;
-    }
-    try {
-      if (projectHasChanges && !await handleSaveProject()) return false;
-      const exportedPath = await window.electronAPI.project.exportPackage(currentProjectId);
-      if (!exportedPath) return false;
-      setProjectMessages([`项目包已导出：${exportedPath}`]);
-      return true;
-    } catch (error) {
-      console.error('Project package export failed:', error);
-      setProjectMessages([`项目包导出失败：${getErrorMessage(error)}`]);
-      return false;
-    }
-  };
+  const projectTransfers = useProjectTransfers({
+    currentProjectId,
+    saveBeforeProjectOperation,
+    applyLoadedProject,
+    setMessages: setProjectMessages,
+  });
 
   // Save on Ctrl/Cmd+S using the latest project snapshot.
   useEffect(() => {
@@ -2165,13 +2114,8 @@ const App: React.FC = () => {
     }
   };
 
-  const handleApplyAIPlan = (plan: AIChoreoPlan) => {
+  const applyAIPlan = (plan: AIChoreoPlan, shouldOverwrite: boolean): void => {
     if (isPlaying) handlePlayPause();
-
-    const hasExistingContent = performers.length > 0 || performerGroups.length > 0 || frames.some(f => Object.keys(f.positions).length > 0);
-    const shouldOverwrite = plan.intent === 'initialize_project' && hasExistingContent
-      ? window.confirm('AI initialization found existing project content. Click OK to overwrite, or Cancel to append.')
-      : false;
 
     const baseFrames: Frame[] = shouldOverwrite
       ? [{ ...DEFAULT_FRAME, positions: {} }]
@@ -2269,6 +2213,23 @@ const App: React.FC = () => {
       setCurrentFrameId(createdFrames[0].id);
     }
     setSelectedPerformerIds(newPerformers.map(p => p.id));
+  };
+
+  const handleApplyAIPlan = (plan: AIChoreoPlan): void => {
+    const hasExistingContent = performers.length > 0
+      || performerGroups.length > 0
+      || frames.some((frame) => Object.keys(frame.positions).length > 0);
+    if (plan.intent === 'initialize_project' && hasExistingContent) {
+      setPendingAIPlan(plan);
+      return;
+    }
+    applyAIPlan(plan, false);
+  };
+
+  const handleResolveAIPlanConflict = (shouldOverwrite: boolean): void => {
+    const plan = pendingAIPlan;
+    setPendingAIPlan(null);
+    if (plan) applyAIPlan(plan, shouldOverwrite);
   };
 
   // --- Frame Management ---
@@ -2441,7 +2402,7 @@ const App: React.FC = () => {
 
   const handleExportProject = async (): Promise<boolean> => {
     if (window.electronAPI?.isElectron) {
-      return handleExportProjectPackage();
+      return projectTransfers.exportProjectPackage();
     }
 
     const projectData = buildProjectDocument('CosStage Project');
@@ -2465,12 +2426,11 @@ const App: React.FC = () => {
 
     if (window.electronAPI?.isElectron) {
       try {
-        const filePath = await window.electronAPI.saveFile(fileName, [
+        const filePath = await window.electronAPI.saveTextFile(fileName, JSON.stringify(projectData, null, 2), [
           { name: 'CosStage JSON 备份 (*.json)', extensions: ['json'] },
           { name: 'All Files', extensions: ['*'] },
         ]);
         if (!filePath) return false;
-        await window.electronAPI.writeFile(filePath, JSON.stringify(projectData, null, 2));
         setProjectMessages([`JSON 备份已导出：${filePath}`]);
         return true;
       } catch (error) {
@@ -2500,7 +2460,7 @@ const App: React.FC = () => {
       return handleExportProjectJsonBackup();
     }
 
-    const exportedPackage = await handleExportProjectPackage();
+    const exportedPackage = await projectTransfers.exportProjectPackage();
     if (exportedPackage) return true;
 
     setProjectMessages(['项目压缩包没有导出成功。为避免清空前丢失内容，请先导出 JSON 备份。']);
@@ -2509,6 +2469,7 @@ const App: React.FC = () => {
 
   const performResetProject = () => {
     const newFrameId = generateId();
+    const newStageConfig = createDefaultStageConfig();
     setPerformers([]);
     setPerformerGroups([]);
     setTransitions([]);
@@ -2521,17 +2482,26 @@ const App: React.FC = () => {
       rotations: {},
     }]);
     setAudioMarkers([]);
+    setStageConfig(newStageConfig);
+    setMediaCache({});
     setCurrentFrameId(newFrameId);
     setSelectedTransitionId(null);
     setSelectedTransitionPerformerId(null);
     setMusicName(null);
+    setMusicAsset(null);
+    setPerformerNotes([]);
     setAudioBuffer(null);
     setMusicUrl(null);
     setCurrentTime(0);
     setSelectedPerformerIds([]);
+    setUndoStack([]);
+    setRedoStack([]);
     setCurrentProjectId(null);
     setCurrentProjectPath(null);
     setLocalProjectClipboardKey(createLocalProjectClipboardKey());
+    setLastSavedState('');
+    setLastSavedAt(null);
+    setProjectMessages([]);
     setProjectHasChanges(false);
   };
 
@@ -2582,7 +2552,7 @@ const App: React.FC = () => {
 
   const handleImportProject = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (window.electronAPI?.isElectron) {
-      await handleImportProjectPackage();
+      await projectTransfers.importProjectPackage();
       return;
     }
 
@@ -2629,10 +2599,10 @@ const App: React.FC = () => {
           setCurrentFrameId(json.frames[0].id);
         }
 
-        alert(`Project loaded successfully. Please re-import audio file "${json.musicName || 'if needed'}"`);
+        setProjectMessages([`项目已导入。请重新导入音频文件“${json.musicName || '如有需要'}”。`]);
       } catch (err) {
         console.error("Failed to import project:", err);
-        alert("Failed to import project. File might be corrupted or invalid.");
+        setProjectMessages(['项目导入失败，文件可能已损坏或格式无效。']);
       }
     };
     reader.readAsText(file);
@@ -3323,13 +3293,13 @@ const App: React.FC = () => {
   const handleExportVideo2D = async () => {
     if (inPointMs == null || outPointMs == null || outPointMs <= inPointMs) {
       if (inPointMs == null && outPointMs == null) {
-        alert('请先设置导出范围。\n\n1. 将播放头移动到导出开始位置。\n2. 点击“导出视频”，在导出设置中把“入点”设为“当前”。\n3. 将播放头移动到导出结束位置，把“出点”设为“当前”。\n4. 再确认导出。');
+        setProjectMessages(['请先设置导出范围：依次将播放头移到开始和结束位置，并在导出设置中把入点、出点设为“当前”。']);
       } else if (inPointMs == null) {
-        alert('还没有设置入点。\n\n将播放头移动到导出开始位置，打开“导出视频”，在导出设置中把“入点”设为“当前”。');
+        setProjectMessages(['还没有设置入点。请将播放头移到导出开始位置，并在导出设置中把入点设为“当前”。']);
       } else if (outPointMs == null) {
-        alert('还没有设置出点。\n\n将播放头移动到导出结束位置，打开“导出视频”，在导出设置中把“出点”设为“当前”。');
+        setProjectMessages(['还没有设置出点。请将播放头移到导出结束位置，并在导出设置中把出点设为“当前”。']);
       } else {
-        alert('导出范围无效：出点必须晚于入点。\n\n请把播放头移动到更靠后的位置，在导出设置中把“出点”设为“当前”。');
+        setProjectMessages(['导出范围无效：出点必须晚于入点。']);
       }
       return;
     }
@@ -3354,12 +3324,7 @@ const App: React.FC = () => {
       | undefined;
     let mp4Writable: any = null;
     let realtimeWritable: any = null;
-    let desktopExportPath: string | null = null;
-
-    if (window.electronAPI?.isElectron) {
-      desktopExportPath = await requestElectronExportPath(downloadBaseName, initialExtension);
-      if (!desktopExportPath) return;
-    } else if (showSaveFilePicker) {
+    if (!isDesktopElectron && showSaveFilePicker) {
       try {
         const handle = await showSaveFilePicker({
           suggestedName: `${downloadBaseName}.${initialExtension}`,
@@ -3561,8 +3526,10 @@ const App: React.FC = () => {
           await mp4Writable.close();
         } else if (arrayBufferTarget) {
           const bytes = new Uint8Array(arrayBufferTarget.buffer);
-          if (desktopExportPath) {
-            await window.electronAPI.writeBinaryFile(desktopExportPath, bytes);
+          if (isDesktopElectron) {
+            await window.electronAPI.saveBinaryFile(`${downloadBaseName}.mp4`, bytes, [
+              { name: 'MP4 Video', extensions: ['mp4'] },
+            ]);
           } else {
             downloadBlob(new Blob([bytes], { type: 'video/mp4' }), `${downloadBaseName}.mp4`);
           }
@@ -3589,13 +3556,7 @@ const App: React.FC = () => {
 
     // --- Fallback: MediaRecorder (real-time playback, render on-the-fly) ---
     if (canFastExport) {
-      if (window.electronAPI?.isElectron) {
-        desktopExportPath = await requestElectronExportPath(downloadBaseName, realtimeFormat.extension);
-        if (!desktopExportPath) {
-          setIsExporting(false);
-          return;
-        }
-      } else if (showSaveFilePicker && !realtimeWritable) {
+      if (!isDesktopElectron && showSaveFilePicker && !realtimeWritable) {
         try {
           const handle = await showSaveFilePicker({
             suggestedName: `${downloadBaseName}.${realtimeFormat.extension}`,
@@ -3653,21 +3614,8 @@ const App: React.FC = () => {
       }
       ledRenderer?.dispose();
       setIsExporting(false);
-      alert('实时录制导出失败：' + (err instanceof Error ? err.message : String(err)));
+      setProjectMessages([`实时录制导出失败：${err instanceof Error ? err.message : String(err)}`]);
       return;
-    }
-
-    if (desktopExportPath && activeRealtimeFormat.extension !== realtimeFormat.extension) {
-      recorder.stop();
-      const updatedPath = await requestElectronExportPath(downloadBaseName, activeRealtimeFormat.extension);
-      if (!updatedPath) {
-        stream.getTracks().forEach((track) => track.stop());
-        ledRenderer?.dispose();
-        setIsExporting(false);
-        return;
-      }
-      desktopExportPath = updatedPath;
-      recorder = startMediaRecorderWithFallback(stream, [activeRealtimeFormat], 100).recorder;
     }
 
     const mime = activeRealtimeFormat.mimeType;
@@ -3732,7 +3680,7 @@ const App: React.FC = () => {
       stream.getTracks().forEach((track) => track.stop());
       ledRenderer?.dispose();
       setIsExporting(false);
-      alert('实时录制导出失败：' + (err instanceof Error ? err.message : String(err)));
+      setProjectMessages([`实时录制导出失败：${err instanceof Error ? err.message : String(err)}`]);
       return;
     }
 
@@ -3742,8 +3690,8 @@ const App: React.FC = () => {
     ledRenderer?.dispose();
 
     if (!realtimeWritable) {
-      if (desktopExportPath) {
-        await writeBlobToElectronPath(desktopExportPath, blob);
+      if (isDesktopElectron) {
+        await saveBlobToElectron(downloadBaseName, activeRealtimeFormat.extension, blob);
       } else {
         downloadBlob(blob, `${downloadBaseName}.${activeRealtimeFormat.extension}`);
       }
@@ -3767,18 +3715,14 @@ const App: React.FC = () => {
       : null;
     const canFastExport = videoEncoderConfig != null;
     const realtimeFormat = getMediaRecorderExportFormat();
+    const isDesktopElectron = Boolean(window.electronAPI?.isElectron);
     const initialExtension = canFastExport ? 'mp4' : realtimeFormat.extension;
     const showSaveFilePicker = (window as any).showSaveFilePicker as
       | ((options?: any) => Promise<any>)
       | undefined;
     let mp4Writable: any = null;
     let realtimeWritable: any = null;
-    let desktopExportPath: string | null = null;
-
-    if (window.electronAPI?.isElectron) {
-      desktopExportPath = await requestElectronExportPath(downloadBaseName, initialExtension);
-      if (!desktopExportPath) return;
-    } else if (showSaveFilePicker) {
+    if (!isDesktopElectron && showSaveFilePicker) {
       try {
         const handle = await showSaveFilePicker({
           suggestedName: `${downloadBaseName}.${initialExtension}`,
@@ -4001,8 +3945,10 @@ const App: React.FC = () => {
           await mp4Writable.close();
         } else if (arrayBufferTarget) {
           const bytes = new Uint8Array(arrayBufferTarget.buffer);
-          if (desktopExportPath) {
-            await window.electronAPI.writeBinaryFile(desktopExportPath, bytes);
+          if (isDesktopElectron) {
+            await window.electronAPI.saveBinaryFile(`${downloadBaseName}.mp4`, bytes, [
+              { name: 'MP4 Video', extensions: ['mp4'] },
+            ]);
           } else {
             downloadBlob(new Blob([bytes], { type: 'video/mp4' }), `${downloadBaseName}.mp4`);
           }
@@ -4029,14 +3975,7 @@ const App: React.FC = () => {
 
     // --- Fallback: MediaRecorder (real-time rendering) ---
     if (canFastExport) {
-      if (window.electronAPI?.isElectron) {
-        desktopExportPath = await requestElectronExportPath(downloadBaseName, realtimeFormat.extension);
-        if (!desktopExportPath) {
-          offline.dispose();
-          setIsExporting(false);
-          return;
-        }
-      } else if (showSaveFilePicker && !realtimeWritable) {
+      if (!isDesktopElectron && showSaveFilePicker && !realtimeWritable) {
         try {
           const handle = await showSaveFilePicker({
             suggestedName: `${downloadBaseName}.${realtimeFormat.extension}`,
@@ -4100,21 +4039,8 @@ const App: React.FC = () => {
       }
       offline.dispose();
       setIsExporting(false);
-      alert('实时录制导出失败：' + (err instanceof Error ? err.message : String(err)));
+      setProjectMessages([`实时录制导出失败：${err instanceof Error ? err.message : String(err)}`]);
       return;
-    }
-
-    if (desktopExportPath && activeRealtimeFormat.extension !== realtimeFormat.extension) {
-      recorder.stop();
-      const updatedPath = await requestElectronExportPath(downloadBaseName, activeRealtimeFormat.extension);
-      if (!updatedPath) {
-        stream.getTracks().forEach((track) => track.stop());
-        offline.dispose();
-        setIsExporting(false);
-        return;
-      }
-      desktopExportPath = updatedPath;
-      recorder = startMediaRecorderWithFallback(stream, [activeRealtimeFormat], 100).recorder;
     }
 
     const mime = activeRealtimeFormat.mimeType;
@@ -4179,7 +4105,7 @@ const App: React.FC = () => {
       stream.getTracks().forEach((track) => track.stop());
       offline.dispose();
       setIsExporting(false);
-      alert('实时录制导出失败：' + (err instanceof Error ? err.message : String(err)));
+      setProjectMessages([`实时录制导出失败：${err instanceof Error ? err.message : String(err)}`]);
       return;
     }
 
@@ -4188,8 +4114,8 @@ const App: React.FC = () => {
     setExportProgress(1);
 
     if (!realtimeWritable) {
-      if (desktopExportPath) {
-        await writeBlobToElectronPath(desktopExportPath, blob);
+      if (isDesktopElectron) {
+        await saveBlobToElectron(downloadBaseName, activeRealtimeFormat.extension, blob);
       } else {
         downloadBlob(blob, `${downloadBaseName}.${activeRealtimeFormat.extension}`);
       }
@@ -4209,11 +4135,11 @@ const App: React.FC = () => {
 
   const handleConfirmExport = async () => {
     if (inPointMs == null || outPointMs == null || outPointMs <= inPointMs) {
-      alert('请设置有效的导出入点和出点，出点必须晚于入点。');
+      setProjectMessages(['请设置有效的导出入点和出点，出点必须晚于入点。']);
       return;
     }
     if (!export2D && !export3D) {
-      alert('请至少选择一种输出：2D 视频或 3D 视频。');
+      setProjectMessages(['请至少选择一种输出：2D 视频或 3D 视频。']);
       return;
     }
 
@@ -4315,6 +4241,48 @@ const App: React.FC = () => {
         onConfirm={handleConfirmStageBackground}
         onCancel={() => setPendingStageBackground(null)}
       />
+      {pendingAIPlan && (
+        <div className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="ai-plan-conflict-title"
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') setPendingAIPlan(null);
+            }}
+            className="w-full max-w-lg rounded-2xl border border-violet-500/30 bg-slate-900 p-6 text-slate-100 shadow-2xl"
+          >
+            <h2 id="ai-plan-conflict-title" className="text-xl font-bold">如何应用 AI 初始化方案？</h2>
+            <p className="mt-4 text-sm leading-6 text-slate-300">
+              当前项目已有编排内容。你可以追加新内容、覆盖现有编排，或返回继续编辑。
+            </p>
+            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setPendingAIPlan(null)}
+                autoFocus
+                className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800"
+              >
+                返回编辑
+              </button>
+              <button
+                type="button"
+                onClick={() => handleResolveAIPlanConflict(false)}
+                className="rounded-lg border border-violet-500/50 px-4 py-2 text-sm font-medium text-violet-200 hover:bg-violet-500/10"
+              >
+                追加内容
+              </button>
+              <button
+                type="button"
+                onClick={() => handleResolveAIPlanConflict(true)}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500"
+              >
+                覆盖现有编排
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {resetProjectDialogMode && (
         <div className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
           <div
@@ -4528,9 +4496,12 @@ const App: React.FC = () => {
             onImportMusic={handleImportMusic}
             onExport={handleExportProject}
             onImportProject={handleImportProject}
-            onImportProjectPackage={handleImportProjectPackage}
-            onImportLegacyProject={handleImportLegacyProject}
-            onExportProjectPackage={handleExportProjectPackage}
+            onImportProjectPackage={projectTransfers.importProjectPackage}
+            onImportChoreography={projectTransfers.importChoreography}
+            onImportLegacyProject={projectTransfers.importLegacyProject}
+            onExportProjectPackage={projectTransfers.exportProjectPackage}
+            onExportChoreography={projectTransfers.exportChoreography}
+            onRestoreRecovery={projectTransfers.restoreRecoverySnapshot}
             selectedPerformerIds={selectedPerformerIds}
             onSelectionChange={setSelectedPerformerIds}
             musicName={musicName}
@@ -4540,6 +4511,7 @@ const App: React.FC = () => {
             onDuplicateFrame={handleDuplicateFrame}
             onReorderFrame={() => { }} // Disabled
             onResetProject={handleResetProject}
+            onDeletedCurrentProject={performResetProject}
             onRenameFrame={handleRenameFrame}
             widthPx={sidebarWidth}
             // Group Management Props

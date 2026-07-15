@@ -31,6 +31,17 @@ import type { LoginInput, AuthResponse, SessionData } from '../shared/types/auth
 const result: AuthResponse = await window.api.auth.login(data);
 ```
 
+### File Export Boundary
+
+The renderer must never receive a reusable filesystem write capability. Export IPC combines the native save dialog and write in one main-process handler.
+
+```typescript
+saveTextFile(defaultName, content, filters): Promise<string | null>;
+saveBinaryFile(defaultName, bytes, filters): Promise<string | null>;
+```
+
+Do not expose `readFile(path)`, `writeFile(path, content)`, or `writeBinaryFile(path, bytes)` through preload. Main-process project operations must validate project IDs and resolve all paths beneath managed storage.
+
 ### Preload API Structure
 
 ```typescript

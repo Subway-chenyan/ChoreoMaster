@@ -1,19 +1,3 @@
-// ==================== Project Storage Types ====================
-
-interface ProjectMeta {
-  id: string;
-  name: string;
-  createdAt: string;
-  updatedAt: string;
-  thumbnail?: string;
-}
-
-interface AppSettings {
-  storagePath: string;
-  recentProjects: string[];
-  maxRecentProjects: number;
-}
-
 // ==================== Update Types ====================
 
 type UpdateStatus =
@@ -39,26 +23,25 @@ interface UpdateState {
 }
 
 import type {
+  AppSettings,
   ProjectAssetKind,
   ProjectAssetResult,
   ProjectDocument,
   ProjectImportResult,
   ProjectLoadResult,
+  ProjectMeta,
+  ProjectRecoverySnapshot,
 } from './electron/project-contract';
 
 declare global {
   interface Window {
     electronAPI: {
       // Dialog operations
-      saveFile: (defaultName: string, filters?: Electron.FileFilter[]) => Promise<string | null>;
+      saveTextFile: (defaultName: string, content: string, filters?: Electron.FileFilter[]) => Promise<string | null>;
+      saveBinaryFile: (defaultName: string, content: Uint8Array, filters?: Electron.FileFilter[]) => Promise<string | null>;
       openFile: (filters: Electron.FileFilter[]) => Promise<string | null>;
       openMultipleFiles: (filters: Electron.FileFilter[]) => Promise<string[]>;
       selectDirectory: () => Promise<string | null>;
-
-      // File system operations
-      readFile: (filePath: string) => Promise<string>;
-      writeFile: (filePath: string, content: string) => Promise<void>;
-      writeBinaryFile: (filePath: string, content: Uint8Array) => Promise<void>;
 
       // Project storage operations
       project: {
@@ -72,10 +55,12 @@ declare global {
         ingestAsset: (projectId: string, sourcePath: string, kind: ProjectAssetKind) => Promise<ProjectAssetResult>;
         exportPackage: (projectId: string) => Promise<string | null>;
         importPackage: () => Promise<ProjectImportResult | null>;
+        exportChoreography: (projectId: string) => Promise<string | null>;
+        importChoreography: () => Promise<ProjectImportResult | null>;
         importLegacy: () => Promise<ProjectImportResult | null>;
+        listRecoverySnapshots: (projectId?: string) => Promise<ProjectRecoverySnapshot[]>;
+        restoreRecoverySnapshot: (snapshotId: string) => Promise<ProjectImportResult>;
         delete: (projectId: string) => Promise<void>;
-        copyMedia: (projectId: string, sourcePath: string, mediaType: 'audio' | 'media') => Promise<string>;
-        getMediaPath: (projectId: string, fileName: string, mediaType: 'audio' | 'media') => Promise<string>;
         openInExplorer: (projectId: string) => Promise<void>;
         openStorageFolder: () => Promise<void>;
         rename: (projectId: string, newName: string) => Promise<void>;

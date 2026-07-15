@@ -2,33 +2,32 @@ import { ipcMain, dialog, BrowserWindow, app, shell } from 'electron';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import type { ProjectAssetKind, ProjectDocument } from './project-contract.js';
+import type {
+  AppSettings,
+  ProjectAssetKind,
+  ProjectDocument,
+  ProjectMeta,
+  ProjectRecoverySnapshot,
+} from './project-contract.js';
 import {
   createManagedProject,
+  deleteManagedProject,
+  duplicateManagedProject,
+  exportChoreographyDocument,
   exportProjectPackage,
+  importChoreographyDocument,
   importLegacyProject,
   importProjectPackage,
   ingestProjectAsset,
+  listManagedProjects,
+  listProjectRecoverySnapshots,
   loadManagedProject,
+  resolveManagedProjectPath,
+  renameManagedProject,
+  restoreProjectRecoverySnapshot,
   saveManagedProject,
 } from './project-service.js';
 import { updaterManager } from './updater.js';
-
-// ==================== Project Storage Types ====================
-
-interface ProjectMeta {
-  id: string;
-  name: string;
-  createdAt: string;
-  updatedAt: string;
-  thumbnail?: string;
-}
-
-interface AppSettings {
-  storagePath: string;
-  recentProjects: string[]; // Project IDs
-  maxRecentProjects: number;
-}
 
 // ==================== Default Settings ====================
 
@@ -110,50 +109,25 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     return filePaths.length > 0 ? filePaths[0] : null;
   });
 
-  // ==================== File System Handlers ====================
-
-  ipcMain.handle('fs:readFile', async (_, filePath: string): Promise<string> => {
-    try {
-      const content = await fs.readFile(filePath, 'utf-8');
-      return content;
-    } catch (error) {
-      console.error('Failed to read file:', error);
-      throw error;
-    }
-  });
-
-  ipcMain.handle('fs:writeFile', async (_, filePath: string, content: string): Promise<void> => {
-    try {
-      // Ensure directory exists
-      const dir = path.dirname(filePath);
-      await fs.mkdir(dir, { recursive: true });
-
+  ipcMain.handle(
+    'dialog:saveTextFile',
+    async (_, defaultName: string, content: string, filters?: Electron.FileFilter[]): Promise<string | null> => {
+      const { filePath } = await dialog.showSaveDialog(mainWindow, { defaultPath: defaultName, filters });
+      if (!filePath) return null;
       await fs.writeFile(filePath, content, 'utf-8');
-    } catch (error) {
-      console.error('Failed to write file:', error);
-      throw error;
-    }
-  });
+      return filePath;
+    },
+  );
 
-  ipcMain.handle('fs:writeBinaryFile', async (_, filePath: string, content: Uint8Array): Promise<void> => {
-    try {
-      const dir = path.dirname(filePath);
-      await fs.mkdir(dir, { recursive: true });
+  ipcMain.handle(
+    'dialog:saveBinaryFile',
+    async (_, defaultName: string, content: Uint8Array, filters?: Electron.FileFilter[]): Promise<string | null> => {
+      const { filePath } = await dialog.showSaveDialog(mainWindow, { defaultPath: defaultName, filters });
+      if (!filePath) return null;
       await fs.writeFile(filePath, Buffer.from(content));
-    } catch (error) {
-      console.error('Failed to write binary file:', error);
-      throw error;
-    }
-  });
-
-  ipcMain.handle('fs:fileExists', async (_, filePath: string): Promise<boolean> => {
-    try {
-      await fs.access(filePath);
-      return true;
-    } catch {
-      return false;
-    }
-  });
+      return filePath;
+    },
+  );
 
   // ==================== Utility Handlers ====================
 
@@ -206,38 +180,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   // List all projects in storage
   ipcMain.handle('project:list', async (): Promise<ProjectMeta[]> => {
     const settings = await loadSettings();
-    const projectsDir = path.join(settings.storagePath, 'projects');
-    
-    try {
-      await ensureStorageDir(settings.storagePath);
-      const entries = await fs.readdir(projectsDir, { withFileTypes: true });
-      const projects: ProjectMeta[] = [];
-      
-      for (const entry of entries) {
-        if (entry.isDirectory()) {
-          const metaPath = path.join(projectsDir, entry.name, 'project.json');
-          try {
-            const content = await fs.readFile(metaPath, 'utf-8');
-            const data = JSON.parse(content);
-            projects.push({
-              id: entry.name,
-              name: data.name || entry.name,
-              createdAt: data.createdAt || new Date().toISOString(),
-              updatedAt: data.updatedAt || new Date().toISOString(),
-              thumbnail: data.thumbnail,
-            });
-          } catch {
-            // Skip invalid project folders
-          }
-        }
-      }
-      
-      // Sort by updatedAt descending
-      projects.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-      return projects;
-    } catch {
-      return [];
-    }
+    return listManagedProjects(settings.storagePath);
   });
 
   // Create a new project
@@ -286,7 +229,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
 
   ipcMain.handle('project:exportPackage', async (_, projectId: string): Promise<string | null> => {
     const settings = await loadSettings();
-    const projectDir = path.join(settings.storagePath, 'projects', projectId);
+    const projectDir = resolveManagedProjectPath(settings.storagePath, projectId);
     const content = JSON.parse(await fs.readFile(path.join(projectDir, 'project.json'), 'utf8')) as { name?: string };
     const defaultName = `${content.name || 'CosStage-project'}.zip`;
     const { filePath } = await dialog.showSaveDialog(mainWindow, {
@@ -319,6 +262,54 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     return result;
   });
 
+  ipcMain.handle('project:exportChoreography', async (_, projectId: string): Promise<string | null> => {
+    const settings = await loadSettings();
+    const projectDir = resolveManagedProjectPath(settings.storagePath, projectId);
+    const content = JSON.parse(await fs.readFile(path.join(projectDir, 'project.json'), 'utf8')) as { name?: string };
+    const { filePath } = await dialog.showSaveDialog(mainWindow, {
+      defaultPath: `${content.name || 'CosStage-choreography'}.cosstage.json`,
+      filters: [
+        { name: 'CosStage 编排 JSON', extensions: ['json'] },
+      ],
+    });
+    if (!filePath) return null;
+    await exportChoreographyDocument(settings.storagePath, projectId, filePath);
+    return filePath;
+  });
+
+  ipcMain.handle('project:importChoreography', async () => {
+    const { filePaths } = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile'],
+      filters: [
+        { name: 'CosStage 编排 JSON', extensions: ['json'] },
+      ],
+    });
+    if (filePaths.length === 0) return null;
+    const settings = await loadSettings();
+    const result = await importChoreographyDocument(settings.storagePath, filePaths[0]);
+    settings.recentProjects = [result.projectId, ...settings.recentProjects.filter((id) => id !== result.projectId)]
+      .slice(0, settings.maxRecentProjects);
+    await saveSettings(settings);
+    return result;
+  });
+
+  ipcMain.handle(
+    'project:listRecoverySnapshots',
+    async (_, projectId?: string): Promise<ProjectRecoverySnapshot[]> => {
+      const settings = await loadSettings();
+      return listProjectRecoverySnapshots(settings.storagePath, projectId);
+    },
+  );
+
+  ipcMain.handle('project:restoreRecoverySnapshot', async (_, snapshotId: string) => {
+    const settings = await loadSettings();
+    const result = await restoreProjectRecoverySnapshot(settings.storagePath, snapshotId);
+    settings.recentProjects = [result.projectId, ...settings.recentProjects.filter((id) => id !== result.projectId)]
+      .slice(0, settings.maxRecentProjects);
+    await saveSettings(settings);
+    return result;
+  });
+
   ipcMain.handle('project:importLegacy', async () => {
     const { filePaths } = await dialog.showOpenDialog(mainWindow, {
       properties: ['openFile'],
@@ -339,42 +330,17 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   // Delete a project
   ipcMain.handle('project:delete', async (_, projectId: string): Promise<void> => {
     const settings = await loadSettings();
-    const projectDir = path.join(settings.storagePath, 'projects', projectId);
-    
-    // Remove directory recursively
-    await fs.rm(projectDir, { recursive: true, force: true });
+    await deleteManagedProject(settings.storagePath, projectId);
     
     // Update recent projects
     settings.recentProjects = settings.recentProjects.filter(p => p !== projectId);
     await saveSettings(settings);
   });
 
-  // Copy media file to project
-  ipcMain.handle('project:copyMedia', async (_, projectId: string, sourcePath: string, mediaType: 'audio' | 'media'): Promise<string> => {
-    const settings = await loadSettings();
-    const projectDir = path.join(settings.storagePath, 'projects', projectId);
-    const targetDir = path.join(projectDir, mediaType);
-    
-    await fs.mkdir(targetDir, { recursive: true });
-    
-    const fileName = path.basename(sourcePath);
-    const targetPath = path.join(targetDir, fileName);
-    
-    await fs.copyFile(sourcePath, targetPath);
-    
-    return targetPath;
-  });
-
-  // Get media file path for project
-  ipcMain.handle('project:getMediaPath', async (_, projectId: string, fileName: string, mediaType: 'audio' | 'media'): Promise<string> => {
-    const settings = await loadSettings();
-    return path.join(settings.storagePath, 'projects', projectId, mediaType, fileName);
-  });
-
   // Open project folder in file explorer
   ipcMain.handle('project:openInExplorer', async (_, projectId: string): Promise<void> => {
     const settings = await loadSettings();
-    const projectDir = path.join(settings.storagePath, 'projects', projectId);
+    const projectDir = resolveManagedProjectPath(settings.storagePath, projectId);
     await shell.openPath(projectDir);
   });
 
@@ -387,62 +353,14 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   // Rename a project
   ipcMain.handle('project:rename', async (_, projectId: string, newName: string): Promise<void> => {
     const settings = await loadSettings();
-    const projectDir = path.join(settings.storagePath, 'projects', projectId);
-    const projectPath = path.join(projectDir, 'project.json');
-    
-    const content = await fs.readFile(projectPath, 'utf-8');
-    const data = JSON.parse(content);
-    data.name = newName;
-    data.updatedAt = new Date().toISOString();
-    
-    await fs.writeFile(projectPath, JSON.stringify(data, null, 2), 'utf-8');
+    await renameManagedProject(settings.storagePath, projectId, newName);
   });
 
   // Duplicate a project
   ipcMain.handle('project:duplicate', async (_, projectId: string): Promise<{ id: string; path: string }> => {
     const settings = await loadSettings();
-    const sourceDir = path.join(settings.storagePath, 'projects', projectId);
-    
-    // Load source project to get name
-    const sourceContent = await fs.readFile(path.join(sourceDir, 'project.json'), 'utf-8');
-    const sourceData = JSON.parse(sourceContent);
-    
-    // Create new project
-    const newName = `${sourceData.name} (Copy)`;
-    const slug = newName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-    const newId = `${slug}-${Date.now()}`;
-    const newDir = path.join(settings.storagePath, 'projects', newId);
-    
-    // Copy entire directory
-    await copyDir(sourceDir, newDir);
-    
-    // Update project.json with new name and timestamps
-    const newProjectPath = path.join(newDir, 'project.json');
-    const newData = JSON.parse(await fs.readFile(newProjectPath, 'utf-8'));
-    newData.name = newName;
-    newData.createdAt = new Date().toISOString();
-    newData.updatedAt = new Date().toISOString();
-    await fs.writeFile(newProjectPath, JSON.stringify(newData, null, 2), 'utf-8');
-    
-    return { id: newId, path: newDir };
+    return duplicateManagedProject(settings.storagePath, projectId);
   });
 
   console.log('IPC handlers registered successfully');
-}
-
-// Helper function to copy directory recursively
-async function copyDir(src: string, dest: string): Promise<void> {
-  await fs.mkdir(dest, { recursive: true });
-  const entries = await fs.readdir(src, { withFileTypes: true });
-  
-  for (const entry of entries) {
-    const srcPath = path.join(src, entry.name);
-    const destPath = path.join(dest, entry.name);
-    
-    if (entry.isDirectory()) {
-      await copyDir(srcPath, destPath);
-    } else {
-      await fs.copyFile(srcPath, destPath);
-    }
-  }
 }

@@ -1,8 +1,9 @@
-import { ipcMain, dialog, shell } from 'electron';
+import { ipcMain, dialog, app, shell } from 'electron';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { createManagedProject, exportProjectPackage, importLegacyProject, importProjectPackage, ingestProjectAsset, loadManagedProject, saveManagedProject, } from './project-service.js';
+import { createManagedProject, deleteManagedProject, duplicateManagedProject, exportChoreographyDocument, exportProjectPackage, importChoreographyDocument, importLegacyProject, importProjectPackage, ingestProjectAsset, listManagedProjects, listProjectRecoverySnapshots, loadManagedProject, resolveManagedProjectPath, renameManagedProject, restoreProjectRecoverySnapshot, saveManagedProject, } from './project-service.js';
+import { updaterManager } from './updater.js';
 // ==================== Default Settings ====================
 const DEFAULT_STORAGE_PATH = path.join(os.homedir(), '.choreo');
 function getSettingsPath() {
@@ -72,52 +73,36 @@ export function registerIpcHandlers(mainWindow) {
         });
         return filePaths.length > 0 ? filePaths[0] : null;
     });
-    // ==================== File System Handlers ====================
-    ipcMain.handle('fs:readFile', async (_, filePath) => {
-        try {
-            const content = await fs.readFile(filePath, 'utf-8');
-            return content;
-        }
-        catch (error) {
-            console.error('Failed to read file:', error);
-            throw error;
-        }
+    ipcMain.handle('dialog:saveTextFile', async (_, defaultName, content, filters) => {
+        const { filePath } = await dialog.showSaveDialog(mainWindow, { defaultPath: defaultName, filters });
+        if (!filePath)
+            return null;
+        await fs.writeFile(filePath, content, 'utf-8');
+        return filePath;
     });
-    ipcMain.handle('fs:writeFile', async (_, filePath, content) => {
-        try {
-            // Ensure directory exists
-            const dir = path.dirname(filePath);
-            await fs.mkdir(dir, { recursive: true });
-            await fs.writeFile(filePath, content, 'utf-8');
-        }
-        catch (error) {
-            console.error('Failed to write file:', error);
-            throw error;
-        }
-    });
-    ipcMain.handle('fs:writeBinaryFile', async (_, filePath, content) => {
-        try {
-            const dir = path.dirname(filePath);
-            await fs.mkdir(dir, { recursive: true });
-            await fs.writeFile(filePath, Buffer.from(content));
-        }
-        catch (error) {
-            console.error('Failed to write binary file:', error);
-            throw error;
-        }
-    });
-    ipcMain.handle('fs:fileExists', async (_, filePath) => {
-        try {
-            await fs.access(filePath);
-            return true;
-        }
-        catch {
-            return false;
-        }
+    ipcMain.handle('dialog:saveBinaryFile', async (_, defaultName, content, filters) => {
+        const { filePath } = await dialog.showSaveDialog(mainWindow, { defaultPath: defaultName, filters });
+        if (!filePath)
+            return null;
+        await fs.writeFile(filePath, Buffer.from(content));
+        return filePath;
     });
     // ==================== Utility Handlers ====================
     ipcMain.handle('app:getVersion', async () => {
-        return '1.0.0';
+        return app.getVersion();
+    });
+    // ==================== Update Handlers ====================
+    ipcMain.handle('update:getState', async () => {
+        return updaterManager.getState();
+    });
+    ipcMain.handle('update:check', async () => {
+        await updaterManager.checkForUpdates(true);
+    });
+    ipcMain.handle('update:download', async () => {
+        await updaterManager.downloadUpdate();
+    });
+    ipcMain.handle('update:install', async () => {
+        updaterManager.quitAndInstall();
     });
     // ==================== Project Storage Handlers ====================
     // Get app settings (storage path, recent projects)
@@ -142,37 +127,7 @@ export function registerIpcHandlers(mainWindow) {
     // List all projects in storage
     ipcMain.handle('project:list', async () => {
         const settings = await loadSettings();
-        const projectsDir = path.join(settings.storagePath, 'projects');
-        try {
-            await ensureStorageDir(settings.storagePath);
-            const entries = await fs.readdir(projectsDir, { withFileTypes: true });
-            const projects = [];
-            for (const entry of entries) {
-                if (entry.isDirectory()) {
-                    const metaPath = path.join(projectsDir, entry.name, 'project.json');
-                    try {
-                        const content = await fs.readFile(metaPath, 'utf-8');
-                        const data = JSON.parse(content);
-                        projects.push({
-                            id: entry.name,
-                            name: data.name || entry.name,
-                            createdAt: data.createdAt || new Date().toISOString(),
-                            updatedAt: data.updatedAt || new Date().toISOString(),
-                            thumbnail: data.thumbnail,
-                        });
-                    }
-                    catch {
-                        // Skip invalid project folders
-                    }
-                }
-            }
-            // Sort by updatedAt descending
-            projects.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-            return projects;
-        }
-        catch {
-            return [];
-        }
+        return listManagedProjects(settings.storagePath);
     });
     // Create a new project
     ipcMain.handle('project:create', async (_, name) => {
@@ -208,13 +163,14 @@ export function registerIpcHandlers(mainWindow) {
     });
     ipcMain.handle('project:exportPackage', async (_, projectId) => {
         const settings = await loadSettings();
-        const projectDir = path.join(settings.storagePath, 'projects', projectId);
+        const projectDir = resolveManagedProjectPath(settings.storagePath, projectId);
         const content = JSON.parse(await fs.readFile(path.join(projectDir, 'project.json'), 'utf8'));
-        const defaultName = `${content.name || 'CosStage-project'}.choreo`;
+        const defaultName = `${content.name || 'CosStage-project'}.zip`;
         const { filePath } = await dialog.showSaveDialog(mainWindow, {
             defaultPath: defaultName,
             filters: [
-                { name: 'CosStage Project Package', extensions: ['choreo'] },
+                { name: '项目压缩包 (*.zip)', extensions: ['zip'] },
+                { name: 'CosStage 项目包 (*.choreo)', extensions: ['choreo'] },
                 { name: 'All Files', extensions: ['*'] },
             ],
         });
@@ -227,7 +183,7 @@ export function registerIpcHandlers(mainWindow) {
         const { filePaths } = await dialog.showOpenDialog(mainWindow, {
             properties: ['openFile'],
             filters: [
-                { name: 'CosStage Project Package', extensions: ['choreo'] },
+                { name: '项目压缩包 / CosStage 项目包', extensions: ['zip', 'choreo'] },
                 { name: 'All Files', extensions: ['*'] },
             ],
         });
@@ -236,6 +192,49 @@ export function registerIpcHandlers(mainWindow) {
         const settings = await loadSettings();
         const result = await importProjectPackage(settings.storagePath, filePaths[0]);
         settings.recentProjects = [result.projectId, ...settings.recentProjects.filter(p => p !== result.projectId)]
+            .slice(0, settings.maxRecentProjects);
+        await saveSettings(settings);
+        return result;
+    });
+    ipcMain.handle('project:exportChoreography', async (_, projectId) => {
+        const settings = await loadSettings();
+        const projectDir = resolveManagedProjectPath(settings.storagePath, projectId);
+        const content = JSON.parse(await fs.readFile(path.join(projectDir, 'project.json'), 'utf8'));
+        const { filePath } = await dialog.showSaveDialog(mainWindow, {
+            defaultPath: `${content.name || 'CosStage-choreography'}.cosstage.json`,
+            filters: [
+                { name: 'CosStage 编排 JSON', extensions: ['json'] },
+            ],
+        });
+        if (!filePath)
+            return null;
+        await exportChoreographyDocument(settings.storagePath, projectId, filePath);
+        return filePath;
+    });
+    ipcMain.handle('project:importChoreography', async () => {
+        const { filePaths } = await dialog.showOpenDialog(mainWindow, {
+            properties: ['openFile'],
+            filters: [
+                { name: 'CosStage 编排 JSON', extensions: ['json'] },
+            ],
+        });
+        if (filePaths.length === 0)
+            return null;
+        const settings = await loadSettings();
+        const result = await importChoreographyDocument(settings.storagePath, filePaths[0]);
+        settings.recentProjects = [result.projectId, ...settings.recentProjects.filter((id) => id !== result.projectId)]
+            .slice(0, settings.maxRecentProjects);
+        await saveSettings(settings);
+        return result;
+    });
+    ipcMain.handle('project:listRecoverySnapshots', async (_, projectId) => {
+        const settings = await loadSettings();
+        return listProjectRecoverySnapshots(settings.storagePath, projectId);
+    });
+    ipcMain.handle('project:restoreRecoverySnapshot', async (_, snapshotId) => {
+        const settings = await loadSettings();
+        const result = await restoreProjectRecoverySnapshot(settings.storagePath, snapshotId);
+        settings.recentProjects = [result.projectId, ...settings.recentProjects.filter((id) => id !== result.projectId)]
             .slice(0, settings.maxRecentProjects);
         await saveSettings(settings);
         return result;
@@ -260,33 +259,15 @@ export function registerIpcHandlers(mainWindow) {
     // Delete a project
     ipcMain.handle('project:delete', async (_, projectId) => {
         const settings = await loadSettings();
-        const projectDir = path.join(settings.storagePath, 'projects', projectId);
-        // Remove directory recursively
-        await fs.rm(projectDir, { recursive: true, force: true });
+        await deleteManagedProject(settings.storagePath, projectId);
         // Update recent projects
         settings.recentProjects = settings.recentProjects.filter(p => p !== projectId);
         await saveSettings(settings);
     });
-    // Copy media file to project
-    ipcMain.handle('project:copyMedia', async (_, projectId, sourcePath, mediaType) => {
-        const settings = await loadSettings();
-        const projectDir = path.join(settings.storagePath, 'projects', projectId);
-        const targetDir = path.join(projectDir, mediaType);
-        await fs.mkdir(targetDir, { recursive: true });
-        const fileName = path.basename(sourcePath);
-        const targetPath = path.join(targetDir, fileName);
-        await fs.copyFile(sourcePath, targetPath);
-        return targetPath;
-    });
-    // Get media file path for project
-    ipcMain.handle('project:getMediaPath', async (_, projectId, fileName, mediaType) => {
-        const settings = await loadSettings();
-        return path.join(settings.storagePath, 'projects', projectId, mediaType, fileName);
-    });
     // Open project folder in file explorer
     ipcMain.handle('project:openInExplorer', async (_, projectId) => {
         const settings = await loadSettings();
-        const projectDir = path.join(settings.storagePath, 'projects', projectId);
+        const projectDir = resolveManagedProjectPath(settings.storagePath, projectId);
         await shell.openPath(projectDir);
     });
     // Open storage folder in file explorer
@@ -297,51 +278,12 @@ export function registerIpcHandlers(mainWindow) {
     // Rename a project
     ipcMain.handle('project:rename', async (_, projectId, newName) => {
         const settings = await loadSettings();
-        const projectDir = path.join(settings.storagePath, 'projects', projectId);
-        const projectPath = path.join(projectDir, 'project.json');
-        const content = await fs.readFile(projectPath, 'utf-8');
-        const data = JSON.parse(content);
-        data.name = newName;
-        data.updatedAt = new Date().toISOString();
-        await fs.writeFile(projectPath, JSON.stringify(data, null, 2), 'utf-8');
+        await renameManagedProject(settings.storagePath, projectId, newName);
     });
     // Duplicate a project
     ipcMain.handle('project:duplicate', async (_, projectId) => {
         const settings = await loadSettings();
-        const sourceDir = path.join(settings.storagePath, 'projects', projectId);
-        // Load source project to get name
-        const sourceContent = await fs.readFile(path.join(sourceDir, 'project.json'), 'utf-8');
-        const sourceData = JSON.parse(sourceContent);
-        // Create new project
-        const newName = `${sourceData.name} (Copy)`;
-        const slug = newName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-        const newId = `${slug}-${Date.now()}`;
-        const newDir = path.join(settings.storagePath, 'projects', newId);
-        // Copy entire directory
-        await copyDir(sourceDir, newDir);
-        // Update project.json with new name and timestamps
-        const newProjectPath = path.join(newDir, 'project.json');
-        const newData = JSON.parse(await fs.readFile(newProjectPath, 'utf-8'));
-        newData.name = newName;
-        newData.createdAt = new Date().toISOString();
-        newData.updatedAt = new Date().toISOString();
-        await fs.writeFile(newProjectPath, JSON.stringify(newData, null, 2), 'utf-8');
-        return { id: newId, path: newDir };
+        return duplicateManagedProject(settings.storagePath, projectId);
     });
     console.log('IPC handlers registered successfully');
-}
-// Helper function to copy directory recursively
-async function copyDir(src, dest) {
-    await fs.mkdir(dest, { recursive: true });
-    const entries = await fs.readdir(src, { withFileTypes: true });
-    for (const entry of entries) {
-        const srcPath = path.join(src, entry.name);
-        const destPath = path.join(dest, entry.name);
-        if (entry.isDirectory()) {
-            await copyDir(srcPath, destPath);
-        }
-        else {
-            await fs.copyFile(srcPath, destPath);
-        }
-    }
 }

@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import isDev from 'electron-is-dev';
 import { getProjectStoragePath, registerIpcHandlers } from './ipc-handlers.js';
 import { resolveProjectAssetPath } from './project-service.js';
+import { updaterManager } from './updater.js';
 // ESM 兼容: 获取 __dirname
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -73,7 +74,6 @@ async function respondWithProjectAsset(request, assetPath) {
         return new Response('Project asset not found', { status: 404 });
     const size = stats.size;
     const headers = new Headers();
-    headers.set('Access-Control-Allow-Origin', '*');
     headers.set('Accept-Ranges', 'bytes');
     const contentType = contentTypeForPath(assetPath);
     if (contentType)
@@ -132,7 +132,7 @@ function createWindow() {
             preload: path.join(__dirname, 'preload.js'),
             contextIsolation: true,
             nodeIntegration: false,
-            sandbox: false,
+            sandbox: true,
         },
         show: false,
     });
@@ -158,6 +158,9 @@ app.whenReady().then(async () => {
     createWindow();
     if (mainWindow) {
         registerIpcHandlers(mainWindow);
+        updaterManager.init(mainWindow);
+        // 启动后延迟检查更新，避免影响启动速度
+        setTimeout(() => updaterManager.checkForUpdates(), 5000);
     }
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) {

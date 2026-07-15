@@ -8,12 +8,20 @@ import { ZipArchive } from 'archiver';
 import crc32 from 'buffer-crc32';
 import {
   createManagedProject,
+  deleteManagedProject,
+  duplicateManagedProject,
+  exportChoreographyDocument,
   exportProjectPackage,
+  importChoreographyDocument,
   importLegacyProject,
   importProjectPackage,
   ingestProjectAsset,
+  listManagedProjects,
+  listProjectRecoverySnapshots,
   loadManagedProject,
   resolveProjectAssetPath,
+  renameManagedProject,
+  restoreProjectRecoverySnapshot,
   saveManagedProject,
 } from '../dist-electron/project-service.js';
 
@@ -374,6 +382,130 @@ test('rejects archive entries that attempt path traversal', async () => {
     ]);
 
     await assert.rejects(importProjectPackage(storagePath, packagePath), /Unsafe archive entry|escapes its root/);
+  });
+});
+
+test('exports and imports choreography-only JSON as a new project without binary assets', async () => {
+  await withTempDir(async (storagePath) => {
+    const created = await createManagedProject(storagePath, 'Choreography Source');
+    await saveManagedProject(storagePath, created.id, {
+      ...projectDocument('Choreography Source'),
+      musicName: 'song.mp3',
+      musicAsset: 'assets/audio/song.mp3',
+    });
+    const jsonPath = path.join(storagePath, 'formation.json');
+
+    await exportChoreographyDocument(storagePath, created.id, jsonPath);
+    const exported = JSON.parse(await readFile(jsonPath, 'utf8'));
+    assert.equal(exported.format, 'cosstage-choreography');
+    assert.equal(exported.schemaVersion, 1);
+    assert.equal(exported.musicAsset, undefined);
+    assert.equal(exported.performers[0].boxTextures, undefined);
+
+    const imported = await importChoreographyDocument(storagePath, jsonPath);
+    assert.notEqual(imported.projectId, created.id);
+    assert.equal(imported.data.frames.length, 1);
+    assert.equal(imported.data.musicAsset, null);
+    assert.equal(imported.data.performers[0].boxTextures, undefined);
+  });
+});
+
+test('keeps five recovery snapshots and restores one as a new project', async () => {
+  await withTempDir(async (storagePath) => {
+    const created = await createManagedProject(storagePath, 'Recovery Source');
+    for (let index = 0; index < 7; index += 1) {
+      await saveManagedProject(storagePath, created.id, {
+        ...projectDocument('Recovery Source'),
+        frames: [{
+          id: `frame-${index}`,
+          name: `Version ${index}`,
+          startTime: 0,
+          duration: 2000,
+          positions: {},
+        }],
+      });
+    }
+
+    const snapshots = await listProjectRecoverySnapshots(storagePath, created.id);
+    assert.equal(snapshots.length, 5);
+    assert.equal(snapshots[0].sourceProjectId, created.id);
+
+    const restored = await restoreProjectRecoverySnapshot(storagePath, snapshots[0].id);
+    assert.notEqual(restored.projectId, created.id);
+    assert.equal(restored.data.frames[0].name, 'Version 5');
+    assert.match(restored.data.name, /Recovery Source/);
+  });
+});
+
+test('skips blank initialization snapshots and keeps the first meaningful version', async () => {
+  await withTempDir(async (storagePath) => {
+    const created = await createManagedProject(storagePath, 'Fresh Project');
+    await saveManagedProject(storagePath, created.id, projectDocument('Fresh Project'));
+    assert.equal((await listProjectRecoverySnapshots(storagePath, created.id)).length, 0);
+
+    await saveManagedProject(storagePath, created.id, {
+      ...projectDocument('Fresh Project'),
+      frames: [{
+        id: 'frame-2',
+        name: 'Changed',
+        startTime: 0,
+        duration: 2000,
+        positions: {},
+      }],
+    });
+    const snapshots = await listProjectRecoverySnapshots(storagePath, created.id);
+    assert.equal(snapshots.length, 1);
+    assert.equal(typeof snapshots[0].createdAt, 'number');
+  });
+});
+
+test('renames atomically and duplicates Chinese project names with valid IDs', async () => {
+  await withTempDir(async (storagePath) => {
+    const created = await createManagedProject(storagePath, '中文项目');
+    await saveManagedProject(storagePath, created.id, projectDocument('中文项目'));
+    await renameManagedProject(storagePath, created.id, '舞台方案');
+
+    const renamed = await loadManagedProject(storagePath, created.id);
+    assert.equal(renamed.data.name, '舞台方案');
+    assert.equal((await listProjectRecoverySnapshots(storagePath, created.id)).length, 1);
+
+    const duplicate = await duplicateManagedProject(storagePath, created.id);
+    assert.notEqual(duplicate.id, created.id);
+    assert.match(duplicate.id, /^[\p{L}\p{N}-]+$/u);
+    const duplicated = await loadManagedProject(storagePath, duplicate.id);
+    assert.equal(duplicated.data.name, '舞台方案 (副本)');
+    assert.equal((await listManagedProjects(storagePath)).length, 2);
+
+    await deleteManagedProject(storagePath, created.id);
+    assert.equal((await listManagedProjects(storagePath)).length, 1);
+    assert.equal((await listProjectRecoverySnapshots(storagePath, created.id)).length, 0);
+  });
+});
+
+test('invalid choreography JSON never installs a partial project', async () => {
+  await withTempDir(async (storagePath) => {
+    const jsonPath = path.join(storagePath, 'invalid-choreography.json');
+    await writeFile(jsonPath, JSON.stringify({
+      format: 'cosstage-choreography',
+      schemaVersion: 1,
+      name: 'Broken',
+      performers: [],
+    }));
+
+    await assert.rejects(importChoreographyDocument(storagePath, jsonPath), /performers or frames/);
+    assert.equal((await listManagedProjects(storagePath)).length, 0);
+  });
+});
+
+test('rejects project packages with too many archive entries before extracting them', async () => {
+  await withTempDir(async (storagePath) => {
+    const packagePath = path.join(storagePath, 'too-many-files.choreo');
+    await createRawZip(packagePath, Array.from({ length: 501 }, (_, index) => ({
+      name: `assets/audio/${index}.txt`,
+      content: 'x',
+    })));
+
+    await assert.rejects(importProjectPackage(storagePath, packagePath), /too many files/i);
   });
 });
 

@@ -74,7 +74,6 @@ async function respondWithProjectAsset(request: Request, assetPath: string): Pro
 
   const size = stats.size;
   const headers = new Headers();
-  headers.set('Access-Control-Allow-Origin', '*');
   headers.set('Accept-Ranges', 'bytes');
 
   const contentType = contentTypeForPath(assetPath);
@@ -134,7 +133,7 @@ function createWindow(): void {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
     },
     show: false,
   });

@@ -1,5 +1,6 @@
 
 export type {
+  AppSettings,
   AudioMarker,
   BoxTextures,
   ExtrudedTextures,
@@ -16,9 +17,13 @@ export type {
   Position,
   ProjectAssetKind,
   ProjectAssetResult,
+  ChoreographyDocument,
   ProjectDocument,
   ProjectImportResult,
   ProjectLoadResult,
+  ProjectMeta,
+  ProjectTemplateData,
+  ProjectRecoverySnapshot,
   ProjectWarning,
   PropCategory,
   PropGeometryType,

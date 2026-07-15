@@ -300,6 +300,42 @@ export interface ProjectDocument {
   performerNotes?: PerformerNote[];
 }
 
+export type ProjectTemplateData = Partial<ProjectDocument>;
+
+export interface ChoreographyDocument {
+  format: 'cosstage-choreography';
+  schemaVersion: 1;
+  name: string;
+  performers: Performer[];
+  performerGroups: PerformerGroup[];
+  frames: Frame[];
+  transitions: TransitionSegment[];
+  audioMarkers: AudioMarker[];
+  stageConfig: StageConfig;
+  performerNotes: PerformerNote[];
+}
+
+export interface ProjectRecoverySnapshot {
+  id: string;
+  sourceProjectId: string;
+  projectName: string;
+  createdAt: number;
+}
+
+export interface ProjectMeta {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  thumbnail?: string;
+}
+
+export interface AppSettings {
+  storagePath: string;
+  recentProjects: string[];
+  maxRecentProjects: number;
+}
+
 export type ProjectAssetKind = 'audio' | 'background' | 'stage-background';
 
 export interface ProjectAssetResult {

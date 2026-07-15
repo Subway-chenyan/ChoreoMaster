@@ -1,27 +1,14 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
+  AppSettings,
   ProjectAssetKind,
   ProjectAssetResult,
   ProjectDocument,
   ProjectImportResult,
   ProjectLoadResult,
+  ProjectMeta,
+  ProjectRecoverySnapshot,
 } from './project-contract.js';
-
-// ==================== Project Storage Types ====================
-
-export interface ProjectMeta {
-  id: string;
-  name: string;
-  createdAt: string;
-  updatedAt: string;
-  thumbnail?: string;
-}
-
-export interface AppSettings {
-  storagePath: string;
-  recentProjects: string[];
-  maxRecentProjects: number;
-}
 
 // ==================== Update Types ====================
 
@@ -49,15 +36,11 @@ export interface UpdateState {
 
 export interface ElectronAPI {
   // Dialog operations
-  saveFile: (defaultName: string, filters?: Electron.FileFilter[]) => Promise<string | null>;
+  saveTextFile: (defaultName: string, content: string, filters?: Electron.FileFilter[]) => Promise<string | null>;
+  saveBinaryFile: (defaultName: string, content: Uint8Array, filters?: Electron.FileFilter[]) => Promise<string | null>;
   openFile: (filters: Electron.FileFilter[]) => Promise<string | null>;
   openMultipleFiles: (filters: Electron.FileFilter[]) => Promise<string[]>;
   selectDirectory: () => Promise<string | null>;
-
-  // File system operations
-  readFile: (filePath: string) => Promise<string>;
-  writeFile: (filePath: string, content: string) => Promise<void>;
-  writeBinaryFile: (filePath: string, content: Uint8Array) => Promise<void>;
 
   // Project storage operations
   project: {
@@ -71,10 +54,12 @@ export interface ElectronAPI {
     ingestAsset: (projectId: string, sourcePath: string, kind: ProjectAssetKind) => Promise<ProjectAssetResult>;
     exportPackage: (projectId: string) => Promise<string | null>;
     importPackage: () => Promise<ProjectImportResult | null>;
+    exportChoreography: (projectId: string) => Promise<string | null>;
+    importChoreography: () => Promise<ProjectImportResult | null>;
     importLegacy: () => Promise<ProjectImportResult | null>;
+    listRecoverySnapshots: (projectId?: string) => Promise<ProjectRecoverySnapshot[]>;
+    restoreRecoverySnapshot: (snapshotId: string) => Promise<ProjectImportResult>;
     delete: (projectId: string) => Promise<void>;
-    copyMedia: (projectId: string, sourcePath: string, mediaType: 'audio' | 'media') => Promise<string>;
-    getMediaPath: (projectId: string, fileName: string, mediaType: 'audio' | 'media') => Promise<string>;
     openInExplorer: (projectId: string) => Promise<void>;
     openStorageFolder: () => Promise<void>;
     rename: (projectId: string, newName: string) => Promise<void>;
@@ -98,22 +83,16 @@ export interface ElectronAPI {
 
 const electronAPI: ElectronAPI = {
   // Dialog operations
-  saveFile: (defaultName: string, filters?: Electron.FileFilter[]) =>
-    ipcRenderer.invoke('dialog:saveFile', defaultName, filters),
+  saveTextFile: (defaultName: string, content: string, filters?: Electron.FileFilter[]) =>
+    ipcRenderer.invoke('dialog:saveTextFile', defaultName, content, filters),
+  saveBinaryFile: (defaultName: string, content: Uint8Array, filters?: Electron.FileFilter[]) =>
+    ipcRenderer.invoke('dialog:saveBinaryFile', defaultName, content, filters),
   openFile: (filters: Electron.FileFilter[]) =>
     ipcRenderer.invoke('dialog:openFile', filters),
   openMultipleFiles: (filters: Electron.FileFilter[]) =>
     ipcRenderer.invoke('dialog:openMultipleFiles', filters),
   selectDirectory: () =>
     ipcRenderer.invoke('dialog:selectDirectory'),
-
-  // File system operations
-  readFile: (filePath: string) =>
-    ipcRenderer.invoke('fs:readFile', filePath),
-  writeFile: (filePath: string, content: string) =>
-    ipcRenderer.invoke('fs:writeFile', filePath, content),
-  writeBinaryFile: (filePath: string, content: Uint8Array) =>
-    ipcRenderer.invoke('fs:writeBinaryFile', filePath, content),
 
   // Project storage operations
   project: {
@@ -127,10 +106,12 @@ const electronAPI: ElectronAPI = {
     ingestAsset: (projectId, sourcePath, kind) => ipcRenderer.invoke('project:ingestAsset', projectId, sourcePath, kind),
     exportPackage: (projectId) => ipcRenderer.invoke('project:exportPackage', projectId),
     importPackage: () => ipcRenderer.invoke('project:importPackage'),
+    exportChoreography: (projectId) => ipcRenderer.invoke('project:exportChoreography', projectId),
+    importChoreography: () => ipcRenderer.invoke('project:importChoreography'),
     importLegacy: () => ipcRenderer.invoke('project:importLegacy'),
+    listRecoverySnapshots: (projectId) => ipcRenderer.invoke('project:listRecoverySnapshots', projectId),
+    restoreRecoverySnapshot: (snapshotId) => ipcRenderer.invoke('project:restoreRecoverySnapshot', snapshotId),
     delete: (projectId) => ipcRenderer.invoke('project:delete', projectId),
-    copyMedia: (projectId, sourcePath, mediaType) => ipcRenderer.invoke('project:copyMedia', projectId, sourcePath, mediaType),
-    getMediaPath: (projectId, fileName, mediaType) => ipcRenderer.invoke('project:getMediaPath', projectId, fileName, mediaType),
     openInExplorer: (projectId) => ipcRenderer.invoke('project:openInExplorer', projectId),
     openStorageFolder: () => ipcRenderer.invoke('project:openStorageFolder'),
     rename: (projectId, newName) => ipcRenderer.invoke('project:rename', projectId, newName),
