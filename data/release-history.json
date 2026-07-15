@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "currentVersion": "1.0.0",
+  "releases": [
+    {
+      "version": "1.0.0",
+      "date": "2026-07-15",
+      "kind": "major",
+      "title": "CosStage 1.0.0",
+      "summary": "CosStage 首个 Windows 桌面版本。",
+      "changes": [
+        {
+          "kind": "major",
+          "text": "提供队形编排、时间轴、2D/3D 舞台预览与项目管理。"
+        }
+      ],
+      "breakingChanges": [
+        "这是首个公开版本，没有更早的稳定项目格式兼容承诺。"
+      ],
+      "migrationSteps": [
+        "首次安装无需迁移；请在开始编排前选择项目存储目录。"
+      ]
+    }
+  ]
+}
