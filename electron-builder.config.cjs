@@ -8,7 +8,7 @@ module.exports = {
   },
   files: [
     'dist-electron/main.js',
-    'dist-electron/preload.js',
+    'dist-electron/preload.cjs',
     'dist-electron/ipc-handlers.js',
     'dist-electron/updater.js',
     'dist-electron/project-contract.js',

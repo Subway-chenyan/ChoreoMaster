@@ -1,3 +1,4 @@
+// Sandboxed Electron preloads must compile as a standalone CommonJS entry.
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
   AppSettings,

@@ -745,3 +745,72 @@ await window.electronAPI.project.save(projectId, snapshot.document);
 setLastSavedState(snapshot.state);
 setLastSavedAt(Date.now());
 ```
+
+## Scenario: Sandboxed Preload Packaging Boundary
+
+### 1. Scope / Trigger
+
+- Trigger: changing the Electron preload source, TypeScript module output, `BrowserWindow.webPreferences`, or Electron Builder file allowlist.
+
+### 2. Signatures
+
+- Preload source: `electron/preload.cts`
+- Compiled entry: `dist-electron/preload.cjs`
+- Window configuration: `preload: path.join(__dirname, 'preload.cjs')`
+- Packaging allowlist: `'dist-electron/preload.cjs'`
+
+### 3. Contracts
+
+- Keep `sandbox: true`, `contextIsolation: true`, and `nodeIntegration: false` on the main renderer window.
+- The sandboxed preload must be a standalone CommonJS entry. Its emitted runtime imports may use only Electron's sandbox-supported `require('electron')` bridge.
+- Cross-layer contract imports in the preload must remain type-only so the emitted preload does not require local project modules.
+- The main-process filename, TypeScript output filename, and Electron Builder allowlist must all point to the same `.cjs` artifact.
+- Do not package or reference a stale ESM `preload.js`; an ESM import failure leaves `window.electronAPI` undefined and makes the desktop renderer fall back to Web-only UI.
+
+### 4. Validation & Error Matrix
+
+- Compiled preload starts with an ESM `import` while sandboxing is enabled -> Electron logs `Cannot use import statement outside a module`; reject the build.
+- Main process references `preload.js` while TypeScript emits `preload.cjs` -> preload is missing; reject the build.
+- Builder omits `dist-electron/preload.cjs` -> packaged app has no desktop bridge; reject the package.
+- `window.electronAPI?.isElectron !== true` in a packaged smoke test -> desktop detection failed; reject the package.
+- Disabling the sandbox only to make an ESM preload run -> security regression; reject the change.
+
+### 5. Good/Base/Bad Cases
+
+- Good: packaged Electron exposes `window.electronAPI.project`, shows the local project manager, and does not show the Web save reminder.
+- Base: `npm run build:main` emits one CommonJS preload that contains `require('electron')` and no ESM import statement.
+- Bad: source tests pass, but the packaged ASAR contains only `dist-electron/preload.js` or omits the preload entirely.
+
+### 6. Tests Required
+
+- Desktop regression asserts the sandbox stays enabled and the main process references `preload.cjs`.
+- Desktop regression asserts the compiled preload contains `require('electron')` and no ESM `import` statement.
+- Desktop regression asserts Electron Builder includes `dist-electron/preload.cjs` and excludes the old `preload.js` path.
+- Packaged smoke verification asserts `window.electronAPI.isElectron === true`, project methods are present, the project manager is visible, and the Web save reminder is absent.
+- Electron startup logs must contain no `Unable to load preload script` or preload syntax error.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```typescript
+// dist-electron/preload.js (ESM) cannot run in the sandbox bundle.
+import { contextBridge, ipcRenderer } from 'electron';
+
+webPreferences: {
+  preload: path.join(__dirname, 'preload.js'),
+  sandbox: true,
+}
+```
+
+#### Correct
+
+```typescript
+// electron/preload.cts -> dist-electron/preload.cjs
+import { contextBridge, ipcRenderer } from 'electron';
+
+webPreferences: {
+  preload: path.join(__dirname, 'preload.cjs'),
+  sandbox: true,
+}
+```

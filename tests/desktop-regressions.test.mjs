@@ -73,6 +73,23 @@ test('desktop project lifecycle is durable, non-destructive, and uses custom dia
   assert.doesNotMatch(`${app}\n${browser}\n${sidebar}`, /window\.(?:alert|confirm|prompt)\(/);
 });
 
+test('sandboxed Electron loads the preload bridge as CommonJS', async () => {
+  const [main, builder] = await Promise.all([
+    read('electron/main.ts'),
+    read('electron-builder.config.cjs'),
+  ]);
+  const preloadMatch = main.match(/preload: path\.join\(__dirname, '([^']+)'\)/);
+
+  assert.equal(preloadMatch?.[1], 'preload.cjs');
+  assert.match(builder, /'dist-electron\/preload\.cjs'/);
+  assert.doesNotMatch(builder, /'dist-electron\/preload\.js'/);
+
+  const compiledPreload = await read('dist-electron/preload.cjs');
+  assert.doesNotMatch(compiledPreload, /^\s*import\s/m);
+  assert.match(compiledPreload, /require\(["']electron["']\)/);
+  assert.match(main, /sandbox: true/);
+});
+
 test('project asset protocol forwards media request headers', async () => {
   const source = await read('electron/main.ts');
   assert.match(source, /request\.headers\.get\('range'\)/);
@@ -98,7 +115,7 @@ test('3D labels stay below application overlays', async () => {
 test('desktop export uses native binary save dialog and bounded recording waits', async () => {
   const [app, preload, ipc, offline] = await Promise.all([
     read('App.tsx'),
-    read('electron/preload.ts'),
+    read('electron/preload.cts'),
     read('electron/ipc-handlers.ts'),
     read('utils/OfflineRenderer3D.ts'),
   ]);
@@ -140,7 +157,7 @@ test('Electron build excludes the embedded Agent and FFmpeg', async () => {
     read('package.json'),
     read('electron-builder.config.cjs'),
     read('electron/main.ts'),
-    read('electron/preload.ts'),
+    read('electron/preload.cts'),
     read('services/choreoAgentService.ts'),
   ]);
 
@@ -228,7 +245,7 @@ test('project saving preserves editor state and exposes autosave feedback', asyn
     read('App.tsx'),
     read('components/Sidebar.tsx'),
     read('electron/ipc-handlers.ts'),
-    read('electron/preload.ts'),
+    read('electron/preload.cts'),
   ]);
   const saveHandler = app.slice(
     app.indexOf('const handleSaveProject'),
