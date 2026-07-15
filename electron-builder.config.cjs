@@ -11,6 +11,7 @@ module.exports = {
     'dist-electron/preload.cjs',
     'dist-electron/ipc-handlers.js',
     'dist-electron/updater.js',
+    'dist-electron/update-contract.js',
     'dist-electron/project-contract.js',
     'dist-electron/project-service.js',
     'dist/**/*',

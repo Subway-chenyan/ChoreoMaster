@@ -1,27 +1,3 @@
-// ==================== Update Types ====================
-
-type UpdateStatus =
-  | 'idle'
-  | 'checking'
-  | 'available'
-  | 'not-available'
-  | 'downloading'
-  | 'downloaded'
-  | 'error';
-
-interface UpdateState {
-  status: UpdateStatus;
-  version?: string;
-  releaseNotes?: string;
-  progress?: {
-    percent: number;
-    bytesPerSecond: number;
-    transferred: number;
-    total: number;
-  };
-  error?: string;
-}
-
 import type {
   AppSettings,
   ProjectAssetKind,
@@ -32,6 +8,7 @@ import type {
   ProjectMeta,
   ProjectRecoverySnapshot,
 } from './electron/project-contract';
+import type { UpdateState } from './electron/update-contract.js';
 
 declare global {
   interface Window {
@@ -79,7 +56,7 @@ declare global {
       // System information
       isElectron: boolean;
       platform: string;
-      version: string;
+      getAppVersion: () => Promise<string>;
     };
   }
 }

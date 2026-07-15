@@ -47,7 +47,7 @@ const electronAPI = {
     // System information
     isElectron: true,
     platform: process.platform,
-    version: process.versions.electron || 'unknown',
+    getAppVersion: () => electron_1.ipcRenderer.invoke('app:getVersion'),
 };
 // Expose API to renderer process
 electron_1.contextBridge.exposeInMainWorld('electronAPI', electronAPI);

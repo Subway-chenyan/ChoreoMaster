@@ -10,30 +10,7 @@ import type {
   ProjectMeta,
   ProjectRecoverySnapshot,
 } from './project-contract.js';
-
-// ==================== Update Types ====================
-
-export type UpdateStatus =
-  | 'idle'
-  | 'checking'
-  | 'available'
-  | 'not-available'
-  | 'downloading'
-  | 'downloaded'
-  | 'error';
-
-export interface UpdateState {
-  status: UpdateStatus;
-  version?: string;
-  releaseNotes?: string;
-  progress?: {
-    percent: number;
-    bytesPerSecond: number;
-    transferred: number;
-    total: number;
-  };
-  error?: string;
-}
+import type { UpdateState } from './update-contract.js';
 
 export interface ElectronAPI {
   // Dialog operations
@@ -79,7 +56,7 @@ export interface ElectronAPI {
   // System information
   isElectron: boolean;
   platform: string;
-  version: string;
+  getAppVersion: () => Promise<string>;
 }
 
 const electronAPI: ElectronAPI = {
@@ -135,7 +112,7 @@ const electronAPI: ElectronAPI = {
   // System information
   isElectron: true,
   platform: process.platform,
-  version: process.versions.electron || 'unknown',
+  getAppVersion: (): Promise<string> => ipcRenderer.invoke('app:getVersion'),
 };
 
 // Expose API to renderer process

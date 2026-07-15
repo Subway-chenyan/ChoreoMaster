@@ -1,18 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Download, RefreshCw, CheckCircle, AlertCircle, X, ArrowUpCircle } from 'lucide-react';
-
-interface UpdateState {
-  status: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error';
-  version?: string;
-  releaseNotes?: string;
-  progress?: {
-    percent: number;
-    bytesPerSecond: number;
-    transferred: number;
-    total: number;
-  };
-  error?: string;
-}
+import type { UpdateState } from '../electron/update-contract.js';
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -111,7 +99,7 @@ export const UpdateNotification: React.FC = () => {
             <div className="flex items-center gap-2">
               <ArrowUpCircle size={16} className="text-blue-500" />
               <span className="text-sm font-bold text-slate-800 dark:text-white">
-                {isChecking ? '检查更新...' : `新版本 ${state.version || ''}`}
+                {isChecking ? '检查更新...' : `新版本 ${state.availableVersion || ''}`}
               </span>
             </div>
             <button
@@ -136,7 +124,7 @@ export const UpdateNotification: React.FC = () => {
             {isAvailable && (
               <>
                 <div className="text-sm text-slate-600 dark:text-slate-300">
-                  发现新版本 <span className="font-semibold text-blue-600 dark:text-blue-400">{state.version}</span>
+                  发现新版本 <span className="font-semibold text-blue-600 dark:text-blue-400">{state.availableVersion}</span>
                 </div>
                 {state.releaseNotes && (
                   <div className="text-xs text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 rounded-lg p-3 max-h-24 overflow-y-auto">
