@@ -139,6 +139,66 @@ grep -R -n -E 'sw\.js|manifest\.webmanifest|navigator\.serviceWorker|serviceWork
 report_legacy_url "${CDN_URL}sw.js" "Legacy sw.js"
 ```
 
+## Scenario: Legacy 1.0.0 update onboarding
+
+### 1. Scope / Trigger
+
+- Applies to the first governed `1.1.0` startup and any change to post-upgrade release notes or update preferences.
+
+### 2. Signatures
+
+- Preference key: `cosstage:update:last-seen-version`.
+- Decision helper: `shouldShowWhatsNew(currentVersion: string, lastSeenVersion: string | null): boolean`.
+- First governed version: `1.1.0`.
+
+### 3. Contracts
+
+- Production `1.0.0` never wrote the last-seen key. When `1.1.0` starts with a missing key, show the bundled `1.1.0` release entry and write the key only after acknowledgement.
+- This bootstrap exception is limited to `1.1.0`. A later fresh install with no key initializes its current version without showing historical release notes.
+- A valid lower last-seen version shows the current release. Equal or higher values do not show it and must not be overwritten by a downgrade.
+- A malformed stored version cannot suppress the current release. If the bundled current release entry is missing, leave the preference unchanged so the next startup can retry.
+
+### 4. Validation & Error Matrix
+
+- `current=1.1.0`, key missing -> show `1.1.0`; do not initialize early.
+- `current>1.1.0`, key missing -> initialize current; do not show historical entries.
+- `current>lastSeen` -> show current entry and persist only on acknowledgement.
+- `current<=lastSeen` -> do not show; preserve the stored higher/equal value.
+- Invalid current SemVer -> do not show.
+- Invalid stored SemVer -> show the valid current release.
+
+### 5. Good/Base/Bad Cases
+
+- Good: a manually upgraded `1.0.0` user sees the `1.1.0` migration/update explanation once, acknowledges it, and does not see it again.
+- Base: a clean future-version install seeds its current version without replaying old release notes.
+- Bad: the component sees a missing key, writes `1.1.0`, and returns before evaluating the first-governed bootstrap rule.
+
+### 6. Tests Required
+
+- Unit tests cover missing-key behavior for `1.0.0`, `1.1.0`, and a later version, plus older/equal/higher/malformed stored values.
+- Renderer regression asserts the display decision occurs before missing-key initialization.
+- Packaged upgrade smoke uses an isolated profile with a missing key, verifies the `1.1.0` dialog is visible, acknowledges it, and verifies the stored value becomes `1.1.0`.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```typescript
+if (lastSeenVersion === null) {
+  writeUpdatePreference(LAST_SEEN_VERSION_KEY, currentVersion);
+  return;
+}
+```
+
+#### Correct
+
+```typescript
+const showWhatsNew = shouldShowWhatsNew(currentVersion, lastSeenVersion);
+if (!showWhatsNew && lastSeenVersion === null) {
+  writeUpdatePreference(LAST_SEEN_VERSION_KEY, currentVersion);
+}
+```
+
 ## Scenario: Clean-checkout release determinism
 
 ### 1. Scope / Trigger

@@ -52,6 +52,7 @@ import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, ChevronDown
 import { StageConfig } from './types';
 import {
   evaluateSceneStateAtTime,
+  findEditableFrameAtTime,
   getGapSegments,
   getGapSelectionId,
   getDefaultBezierControlPoints,
@@ -2820,7 +2821,15 @@ const App: React.FC = () => {
   const handlePlayPause = useCallback(() => {
     if (isPlaying) {
       // Pause
+      const editableFrame = findEditableFrameAtTime(currentTime, frames);
+      if (editableFrame) {
+        setCurrentFrameId(editableFrame.id);
+        setSelectedTransitionId(null);
+        setSelectedTransitionPerformerId(null);
+        setSelectedPerformerIds([]);
+      }
       setIsPlaying(false);
+      isPlayingRef.current = false;
       stopAudio();
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     } else {
@@ -2862,7 +2871,7 @@ const App: React.FC = () => {
       };
       rafRef.current = requestAnimationFrame(loop);
     }
-  }, [isPlaying, currentTime, getPlaybackEndMs]);
+  }, [isPlaying, currentTime, frames, getPlaybackEndMs]);
 
   // Separate effect for spacebar to ensure latest handlePlayPause closure is used
   useEffect(() => {
@@ -3007,8 +3016,7 @@ const App: React.FC = () => {
     setCurrentTime(time);
 
     // Auto-update selection to match playhead
-    const sorted = getSortedFrames(frames);
-    const frameUnderPlayhead = sorted.find(f => time >= f.startTime && time < f.startTime + f.duration);
+    const frameUnderPlayhead = findEditableFrameAtTime(time, frames);
     if (frameUnderPlayhead && frameUnderPlayhead.id !== currentFrameId) {
       setCurrentFrameId(frameUnderPlayhead.id);
     }
@@ -4149,16 +4157,16 @@ const App: React.FC = () => {
   };
 
   const handleSelectFrame = (id: string) => {
+    const f = frames.find(fr => fr.id === id);
+    if (isPlaying) {
+      handlePlayPause(); // Pause before the explicit selection so it remains authoritative.
+    }
     setSelectedPerformerIds([]);
     setSelectedTransitionId(null);
     setSelectedTransitionPerformerId(null);
     setCurrentFrameId(id);
-    const f = frames.find(fr => fr.id === id);
     if (f) {
       setCurrentTime(f.startTime);
-      if (isPlaying) {
-        handlePlayPause(); // Pause on select
-      }
     }
   };
 

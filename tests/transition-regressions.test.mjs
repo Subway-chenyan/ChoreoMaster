@@ -36,6 +36,42 @@ test('uses the persisted transition id when selecting a configured frame gap', a
   assert.equal(selectionId, 'custom-imported-transition-id');
 });
 
+test('resolves the editable formation for playback holds, gaps, and timeline edges', async () => {
+  const { findEditableFrameAtTime } = await importTypeScriptModule('../utils/transitions.ts');
+  const frames = [
+    {
+      id: 'frame-b',
+      name: 'B',
+      startTime: 3000,
+      duration: 1000,
+      positions: {},
+    },
+    {
+      id: 'frame-a',
+      name: 'A',
+      startTime: 500,
+      duration: 1000,
+      positions: {},
+    },
+  ];
+
+  assert.equal(findEditableFrameAtTime(500, frames)?.id, 'frame-a');
+  assert.equal(findEditableFrameAtTime(1000, frames)?.id, 'frame-a');
+  assert.equal(findEditableFrameAtTime(1500, frames)?.id, 'frame-b');
+  assert.equal(findEditableFrameAtTime(2500, frames)?.id, 'frame-b');
+  assert.equal(findEditableFrameAtTime(3000, frames)?.id, 'frame-b');
+  assert.equal(findEditableFrameAtTime(9000, frames)?.id, 'frame-b');
+  assert.equal(findEditableFrameAtTime(0, frames)?.id, 'frame-a');
+  assert.equal(findEditableFrameAtTime(Number.NaN, frames)?.id, 'frame-a');
+  assert.equal(findEditableFrameAtTime(500, []), null);
+
+  const overlappingFrames = [
+    { id: 'later', name: 'Later', startTime: 1000, duration: 2000, positions: {} },
+    { id: 'earlier', name: 'Earlier', startTime: 500, duration: 2000, positions: {} },
+  ];
+  assert.equal(findEditableFrameAtTime(1500, overlappingFrames)?.id, 'earlier');
+});
+
 test('normalizes imported transitions and discards malformed motion data', async () => {
   const { normalizeTransitions } = await importTypeScriptModule('../electron/project-contract.ts');
   const transitions = normalizeTransitions([

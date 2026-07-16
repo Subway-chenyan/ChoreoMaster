@@ -117,11 +117,13 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
       .then(({ currentVersion, history }) => {
         if (!active) return;
         const lastSeenVersion = readUpdatePreference(LAST_SEEN_VERSION_KEY);
-        if (lastSeenVersion === null) {
-          writeUpdatePreference(LAST_SEEN_VERSION_KEY, currentVersion);
+        const showWhatsNew = shouldShowWhatsNew(currentVersion, lastSeenVersion);
+        if (!showWhatsNew) {
+          if (lastSeenVersion === null) {
+            writeUpdatePreference(LAST_SEEN_VERSION_KEY, currentVersion);
+          }
           return;
         }
-        if (!shouldShowWhatsNew(currentVersion, lastSeenVersion)) return;
 
         const release = history.releases.find((item) => item.version === currentVersion);
         if (release) setWhatsNewRelease(release);

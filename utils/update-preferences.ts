@@ -1,6 +1,7 @@
 type SemverTuple = readonly [bigint, bigint, bigint];
 
 const SEMVER_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+const FIRST_GOVERNED_VERSION = '1.1.0';
 
 function parseSemver(value: string): SemverTuple | null {
   const match = SEMVER_PATTERN.exec(value);
@@ -79,9 +80,9 @@ export async function beforeInstallSafely(
 }
 
 export function shouldShowWhatsNew(currentVersion: string, lastSeenVersion: string | null): boolean {
-  if (lastSeenVersion === null) return false;
   const current = parseSemver(currentVersion);
   if (!current) return false;
+  if (lastSeenVersion === null) return currentVersion === FIRST_GOVERNED_VERSION;
   const lastSeen = parseSemver(lastSeenVersion);
   return lastSeen === null || compare(current, lastSeen) > 0;
 }

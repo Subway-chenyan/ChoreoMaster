@@ -4,6 +4,24 @@ import test from 'node:test';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
+test('pausing playback selects the formation that owns the current timeline position', async () => {
+  const app = await read('App.tsx');
+
+  assert.match(app, /findEditableFrameAtTime/);
+  assert.match(
+    app,
+    /if \(isPlaying\) \{[\s\S]{0,320}findEditableFrameAtTime\(currentTime, frames\)[\s\S]{0,220}setCurrentFrameId\([\s\S]{0,220}setSelectedPerformerIds\(\[\]\)/,
+  );
+  assert.match(
+    app,
+    /const handleSelectFrame = \(id: string\) => \{[\s\S]{0,260}if \(isPlaying\) \{[\s\S]{0,100}handlePlayPause\(\)[\s\S]{0,260}setCurrentFrameId\(id\)/,
+  );
+  assert.match(
+    app,
+    /const handleSeek = \(time: number\) => \{[\s\S]{0,260}findEditableFrameAtTime\(time, frames\)/,
+  );
+});
+
 test('tutorial example resolves beside the current document for packaged Electron', async () => {
   const source = await read('components/ProjectBrowser.tsx');
   assert.match(source, /new URL\('\.\/tutorial-project\.json', window\.location\.href\)/);
@@ -486,6 +504,18 @@ test('desktop update modals serialize focus and update errors remain reachable',
   assert.match(modal, /previousActiveElement/);
   assert.match(modal, /event\.key !== 'Tab'/);
   assert.match(modal, /focusable\[focusable\.length - 1\]\?\.focus\(\)/);
+});
+
+test('first governed release checks the legacy migration prompt before initializing its preference', async () => {
+  const notification = await read('components/UpdateNotification.tsx');
+  const decisionIndex = notification.indexOf(
+    'const showWhatsNew = shouldShowWhatsNew(currentVersion, lastSeenVersion)',
+  );
+  const initializeIndex = notification.indexOf('if (lastSeenVersion === null)');
+
+  assert.ok(decisionIndex >= 0);
+  assert.ok(initializeIndex >= 0);
+  assert.ok(decisionIndex < initializeIndex);
 });
 
 test('desktop release preserves builder identity and commits stable pointers in order', async () => {

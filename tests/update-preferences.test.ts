@@ -17,6 +17,11 @@ test('shows whats new only after an upgrade', () => {
   assert.equal(shouldShowWhatsNew('1.0.0', '1.1.0'), false);
 });
 
+test('shows the first governed release when legacy 1.0.0 has no version preference', () => {
+  assert.equal(shouldShowWhatsNew('1.1.0', null), true);
+  assert.equal(shouldShowWhatsNew('1.2.0', null), false);
+});
+
 test('does not repeat the same ignored major update', () => {
   assert.equal(shouldPromptIgnoredUpdate('2.0.0', '2.0.0'), false);
   assert.equal(shouldPromptIgnoredUpdate('2.0.1', '2.0.0'), true);

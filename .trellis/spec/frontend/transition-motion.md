@@ -139,3 +139,68 @@ This makes it impossible to create a sub-`0.5s` keyframe and introduces state th
 const newDur = normalizeFrameDuration(draggingState.originalDuration + deltaTime);
 const keyframe = isKeyframeFrame(frame);
 ```
+
+## Scenario: Playback pause and playhead editing selection
+
+### 1. Scope / Trigger
+
+- Trigger: changing playback pause, timeline seek, frame selection, or any editor write that depends on the active formation.
+
+### 2. Signatures
+
+```typescript
+function findEditableFrameAtTime(timeMs: number, frames: Frame[]): Frame | null;
+```
+
+### 3. Contracts
+
+- `currentTime` is the scene-rendering source of truth; `currentFrameId` is the formation-editing target. They must not drift after playback stops or the playhead moves.
+- A hold interval `[startTime, startTime + duration)` selects that frame.
+- A transition or empty gap selects its destination/next frame. The initial gap selects the first frame; time after the final frame selects the final frame.
+- Pausing keeps `currentTime`, synchronizes `currentFrameId`, clears transition and performer selections, and visibly selects the resolved formation.
+- Seeking uses the same resolver so a paused playhead in a gap cannot keep editing an unrelated older frame.
+- When the user explicitly clicks a frame during playback, stop playback before applying the explicit frame ID and start time; the user's selection is authoritative.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required behavior |
+| --- | --- |
+| Frames are not sorted | Sort by `startTime` without mutating the input |
+| `timeMs` is not finite | Resolve using time `0` |
+| Frames overlap | Select the first matching frame in stable `startTime` order, matching scene evaluation |
+| Frames are empty | Return `null` and do not create an invalid selection |
+
+### 5. Good/Base/Bad Cases
+
+- Good: playback starts on A, pauses while B holds, and the next drag writes B.
+- Good: playback pauses in the A-to-B gap and selects B while preserving the interpolated playhead time.
+- Base: pausing while the already-selected frame holds leaves the same frame selected.
+- Bad: the stage renders from `currentTime` while drag, rotation, or undo still writes the frame selected before playback.
+
+### 6. Tests Required
+
+- Unit: hold, gap, initial gap, exact boundaries, final tail, non-finite time, unsorted frames, and empty frames.
+- Desktop regression: pause calls `findEditableFrameAtTime(currentTime, frames)` and updates `currentFrameId`.
+- Desktop regression: seek reuses the resolver and explicit frame selection runs after the pause state update.
+- The resolver test must be part of the standard `npm test` chain.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```typescript
+if (isPlaying) {
+  setIsPlaying(false);
+  // currentFrameId still points to the formation selected before playback.
+}
+```
+
+#### Correct
+
+```typescript
+if (isPlaying) {
+  const editableFrame = findEditableFrameAtTime(currentTime, frames);
+  if (editableFrame) setCurrentFrameId(editableFrame.id);
+  setIsPlaying(false);
+}
+```

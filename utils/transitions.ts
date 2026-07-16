@@ -43,6 +43,21 @@ export function getSortedFrames(frames: Frame[]): Frame[] {
   return [...frames].sort((a, b) => a.startTime - b.startTime);
 }
 
+export function findEditableFrameAtTime(timeMs: number, frames: Frame[]): Frame | null {
+  const sortedFrames = getSortedFrames(frames);
+  if (sortedFrames.length === 0) return null;
+
+  const normalizedTime = Number.isFinite(timeMs) ? timeMs : 0;
+  const activeFrame = sortedFrames.find((frame) => (
+    normalizedTime >= frame.startTime
+    && normalizedTime < frame.startTime + frame.duration
+  ));
+  if (activeFrame) return activeFrame;
+
+  const nextFrame = sortedFrames.find((frame) => frame.startTime > normalizedTime);
+  return nextFrame ?? sortedFrames[sortedFrames.length - 1] ?? null;
+}
+
 export function createTransitionId(fromFrameId: string, toFrameId: string): string {
   return `transition-${fromFrameId}-${toFrameId}`;
 }
