@@ -55,6 +55,12 @@ test('root test script runs the release suite without recursion', async () => {
   assert.equal(pkg.devDependencies['js-yaml'], '4.3.0');
 });
 
+test('project archive tests declare their checksum dependency directly', async () => {
+  const pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
+
+  assert.equal(pkg.devDependencies['buffer-crc32'], '1.0.0');
+});
+
 test('quality workflow gates pull requests and main with least privilege', async () => {
   const { workflow } = await readWorkflow('ci.yml');
 

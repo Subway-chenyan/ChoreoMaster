@@ -49,6 +49,7 @@
     "@types/unzipper": "^0.10.11",
     "@vitejs/plugin-react": "^5.0.0",
     "autoprefixer": "^10.4.24",
+    "buffer-crc32": "1.0.0",
     "concurrently": "^9.2.1",
     "electron": "^40.2.1",
     "electron-builder": "^26.7.0",
