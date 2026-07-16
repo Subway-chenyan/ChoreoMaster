@@ -487,3 +487,21 @@ test('desktop update modals serialize focus and update errors remain reachable',
   assert.match(modal, /event\.key !== 'Tab'/);
   assert.match(modal, /focusable\[focusable\.length - 1\]\?\.focus\(\)/);
 });
+
+test('release pipeline keeps builder metadata, stable identity, and serialized pointers', async () => {
+  const [builder, release, publish, rollback] = await Promise.all([
+    read('electron-builder.config.cjs'),
+    read('.github/workflows/desktop-release.yml'),
+    read('scripts/release/publish-cos.sh'),
+    read('.github/workflows/desktop-rollback.yml'),
+  ]);
+
+  assert.match(builder, /appId: 'com\.choreomaster\.app'/);
+  assert.match(builder, /releaseNotesFile: 'build\/release-notes\.md'/);
+  assert.match(release, /group: desktop-release-stable/);
+  assert.match(release, /cancel-in-progress: false/);
+  assert.doesNotMatch(release, /Get-FileHash\s+-Algorithm\s+SHA512/);
+  assert.match(publish, /downloads\/metadata\/\$VERSION\/latest\.yml/);
+  assert.match(rollback, /group: desktop-release-stable/);
+  assert.match(rollback, /cos:\/\/production\/downloads\/metadata\/\$VERSION\/latest\.yml/);
+});
