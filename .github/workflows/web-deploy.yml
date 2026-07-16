@@ -102,6 +102,15 @@ jobs:
             -e cos.accelerate.myqcloud.com \
             -i "$TENCENT_SECRET_ID" \
             -k "$TENCENT_SECRET_KEY"
+          versioning_state="$(coscli bucket-versioning \
+            --method get \
+            "cos://$COS_ALIAS" \
+            --secret-id "$TENCENT_SECRET_ID" \
+            --secret-key "$TENCENT_SECRET_KEY" 2>&1)"
+          if ! grep -Fq 'bucket versioning status is Closed' <<< "$versioning_state"; then
+            echo "Web deployment requires COS bucket versioning to be Closed." >&2
+            exit 1
+          fi
 
       - name: Upload web
         if: steps.gate.outputs.deploy == 'true'

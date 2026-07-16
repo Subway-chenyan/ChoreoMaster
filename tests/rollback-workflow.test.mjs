@@ -50,8 +50,8 @@ test('rollback is manual-only, serialized with releases, and production-gated', 
   assert.doesNotMatch(source, /(?:git|gh)\s+(?:tag|release|push|delete)|rm\s+[^\n]*(?:-r|-R|--recursive)/);
 });
 
-test('rollback installs verified tools and reads every historical input from authenticated COS', async () => {
-  const { workflow } = await readWorkflow();
+test('rollback installs verified tools, proves safe bucket versioning, and reads authenticated COS', async () => {
+  const { source, workflow } = await readWorkflow();
   const job = workflow.jobs.rollback;
   const validate = findStep(job, 'Validate dispatch context').run;
   assert.match(validate, /GITHUB_REF.*refs\/heads\/main/);
@@ -65,6 +65,13 @@ test('rollback installs verified tools and reads every historical input from aut
   assert.match(install, /coscli config add/);
   assert.match(install, /TENCENT_SECRET_ID:\?/);
   assert.match(install, /TENCENT_SECRET_KEY:\?/);
+  assert.match(install, /coscli bucket-versioning/);
+  assert.match(install, /--method get/);
+  assert.match(install, /cos:\/\/production/);
+  assert.match(install, /bucket versioning status is Closed/);
+  assert.match(install, /--secret-id "\$TENCENT_SECRET_ID"/);
+  assert.match(install, /--secret-key "\$TENCENT_SECRET_KEY"/);
+  assert.ok(source.indexOf('coscli bucket-versioning') < source.indexOf('- name: Commit rollback pointers'));
 
   const download = findStep(job, 'Download authenticated historical release').run;
   for (const object of [

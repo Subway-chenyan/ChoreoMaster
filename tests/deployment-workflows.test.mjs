@@ -168,6 +168,13 @@ test('web workflow is reusable, least-privilege, production-concurrent, and supp
   assert.match(install, /sha256sum --check --strict/);
   assert.match(install, /tccli==3\.1\.128\.1/);
   assert.ok(install.indexOf('sha256sum --check --strict') < install.indexOf('install -m 0755'));
+  assert.match(install, /coscli bucket-versioning/);
+  assert.match(install, /--method get/);
+  assert.match(install, /--secret-id "\$TENCENT_SECRET_ID"/);
+  assert.match(install, /--secret-key "\$TENCENT_SECRET_KEY"/);
+  assert.match(install, /set -euo pipefail/);
+  assert.match(install, /bucket versioning status is Closed/);
+  assert.ok(source.indexOf('coscli bucket-versioning') < source.indexOf('- name: Upload web'));
 
   const upload = findStep(workflow.jobs.deploy, 'Upload web').run;
   assert.ok(upload.indexOf('coscli sync') < upload.indexOf('coscli cp ./dist/index.html'));

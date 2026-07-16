@@ -76,7 +76,7 @@ Environment variable：
 
 - `WINDOWS_PUBLISHER_NAME`：必须与 Windows Authenticode 证书 Subject 中的发布者一致。
 
-腾讯云 COS 存储桶 `beat-1317738912` 的 bucket versioning 必须为 `Closed`。`Desktop Release` 在任何生产写入前都会通过已认证的 COS API 检查该状态；如果无法读取或状态不是 `Closed`，工作流会 fail closed。不要为了重试临时启用或暂停 bucket versioning。
+腾讯云 COS 存储桶 `beat-1317738912` 的 bucket versioning 必须为 `Closed`。所有会写入生产 COS 的工作流（`Desktop Release`、`Desktop Rollback`、`Deploy Web`）都会在首次写入前通过已认证的 COS API 检查该状态；如果无法读取或状态不是 `Closed`，工作流会 fail closed。不要为了重试临时启用或暂停 bucket versioning。
 
 仓库还必须创建 `release:none` 标签。该标签只用于明确声明普通 PR 没有产品版本影响，不能用于跳过 Release PR 的人工审核。
 
@@ -179,6 +179,7 @@ Electron updater 不会自动降级已经安装的更高版本。回滚主要保
 2. 退出 CosStage，不要先卸载 1.0.0。
 3. 从 `https://beat.cosdrama.cn/downloads/CosStage-Setup-x64.exe` 下载 1.1.0 安装包。
 4. 直接覆盖安装并重新启动，确认项目和设置仍然存在。
-5. 在产品指南的版本信息中确认已升级到 1.1.0。此后可使用新的应用内更新流程。
+5. 首次启动确认“本次更新 · 1.1.0”，完成一次性迁移提示；确认前不会提前标记为已读。
+6. 在产品指南的版本信息中确认已升级到 1.1.0。此后可使用新的应用内更新流程。
 
 CosStage 保持原有 `appId`，安装器也不会在卸载时主动删除应用数据；覆盖安装用于保留项目目录和设置。如果项目未出现，停止编辑并从迁移前导出的项目包恢复。
