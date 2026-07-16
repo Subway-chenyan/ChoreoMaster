@@ -4992,7 +4992,7 @@ const App: React.FC = () => {
                     type="button"
                     onClick={() => setIs3DDragEnabled((enabled) => !enabled)}
                     disabled={isPlaying}
-                    className={`rounded p-2 transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                    className={`inline-flex shrink-0 items-center gap-1.5 rounded p-2 transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                       is3DDragEnabled
                         ? 'bg-amber-500/15 text-amber-400'
                         : theme === 'dark'
@@ -5008,6 +5008,7 @@ const App: React.FC = () => {
                         : '启用 3D 拖动编辑'}
                   >
                     {is3DDragEnabled ? <Unlock size={16} /> : <Lock size={16} />}
+                    <span className="whitespace-nowrap text-xs font-medium">3D 拖动编辑</span>
                   </button>
                 )}
                 <div className={`w-px h-6 mx-1 ${theme === 'dark' ? 'bg-slate-700' : 'bg-gray-300'}`}></div>

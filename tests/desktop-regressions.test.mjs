@@ -363,14 +363,46 @@ test('3D drag editing is transient and uses the shared interaction policy', asyn
   ]);
 
   assert.match(appSource, /const \[is3DDragEnabled, setIs3DDragEnabled\] = useState\(false\)/);
-  assert.match(appSource, /setIs3DDragEnabled\(false\)/);
-  assert.match(appSource, /viewMode === '3d'[\s\S]*aria-pressed=\{is3DDragEnabled\}/);
+  assert.match(
+    appSource,
+    /useEffect\(\(\) => \{\s*setIs3DDragEnabled\(false\);\s*\}, \[activeProjectClipboardKey\]\);/,
+  );
+  assert.match(appSource, /\{viewMode === '3d' && \([\s\S]{0,1200}aria-pressed=\{is3DDragEnabled\}/);
   assert.match(appSource, /aria-label=\{is3DDragEnabled \? '锁定 3D 对象' : '启用 3D 拖动编辑'\}/);
+  assert.match(
+    appSource,
+    /aria-pressed=\{is3DDragEnabled\}[\s\S]{0,500}<span className="whitespace-nowrap text-xs font-medium">3D 拖动编辑<\/span>/,
+  );
   assert.match(appSource, /<Stage3D[\s\S]*dragEnabled=\{is3DDragEnabled\}/);
-  assert.doesNotMatch(appSource, /localStorage[\s\S]{0,120}is3DDragEnabled/);
+
+  const projectDocumentStart = appSource.indexOf('const buildProjectDocument = useCallback');
+  const projectDocumentEnd = appSource.indexOf('// Initialize Audio Context', projectDocumentStart);
+  assert.notEqual(projectDocumentStart, -1);
+  assert.notEqual(projectDocumentEnd, -1);
+  assert.doesNotMatch(appSource.slice(projectDocumentStart, projectDocumentEnd), /is3DDragEnabled/);
+
+  const projectSnapshotStart = appSource.indexOf('const getProjectStateString = useCallback');
+  const projectSnapshotEnd = appSource.indexOf('// Track changes to project', projectSnapshotStart);
+  assert.notEqual(projectSnapshotStart, -1);
+  assert.notEqual(projectSnapshotEnd, -1);
+  const projectSnapshotSource = appSource.slice(projectSnapshotStart, projectSnapshotEnd);
+  assert.match(projectSnapshotSource, /const currentProjectStateString = useMemo/);
+  assert.match(
+    projectSnapshotSource,
+    /latestProjectSnapshotRef\.current = \{\s*projectId: currentProjectId,\s*document: buildProjectDocument\(\),\s*state: currentProjectStateString,\s*\};/,
+  );
+  assert.doesNotMatch(projectSnapshotSource, /is3DDragEnabled/);
+
   assert.match(stage3DSource, /dragEnabled\?: boolean/);
   assert.match(stage3DSource, /dragEnabled=\{dragEnabled\}/);
-  assert.match(scene3DSource, /resolveThreeInteractionPolicy/);
+  assert.match(
+    scene3DSource,
+    /const interactionPolicy = resolveThreeInteractionPolicy\(\{\s*dragEnabled,\s*readonly,\s*isDragging,\s*\}\);/,
+  );
+  assert.match(
+    scene3DSource,
+    /onPositionChange: interactionPolicy\.canDragObjects\s*\? \(newPos: Position\) => handlePositionChange\(p\.id, newPos\)\s*: undefined/,
+  );
   assert.match(scene3DSource, /enableRotate=\{interactionPolicy\.enableRotate\}/);
   assert.match(scene3DSource, /enablePan=\{interactionPolicy\.enablePan\}/);
   assert.match(scene3DSource, /enableZoom=\{interactionPolicy\.enableZoom\}/);
