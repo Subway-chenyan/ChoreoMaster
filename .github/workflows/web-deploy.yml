@@ -1,0 +1,174 @@
+name: Deploy Web
+
+on:
+  push:
+    branches: [main]
+  workflow_call:
+    inputs:
+      force:
+        type: boolean
+        default: false
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-web-production
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      CDN_URL: https://beat.cosdrama.cn/
+      COS_ALIAS: production
+      TENCENT_SECRET_ID: ${{ secrets.TENCENT_SECRET_ID }}
+      TENCENT_SECRET_KEY: ${{ secrets.TENCENT_SECRET_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 2
+
+      - name: Detect pending release commit
+        id: gate
+        env:
+          FORCE_DEPLOY: ${{ inputs.force || false }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$FORCE_DEPLOY" = "true" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! previous_package="$(git show HEAD^:package.json 2>/dev/null)"; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          current_version="$(node -p 'require("./package.json").version')"
+          previous_version="$(printf '%s' "$previous_package" | node -e 'let source="";process.stdin.on("data",chunk=>source+=chunk).on("end",()=>process.stdout.write(JSON.parse(source).version))')"
+          if [ "$current_version" = "$previous_version" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+            echo "Version-changing commit waits for Desktop Release."
+          fi
+
+      - name: Set up Node.js
+        if: steps.gate.outputs.deploy == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.gate.outputs.deploy == 'true'
+        run: npm ci
+
+      - name: Build web
+        if: steps.gate.outputs.deploy == 'true'
+        run: npm run build
+
+      - name: Install verified Tencent CLIs
+        if: steps.gate.outputs.deploy == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${TENCENT_SECRET_ID:?Missing GitHub secret TENCENT_SECRET_ID}"
+          : "${TENCENT_SECRET_KEY:?Missing GitHub secret TENCENT_SECRET_KEY}"
+          coscli_file="$(mktemp)"
+          trap 'rm -f -- "$coscli_file"' EXIT
+          curl -fsSL --retry 5 --retry-delay 3 \
+            "https://github.com/tencentyun/coscli/releases/download/v1.0.8/coscli-v1.0.8-linux-amd64" \
+            -o "$coscli_file"
+          printf '%s  %s\n' \
+            '7165f2ae16c5f7ac495864c963ca574a76e04ec72680d7bc8a8eee3234d8cf91' \
+            "$coscli_file" | sha256sum --check --strict
+          sudo install -m 0755 "$coscli_file" /usr/local/bin/coscli
+          python -m pip install --disable-pip-version-check tccli==3.1.128.1
+          coscli config add \
+            --init-skip=true \
+            -a "$COS_ALIAS" \
+            -b beat-1317738912 \
+            -r ap-guangzhou \
+            -e cos.accelerate.myqcloud.com \
+            -i "$TENCENT_SECRET_ID" \
+            -k "$TENCENT_SECRET_KEY"
+
+      - name: Upload web
+        if: steps.gate.outputs.deploy == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          coscli sync ./dist/ "cos://$COS_ALIAS/" \
+            --recursive \
+            --force \
+            --secret-id "$TENCENT_SECRET_ID" \
+            --secret-key "$TENCENT_SECRET_KEY"
+          coscli cp ./dist/index.html "cos://$COS_ALIAS/index.html" \
+            --secret-id "$TENCENT_SECRET_ID" \
+            --secret-key "$TENCENT_SECRET_KEY" \
+            --meta "Cache-Control:no-cache"
+
+          remove_legacy_object() {
+            local object_path="$1"
+            if coscli rm "cos://$COS_ALIAS/$object_path" \
+              --secret-id "$TENCENT_SECRET_ID" \
+              --secret-key "$TENCENT_SECRET_KEY" \
+              -f; then
+              echo "Removed legacy object: $object_path"
+            else
+              echo "Legacy object absent or removal was delayed: $object_path"
+            fi
+          }
+          remove_legacy_object "sw.js"
+          remove_legacy_object "manifest.webmanifest"
+
+          tccli cdn PurgeUrlsCache \
+            --secretId "$TENCENT_SECRET_ID" \
+            --secretKey "$TENCENT_SECRET_KEY" \
+            --region ap-guangzhou \
+            --Urls "[\"${CDN_URL}index.html\",\"${CDN_URL}sw.js\",\"${CDN_URL}manifest.webmanifest\"]" \
+            --Area mainland
+
+      - name: Verify web
+        if: steps.gate.outputs.deploy == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_asset="$(grep -oE 'assets/index-[^"]+\.js' dist/index.html | head -n 1)"
+          test -n "$expected_asset"
+          if grep -R -n -E 'sw\.js|manifest\.webmanifest|navigator\.serviceWorker|serviceWorker\.register' dist; then
+            echo "Current build still references legacy PWA artifacts."
+            exit 1
+          fi
+
+          deployed_html=""
+          for attempt in $(seq 1 12); do
+            deployed_html="$(curl -fsSL "${CDN_URL}?deploy=$GITHUB_SHA" || true)"
+            if grep -Fq "$expected_asset" <<< "$deployed_html"; then
+              break
+            fi
+            echo "Waiting for CDN refresh ($attempt/12)..."
+            sleep 5
+          done
+          grep -Fq "$expected_asset" <<< "$deployed_html"
+          curl -fsSI --retry 5 --retry-delay 3 "${CDN_URL}$expected_asset" >/dev/null
+
+          report_legacy_url() {
+            local object_path="$1"
+            local status
+            status="$(curl -sS -L -o /dev/null -w '%{http_code}' \
+              "${CDN_URL}${object_path}?deploy=$GITHUB_SHA&legacy-check=1" || true)"
+            echo "Legacy URL diagnostic: $object_path status=${status:-request-failed}"
+          }
+          report_legacy_url "sw.js"
+          report_legacy_url "manifest.webmanifest"

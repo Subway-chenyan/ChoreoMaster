@@ -23,7 +23,7 @@
     "test:backend": "node scripts/run-backend-pytest.cjs",
     "test:project": "npm run build:main && node --test tests/project-service.test.mjs",
     "test:desktop": "node --experimental-strip-types --test tests/desktop-regressions.test.mjs tests/update-contract.test.ts tests/update-preferences.test.ts tests/release-history.test.ts tests/cross-project-clipboard.test.ts tests/performer-grouping.test.ts tests/stage-grid-behavior.test.ts",
-    "test:release": "node --test tests/release-model.test.mjs tests/change-intent.test.mjs tests/version-packages.test.mjs tests/release-artifacts.test.mjs tests/release-workflows.test.mjs",
+    "test:release": "node --test tests/release-model.test.mjs tests/change-intent.test.mjs tests/version-packages.test.mjs tests/release-artifacts.test.mjs tests/release-workflows.test.mjs tests/published-index.test.mjs tests/publish-cos.test.mjs tests/deployment-workflows.test.mjs",
     "validate:release-data": "node scripts/release/validate-release-data.mjs",
     "verify:release-artifacts": "node scripts/release/verify-release-artifacts.mjs",
     "release:dry-run": "npm run validate:release-data && npm test && npm run build:electron:win && npm run verify:release-artifacts -- --allow-unsigned",

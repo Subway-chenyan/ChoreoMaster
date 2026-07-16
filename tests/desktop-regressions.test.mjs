@@ -169,13 +169,14 @@ test('Electron build excludes the embedded Agent and FFmpeg', async () => {
 });
 
 test('COS deploy verification does not fail on reachable legacy PWA URLs', async () => {
-  const workflow = await read('.github/workflows/deploy-cos.yml');
+  const workflow = await read('.github/workflows/web-deploy.yml');
 
   assert.match(workflow, /Current build still references legacy PWA artifacts/);
   assert.match(workflow, /grep -R -n -E 'sw\\.js\|manifest\\.webmanifest\|navigator\\.serviceWorker\|serviceWorker\\.register' dist/);
   assert.match(workflow, /report_legacy_url\(\) \{/);
-  assert.match(workflow, /does not fail deploy because CDN\/static-site fallback can keep legacy URLs at 200/);
-  assert.match(workflow, /report_legacy_url "\$\{CDN_URL\}sw\.js" "Legacy sw\.js"/);
+  assert.match(workflow, /Legacy URL diagnostic:/);
+  assert.match(workflow, /report_legacy_url "sw\.js"/);
+  assert.match(workflow, /report_legacy_url "manifest\.webmanifest"/);
   assert.doesNotMatch(workflow, /wait_until_unreachable/);
   assert.doesNotMatch(workflow, /still reachable after CDN purge wait/);
 });
