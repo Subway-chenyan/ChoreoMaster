@@ -460,3 +460,29 @@ test('product guide renders release history with explicit async states and no we
   assert.match(webBranch, /fetchImpl\(PUBLISHED_RELEASES_URL, \{ cache: 'no-store' \}\)/);
   assert.doesNotMatch(webBranch, /bundledHistory/);
 });
+
+test('desktop update install is gated by project save', async () => {
+  const [app, notification] = await Promise.all([
+    read('App.tsx'),
+    read('components/UpdateNotification.tsx'),
+  ]);
+
+  assert.match(app, /<UpdateNotification beforeInstall=\{saveBeforeProjectOperation\}/);
+  assert.match(notification, /if \(await beforeInstall\(\)\) await window\.electronAPI\.update\.install\(\)/);
+  assert.match(notification, /state\.updateKind === 'major'/);
+  assert.match(notification, /正在保存项目…/);
+  assert.doesNotMatch(notification, /dangerouslySetInnerHTML|window\.(?:alert|confirm|prompt)\(/);
+});
+
+test('desktop update modals serialize focus and update errors remain reachable', async () => {
+  const [notification, modal] = await Promise.all([
+    read('components/UpdateNotification.tsx'),
+    read('components/UpdateModal.tsx'),
+  ]);
+
+  assert.match(notification, /\(isAvailable \|\| isDownloaded \|\| isError\)/);
+  assert.match(notification, /showMajorDialog \? null : whatsNewRelease/);
+  assert.match(modal, /previousActiveElement/);
+  assert.match(modal, /event\.key !== 'Tab'/);
+  assert.match(modal, /focusable\[focusable\.length - 1\]\?\.focus\(\)/);
+});

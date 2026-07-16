@@ -4229,7 +4229,7 @@ const App: React.FC = () => {
         onDeleteNoteItem={handleDeleteNoteItem}
       />
       {/* Update Notification */}
-      <UpdateNotification />
+      <UpdateNotification beforeInstall={saveBeforeProjectOperation} />
       <StageBackgroundDialog
         isOpen={pendingStageBackground !== null}
         fileName={pendingStageBackground?.fileName ?? ''}
