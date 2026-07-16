@@ -28,6 +28,7 @@
 | [quality.md](./quality.md)                                                     | Code quality and performance standards          | Reference     |
 | [stage-division.md](./stage-division.md)                                       | Meter grid and stage zone rendering              | Stage changes |
 | [transition-motion.md](./transition-motion.md)                                 | Per-frame rotation, paths, and prop pivot contract | Motion changes |
+| [three-interaction.md](./three-interaction.md)                                 | Safe 3D drag, pointer, and camera contracts       | 3D interaction changes |
 
 ---
 
