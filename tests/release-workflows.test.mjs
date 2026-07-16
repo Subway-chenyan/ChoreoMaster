@@ -52,7 +52,7 @@ test('root test script runs the release suite without recursion', async () => {
     'npm run typecheck && npm run test:release && npm run test:backend && npm run test:project && npm run test:desktop && npm run build',
   );
   assert.doesNotMatch(pkg.scripts['test:release'], /npm (?:run )?test(?:\s|$)/);
-  assert.equal(pkg.devDependencies['js-yaml'], '4.1.1');
+  assert.equal(pkg.devDependencies['js-yaml'], '4.3.0');
 });
 
 test('quality workflow gates pull requests and main with least privilege', async () => {
