@@ -253,6 +253,53 @@ async function assertNoTempFiles(fixture) {
   assert.deepEqual(await readdir(fixture.tempDir), []);
 }
 
+function runGit(cwd, args) {
+  const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
+  assert.equal(result.status, 0, `git ${args.join(' ')} failed:\n${result.stderr}`);
+  return result.stdout.trim();
+}
+
+test('autocrlf checkout keeps release shell scripts LF-only and executable', async (t) => {
+  const workspace = await mkdtemp(path.join(os.tmpdir(), 'cosstage-shell-eol-'));
+  t.after(() => rm(workspace, { recursive: true, force: true }));
+  const sourceRepo = path.join(workspace, 'source');
+  const checkoutRepo = path.join(workspace, 'checkout');
+  const relativeScript = path.join('scripts', 'release', 'publish-cos.sh');
+  await mkdir(path.join(sourceRepo, 'scripts', 'release'), { recursive: true });
+  await copyFile(publishScript, path.join(sourceRepo, relativeScript));
+  try {
+    await copyFile(path.join(root, '.gitattributes'), path.join(sourceRepo, '.gitattributes'));
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+
+  runGit(sourceRepo, ['init']);
+  runGit(sourceRepo, ['config', 'core.autocrlf', 'false']);
+  runGit(sourceRepo, ['config', 'user.email', 'shell-eol@example.invalid']);
+  runGit(sourceRepo, ['config', 'user.name', 'Shell EOL Test']);
+  runGit(sourceRepo, ['add', '.']);
+  runGit(sourceRepo, ['update-index', '--chmod=+x', 'scripts/release/publish-cos.sh']);
+  runGit(sourceRepo, ['commit', '-m', 'fixture']);
+  runGit(workspace, ['-c', 'core.autocrlf=true', 'clone', sourceRepo, checkoutRepo]);
+
+  const checkedOutScript = await readFile(path.join(checkoutRepo, relativeScript));
+  assert.equal(checkedOutScript.includes(Buffer.from('\r\n')), false);
+  assert.equal(
+    checkedOutScript.subarray(0, '#!/usr/bin/env bash\n'.length).toString('utf8'),
+    '#!/usr/bin/env bash\n',
+  );
+  assert.match(
+    runGit(checkoutRepo, ['ls-files', '--stage', '--', 'scripts/release/publish-cos.sh']),
+    /^100755 /,
+  );
+  const syntaxCheck = spawnSync(
+    bashExecutable(),
+    ['-n', path.join(checkoutRepo, relativeScript)],
+    { encoding: 'utf8' },
+  );
+  assert.equal(syntaxCheck.status, 0, syntaxCheck.stderr);
+});
+
 test('publish script is executable and avoids unsafe shell constructs', async () => {
   const source = await readFile(publishScript, 'utf8');
   const fileStat = await stat(publishScript);
