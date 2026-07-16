@@ -26,7 +26,7 @@
     "test:release": "node --test tests/release-model.test.mjs tests/change-intent.test.mjs tests/version-packages.test.mjs tests/release-artifacts.test.mjs tests/release-workflows.test.mjs tests/published-index.test.mjs tests/publish-cos.test.mjs tests/deployment-workflows.test.mjs tests/rollback-workflow.test.mjs",
     "validate:release-data": "node scripts/release/validate-release-data.mjs",
     "verify:release-artifacts": "node scripts/release/verify-release-artifacts.mjs",
-    "release:dry-run": "npm run validate:release-data && npm test && npm run build:electron:win && npm run verify:release-artifacts -- --allow-unsigned",
+    "release:dry-run": "npm run validate:release-data && npm test && npm run build:electron:win && node scripts/release/verify-release-artifacts.mjs --allow-unsigned",
     "test": "npm run typecheck && npm run test:release && npm run test:backend && npm run test:project && npm run test:desktop && npm run build"
   },
   "dependencies": {

@@ -836,6 +836,10 @@ test('release scripts keep version packaging tests and do not recurse', async ()
   assert.match(pkg.scripts['release:dry-run'], /npm run build:electron:win/);
   assert.match(
     pkg.scripts['release:dry-run'],
+    /node scripts\/release\/verify-release-artifacts\.mjs --allow-unsigned/,
+  );
+  assert.doesNotMatch(
+    pkg.scripts['release:dry-run'],
     /npm run verify:release-artifacts -- --allow-unsigned/,
   );
   assert.doesNotMatch(pkg.scripts['release:dry-run'], /release:dry-run/);
