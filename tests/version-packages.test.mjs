@@ -85,6 +85,16 @@ async function writeJson(filePath, value) {
   await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`);
 }
 
+async function readChangesetSnapshot(changesetDir) {
+  const names = (await readdir(changesetDir))
+    .filter((name) => name.endsWith('.md'))
+    .sort();
+  return Promise.all(names.map(async (name) => [
+    name,
+    await readFile(path.join(changesetDir, name), 'utf8'),
+  ]));
+}
+
 async function createFixture(t, options = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cosstage-version-packages-'));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -330,11 +340,9 @@ test('starts the current npm CLI through Node without a platform shell', () => {
 
 test('CLI rejects a missing npm_execpath before touching the real release state', async () => {
   const packagePath = fileURLToPath(new URL('../package.json', import.meta.url));
-  const changesetPath = fileURLToPath(
-    new URL('../.changeset/first-governed-release.md', import.meta.url),
-  );
+  const changesetDir = fileURLToPath(new URL('../.changeset', import.meta.url));
   const packageBefore = await readFile(packagePath, 'utf8');
-  const changesetBefore = await readFile(changesetPath, 'utf8');
+  const changesetsBefore = await readChangesetSnapshot(changesetDir);
 
   const result = spawnSync(process.execPath, [cliPath], {
     encoding: 'utf8',
@@ -345,7 +353,7 @@ test('CLI rejects a missing npm_execpath before touching the real release state'
   assert.match(result.stderr, /缺少 npm_execpath.*npm run version-packages/);
   assert.doesNotMatch(result.stderr, /\n\s+at /);
   assert.equal(await readFile(packagePath, 'utf8'), packageBefore);
-  assert.equal(await readFile(changesetPath, 'utf8'), changesetBefore);
+  assert.deepEqual(await readChangesetSnapshot(changesetDir), changesetsBefore);
 });
 
 test('allows future major releases and renders each notes section once', async (t) => {

@@ -23,11 +23,11 @@
     "test:backend": "node scripts/run-backend-pytest.cjs",
     "test:project": "npm run build:main && node --test tests/project-service.test.mjs",
     "test:desktop": "node --experimental-strip-types --test tests/desktop-regressions.test.mjs tests/update-contract.test.ts tests/update-preferences.test.ts tests/release-history.test.ts tests/cross-project-clipboard.test.ts tests/performer-grouping.test.ts tests/stage-grid-behavior.test.ts",
-    "test:release": "node --test tests/release-model.test.mjs tests/change-intent.test.mjs tests/version-packages.test.mjs tests/release-artifacts.test.mjs",
+    "test:release": "node --test tests/release-model.test.mjs tests/change-intent.test.mjs tests/version-packages.test.mjs tests/release-artifacts.test.mjs tests/release-workflows.test.mjs",
     "validate:release-data": "node scripts/release/validate-release-data.mjs",
     "verify:release-artifacts": "node scripts/release/verify-release-artifacts.mjs",
     "release:dry-run": "npm run validate:release-data && npm test && npm run build:electron:win && npm run verify:release-artifacts -- --allow-unsigned",
-    "test": "npm run typecheck && npm run test:backend && npm run test:project && npm run test:desktop && npm run build"
+    "test": "npm run typecheck && npm run test:release && npm run test:backend && npm run test:project && npm run test:desktop && npm run build"
   },
   "dependencies": {
     "archiver": "^8.0.0",
@@ -52,6 +52,7 @@
     "concurrently": "^9.2.1",
     "electron": "^40.2.1",
     "electron-builder": "^26.7.0",
+    "js-yaml": "4.1.1",
     "lucide-react": "^0.554.0",
     "png-to-ico": "^3.0.1",
     "postcss": "^8.5.6",
