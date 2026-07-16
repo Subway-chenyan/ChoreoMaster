@@ -148,7 +148,7 @@ Windows job 上传的已签名 artifact 只保留 1 天。一旦 `publish` job �
 | 远端同名不可变对象与本地哈希不同 | 立即停止，不得覆盖、删除或绕过检查。核对版本号、签名产物、构建来源和 COS 对象，确认原因后使用新版本修复。 |
 | 稳定安装包、`releases.json` 或根 `latest.yml` 更新中断 | 先确认版本化对象哈希一致，再在原运行选择 **Re-run failed jobs**。同一 publish job 会复用已签名 artifact，并重新按稳定安装包 → index → latest 写入，使半提交 pointer 收敛。 |
 | COS 写入完成但公网哈希验证失败 | 检查 CDN、缓存刷新和对象内容；恢复后在原运行选择 **Re-run failed jobs**。公网验证通过前不会创建 tag 或 GitHub Release。 |
-| 原运行的已签名 artifact 已超过 1 天保留期，且 tag 尚未创建 | 当前自动化不能安全重签并复现同一哈希。不要重跑或覆盖同版本；先手工运行 `Desktop Rollback` 将三个 pointer 收敛到前一 stable，再通过新的 Changeset 和 Release PR 发布一个更高 Patch。 |
+| 原运行的已签名 artifact 已超过 1 天保留期，且 tag 尚未创建 | 当前自动化不能安全重签并复现同一哈希。先确认前一 stable 已存在于 `releases.json`，且它的版本化 installer、blockmap、`.sha256` sidecar 和 metadata 四项完整；只有全部满足时，才能手工运行 `Desktop Rollback` 将三个 pointer 收敛到前一 stable，再通过新的 Changeset 和 Release PR 发布更高 Patch。若索引或任一历史制品缺失，立即停止自动操作并进入事故处置：不得覆盖或删除同版本制品，先盘点三个 pointer 的实际状态并制定人工恢复方案，最后通过更高 Patch 收敛。 |
 | tag 已创建，但 GitHub Release 不存在或缺少资产 | 在 `main` 新开 `Desktop Release` workflow run，或手工 dispatch 该工作流。detect 会进入 `repair-release`，从公网版本化对象校验并补齐 Release，不重新构建、签名或改写 COS 历史制品。 |
 | GitHub Release 完成，但 `deploy-web` 失败 | 排除故障后在该次 `Desktop Release` 中选择 “Re-run failed jobs”，保留 `force: true` 的可复用 Web 部署调用。 |
 
