@@ -76,6 +76,8 @@ Environment variable：
 
 - `WINDOWS_PUBLISHER_NAME`：必须与 Windows Authenticode 证书 Subject 中的发布者一致。
 
+腾讯云 COS 存储桶 `beat-1317738912` 的 bucket versioning 必须为 `Closed`。`Desktop Release` 在任何生产写入前都会通过已认证的 COS API 检查该状态；如果无法读取或状态不是 `Closed`，工作流会 fail closed。不要为了重试临时启用或暂停 bucket versioning。
+
 仓库还必须创建 `release:none` 标签。该标签只用于明确声明普通 PR 没有产品版本影响，不能用于跳过 Release PR 的人工审核。
 
 密钥、证书内容和密码不得写入 `.env`、提交日志、构建产物或文档。根目录 `.env.example` 只记录本地 dry-run 开关和本地发布者名称。
@@ -101,6 +103,8 @@ node scripts/release/verify-builder-output.mjs 1.0.0
 将示例中的 `1.0.0` 替换为当前工作区版本。`-AllowUnsigned` 只能用于本地 dry-run；生产工作流设置 `COSSTAGE_REQUIRE_CODE_SIGNING=true`，不允许 unsigned 安装包通过。
 
 如需在合并 Release PR 前验证真实签名，只能在 GitHub Actions 中选择 Changesets Release PR 分支 `changeset-release/main`，再手工运行 `Desktop Release`。不得从任意功能分支或临时分支发起 production 签名预检。Windows build job 仍需 `production` reviewer 批准；`publish` 与 `repair-release` 必须因 `github.ref != 'refs/heads/main'` 显示 skipped。下载 CI artifact 后执行 `Get-AuthenticodeSignature`，确认 `Status` 为 `Valid`，且证书 Subject 包含 `WINDOWS_PUBLISHER_NAME`。不要在该分支运行回滚或任何 COS 写操作。
+
+合并 Release PR 前，production reviewer 还必须在腾讯云控制台或经认证的 COS CLI 中确认 bucket versioning 返回 `Closed`。发布日志中的版本控制预检必须成功；状态无法确认时不得批准生产发布。
 
 ## 生产发布与成功信号
 
@@ -135,16 +139,20 @@ downloads/CosStage-Setup-x64.exe
 
 根 `latest.yml` 是最后一个 COS 写入，但整个序列不是原子事务。中途失败时，三个 pointer 可能短暂不一致；不要把“最后一步尚未执行”误判为完整回滚。
 
+Windows job 上传的已签名 artifact 只保留 1 天。一旦 `publish` job 开始，该 artifact 的哈希就是本次版本的制品身份。COS 上传、pointer 提交或公网验证失败时，只能回到原 `Desktop Release` workflow run，选择 **Re-run failed jobs**，让失败的 publish job 复用同一 artifact。不得选择 Re-run all jobs，也不得新开 workflow run 重签同一版本；Authenticode 时间戳会使新安装包产生不同哈希，并触发不可变对象冲突。
+
 | 失败点 | 补偿方式 |
 | --- | --- |
-| 不可变制品上传前或上传中 | 修复原因后 rerun 同一个 `Desktop Release`。已存在且哈希相同的对象会被复用。 |
+| Windows 构建、测试或签名在 artifact 上传完成前失败 | 修复原因后在原运行选择 **Re-run failed jobs**。此时 publish 尚未开始，不存在远端制品身份冲突。 |
+| 不可变制品上传或 COS 读取失败 | 在 artifact 仍处于 1 天保留期内时，只在原运行选择 **Re-run failed jobs**。相同哈希的不可变对象会被验证后复用。 |
 | 远端同名不可变对象与本地哈希不同 | 立即停止，不得覆盖、删除或绕过检查。核对版本号、签名产物、构建来源和 COS 对象，确认原因后使用新版本修复。 |
-| 稳定安装包、`releases.json` 或根 `latest.yml` 更新中断 | 先确认版本化对象哈希一致，再 rerun 同一发布。脚本会重新按稳定安装包 → index → latest 收敛 pointer。 |
-| COS 写入完成但公网哈希验证失败 | 检查 CDN、缓存刷新和对象内容；恢复后 rerun。公网验证通过前不会创建 tag 或 GitHub Release。 |
-| tag 已创建，但 GitHub Release 不存在或缺少资产 | rerun `Desktop Release`。检测阶段会进入 `repair-release`，从公网版本化对象校验后补齐 Release，不重写历史制品。 |
+| 稳定安装包、`releases.json` 或根 `latest.yml` 更新中断 | 先确认版本化对象哈希一致，再在原运行选择 **Re-run failed jobs**。同一 publish job 会复用已签名 artifact，并重新按稳定安装包 → index → latest 写入，使半提交 pointer 收敛。 |
+| COS 写入完成但公网哈希验证失败 | 检查 CDN、缓存刷新和对象内容；恢复后在原运行选择 **Re-run failed jobs**。公网验证通过前不会创建 tag 或 GitHub Release。 |
+| 原运行的已签名 artifact 已超过 1 天保留期，且 tag 尚未创建 | 当前自动化不能安全重签并复现同一哈希。不要重跑或覆盖同版本；先手工运行 `Desktop Rollback` 将三个 pointer 收敛到前一 stable，再通过新的 Changeset 和 Release PR 发布一个更高 Patch。 |
+| tag 已创建，但 GitHub Release 不存在或缺少资产 | 在 `main` 新开 `Desktop Release` workflow run，或手工 dispatch 该工作流。detect 会进入 `repair-release`，从公网版本化对象校验并补齐 Release，不重新构建、签名或改写 COS 历史制品。 |
 | GitHub Release 完成，但 `deploy-web` 失败 | 排除故障后在该次 `Desktop Release` 中选择 “Re-run failed jobs”，保留 `force: true` 的可复用 Web 部署调用。 |
 
-不要删除历史 tag、GitHub Release 或版本化 COS 对象来“重试”。任何同名异哈希都表示版本不可复现或对象被篡改，必须停机调查。
+不要删除历史 tag、GitHub Release 或版本化 COS 对象来“重试”，也不要用 Re-run all jobs 重新签名同一版本。任何同名异哈希都表示版本不可复现或对象被篡改，必须停机调查。
 
 ## 手工回滚 stable 版本
 
@@ -152,7 +160,7 @@ downloads/CosStage-Setup-x64.exe
 
 操作步骤：
 
-1. 确认目标版本的版本化安装包、blockmap、`.sha256` 和 `metadata/X.Y.Z/latest.yml` 都存在。
+1. 确认目标版本的版本化安装包、blockmap、`.sha256` 和 `downloads/metadata/X.Y.Z/latest.yml` 都存在。
 2. 打开 GitHub Actions → `Desktop Rollback` → Run workflow。
 3. 分支选择 `main`，输入严格的 `X.Y.Z` 版本号。
 4. 由 production required reviewer 人工批准。

@@ -488,7 +488,7 @@ test('desktop update modals serialize focus and update errors remain reachable',
   assert.match(modal, /focusable\[focusable\.length - 1\]\?\.focus\(\)/);
 });
 
-test('release pipeline keeps builder metadata, stable identity, and serialized pointers', async () => {
+test('desktop release preserves builder identity and commits stable pointers in order', async () => {
   const [builder, release, publish, rollback] = await Promise.all([
     read('electron-builder.config.cjs'),
     read('.github/workflows/desktop-release.yml'),
@@ -502,6 +502,19 @@ test('release pipeline keeps builder metadata, stable identity, and serialized p
   assert.match(release, /cancel-in-progress: false/);
   assert.doesNotMatch(release, /Get-FileHash\s+-Algorithm\s+SHA512/);
   assert.match(publish, /downloads\/metadata\/\$VERSION\/latest\.yml/);
+
+  const aliasWrite = publish.indexOf(
+    'coscli cp "$alias_path" "cos://production/downloads/CosStage-Setup-x64.exe"',
+  );
+  const indexWrite = publish.indexOf(
+    'coscli cp releases.next.json "cos://production/downloads/releases.json"',
+  );
+  const latestWrite = publish.indexOf(
+    'coscli cp desktop/latest.yml "cos://production/downloads/latest.yml"',
+  );
+  assert.ok(aliasWrite >= 0 && aliasWrite < indexWrite && indexWrite < latestWrite);
+  assert.equal(publish.lastIndexOf('coscli cp'), latestWrite);
+
   assert.match(rollback, /group: desktop-release-stable/);
   assert.match(rollback, /cos:\/\/production\/downloads\/metadata\/\$VERSION\/latest\.yml/);
 });
