@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import ts from 'typescript';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -392,6 +393,71 @@ test('3D drag editing is transient and uses the shared interaction policy', asyn
     /latestProjectSnapshotRef\.current = \{\s*projectId: currentProjectId,\s*document: buildProjectDocument\(\),\s*state: currentProjectStateString,\s*\};/,
   );
   assert.doesNotMatch(projectSnapshotSource, /is3DDragEnabled/);
+
+  const appSyntaxTree = ts.createSourceFile(
+    'App.tsx',
+    appSource,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  const localStorageCalls = [];
+  const pushUndoActionCalls = [];
+  const persistedStorageMethods = new Set(['getItem', 'setItem', 'removeItem']);
+
+  const getStaticMember = (expression) => {
+    if (ts.isPropertyAccessExpression(expression)) {
+      return { receiver: expression.expression, name: expression.name.text };
+    }
+    if (
+      ts.isElementAccessExpression(expression)
+      && expression.argumentExpression
+      && ts.isStringLiteralLike(expression.argumentExpression)
+    ) {
+      return { receiver: expression.expression, name: expression.argumentExpression.text };
+    }
+    return null;
+  };
+  const isLocalStorageReceiver = (expression) => (
+    (ts.isIdentifier(expression) && expression.text === 'localStorage')
+    || getStaticMember(expression)?.name === 'localStorage'
+  );
+
+  const visitCallExpressions = (node) => {
+    if (ts.isCallExpression(node)) {
+      const member = getStaticMember(node.expression);
+      if (member) {
+        if (
+          persistedStorageMethods.has(member.name)
+          && isLocalStorageReceiver(member.receiver)
+        ) {
+          localStorageCalls.push(node);
+        }
+        if (member.name === 'pushUndoAction') pushUndoActionCalls.push(node);
+      } else if (ts.isIdentifier(node.expression) && node.expression.text === 'pushUndoAction') {
+        pushUndoActionCalls.push(node);
+      }
+    }
+    ts.forEachChild(node, visitCallExpressions);
+  };
+
+  visitCallExpressions(appSyntaxTree);
+  assert.ok(localStorageCalls.length > 0, 'expected to inspect existing localStorage calls');
+  assert.ok(pushUndoActionCalls.length > 0, 'expected to inspect existing pushUndoAction calls');
+  for (const call of localStorageCalls) {
+    assert.doesNotMatch(
+      call.getText(appSyntaxTree),
+      /\bis3DDragEnabled\b/,
+      '3D drag editing mode must remain outside localStorage calls',
+    );
+  }
+  for (const call of pushUndoActionCalls) {
+    assert.doesNotMatch(
+      call.getText(appSyntaxTree),
+      /\bis3DDragEnabled\b/,
+      '3D drag editing mode must remain outside undo history calls',
+    );
+  }
 
   assert.match(stage3DSource, /dragEnabled\?: boolean/);
   assert.match(stage3DSource, /dragEnabled=\{dragEnabled\}/);
