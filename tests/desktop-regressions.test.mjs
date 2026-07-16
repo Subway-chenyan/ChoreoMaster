@@ -490,6 +490,37 @@ test('3D pointer lifecycle captures accepted drags and commits exact final updat
   assert.match(prop3DSource, /setPointerCapture/);
   assert.match(performer3DSource, /onPointerCancel=\{handlePlanePointerCancel\}/);
   assert.match(prop3DSource, /onPointerCancel=\{handlePlanePointerCancel\}/);
+  for (const source of [performer3DSource, prop3DSource]) {
+    assert.match(source, /const \{ camera, raycaster, pointer, gl \} = useThree\(\)/);
+    assert.match(source, /const canvas = gl\.domElement/);
+    assert.match(source, /canvas\.addEventListener\('pointercancel', handleCanvasPointerTermination\)/);
+    assert.match(source, /canvas\.addEventListener\('lostpointercapture', handleCanvasPointerTermination\)/);
+    assert.match(source, /canvas\.removeEventListener\('pointercancel', handleCanvasPointerTermination\)/);
+    assert.match(source, /canvas\.removeEventListener\('lostpointercapture', handleCanvasPointerTermination\)/);
+    assert.match(source, /captured\.pointerId !== event\.pointerId/);
+    assert.match(source, /const finishActiveDrag = useCallback\(\(notifyDragEnd: boolean = true\) => \{/);
+    assert.match(source, /if \(dragEnabled\) return;\s*finishActiveDrag\(\);/);
+    assert.match(source, /finishActiveDrag\(false\);/);
+    assert.match(source, /onDragEndRef\.current\?\.\(finalPosition\)/);
+  }
+  assert.match(
+    performer3DSource,
+    /if \(!isPlaneDraggingRef\.current && !isHeightDraggingRef\.current\) return;/,
+  );
+  assert.match(prop3DSource, /if \(!isPlaneDraggingRef\.current\) return;/);
+  assert.match(
+    performer3DSource,
+    /isPlaneDraggingRef\.current = false;\s*isHeightDraggingRef\.current = false;[\s\S]{0,200}releaseCapturedPointer\(\);/,
+  );
+  assert.match(
+    prop3DSource,
+    /isPlaneDraggingRef\.current = false;[\s\S]{0,200}releaseCapturedPointer\(\);/,
+  );
+  assert.match(performer3DSource, /onLostPointerCapture=\{handleHeightPointerCancel\}/);
+  assert.match(
+    performer3DSource,
+    /const handleHeightDragEnd = useCallback\([\s\S]{0,220}finishActiveDrag\(\);/,
+  );
   assert.match(prop3DSource, /getPropAnchorFromCenter/);
   assert.match(scene3DSource, /onDragEnd\?\.\(\[draggedId\], \[committedUpdate\]\)/);
 });

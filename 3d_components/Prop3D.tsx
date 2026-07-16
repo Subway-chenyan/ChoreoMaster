@@ -72,7 +72,7 @@ const Prop3D: React.FC<Prop3DProps> = ({
   onDragEnd,
   onPositionChange
 }) => {
-  const { camera, raycaster, pointer } = useThree();
+  const { camera, raycaster, pointer, gl } = useThree();
   const meshRef = useRef<THREE.Group>(null);
   const [hovered, setHover] = useState(false);
   const currentPositionRef = useRef<THREE.Vector3>(new THREE.Vector3(0, 0, 0));
@@ -87,6 +87,7 @@ const Prop3D: React.FC<Prop3DProps> = ({
     pointerId: number;
     target: PointerCaptureApi;
   } | null>(null);
+  const onDragEndRef = useRef(onDragEnd);
 
   const capturePointer = useCallback((event: ThreeEvent<PointerEvent>) => {
     const target = getPointerCaptureApi(event);
@@ -102,23 +103,43 @@ const Prop3D: React.FC<Prop3DProps> = ({
     captured.target.releasePointerCapture(captured.pointerId);
   }, []);
 
-  const clearDragRefs = useCallback(() => {
+  const finishActiveDrag = useCallback((notifyDragEnd: boolean = true) => {
+    if (!isPlaneDraggingRef.current) return;
+    const finalPosition = lastPlanePositionRef.current ?? undefined;
     isPlaneDraggingRef.current = false;
     lastPlanePositionRef.current = null;
     releaseCapturedPointer();
+    if (notifyDragEnd) onDragEndRef.current?.(finalPosition);
   }, [releaseCapturedPointer]);
 
   useEffect(() => {
+    onDragEndRef.current = onDragEnd;
+  }, [onDragEnd]);
+
+  const handleCanvasPointerTermination = useCallback((event: PointerEvent) => {
+    const captured = capturedPointerRef.current;
+    if (!captured || captured.pointerId !== event.pointerId) return;
+    finishActiveDrag();
+  }, [finishActiveDrag]);
+
+  useEffect(() => {
+    const canvas = gl.domElement;
+    canvas.addEventListener('pointercancel', handleCanvasPointerTermination);
+    canvas.addEventListener('lostpointercapture', handleCanvasPointerTermination);
+    return () => {
+      canvas.removeEventListener('pointercancel', handleCanvasPointerTermination);
+      canvas.removeEventListener('lostpointercapture', handleCanvasPointerTermination);
+    };
+  }, [gl, handleCanvasPointerTermination]);
+
+  useEffect(() => {
     if (dragEnabled) return;
-    const wasDragging = isPlaneDraggingRef.current;
-    const finalPosition = lastPlanePositionRef.current ?? undefined;
-    clearDragRefs();
-    if (wasDragging) onDragEnd?.(finalPosition);
-  }, [clearDragRefs, dragEnabled, onDragEnd]);
+    finishActiveDrag();
+  }, [dragEnabled, finishActiveDrag]);
 
   useEffect(() => () => {
-    clearDragRefs();
-  }, [clearDragRefs]);
+    finishActiveDrag(false);
+  }, [finishActiveDrag]);
 
   const dims = { width: performer.width || 1, height: performer.height || 1, depth: performer.depth || 1 };
 
@@ -291,18 +312,13 @@ const Prop3D: React.FC<Prop3DProps> = ({
     onDragStart?.();
   }, [camera, capturePointer, dragEnabled, onDragStart, onPositionChange, pointer, raycaster]);
 
-  const finishPlaneDrag = useCallback((event: ThreeEvent<PointerEvent>) => {
+  const handlePlanePointerUp = useCallback((event: ThreeEvent<PointerEvent>) => {
     if (!isPlaneDraggingRef.current) return;
     event.stopPropagation();
-    isPlaneDraggingRef.current = false;
-    releaseCapturedPointer();
-    const finalPosition = lastPlanePositionRef.current ?? undefined;
-    lastPlanePositionRef.current = null;
-    onDragEnd?.(finalPosition);
-  }, [onDragEnd, releaseCapturedPointer]);
+    finishActiveDrag();
+  }, [finishActiveDrag]);
 
-  const handlePlanePointerUp = finishPlaneDrag;
-  const handlePlanePointerCancel = finishPlaneDrag;
+  const handlePlanePointerCancel = handlePlanePointerUp;
 
   const handleClick = useCallback((event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();
