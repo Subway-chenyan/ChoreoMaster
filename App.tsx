@@ -48,7 +48,7 @@ import {
   STAGE_GRID_SPACING_STEP,
   STAGE_THIRD_POSITIONS,
 } from './utils/stage-grid';
-import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, ChevronDown, ChevronUp, ChevronRight, PanelLeftClose, PanelLeftOpen, X, GripHorizontal, SlidersHorizontal, BookOpen, MessageCircle, Eye, EyeOff, Magnet } from 'lucide-react';
+import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, ChevronDown, ChevronUp, ChevronRight, PanelLeftClose, PanelLeftOpen, X, GripHorizontal, SlidersHorizontal, BookOpen, MessageCircle, Eye, EyeOff, Magnet, Lock, Unlock } from 'lucide-react';
 import { StageConfig } from './types';
 import {
   evaluateSceneStateAtTime,
@@ -452,6 +452,7 @@ const App: React.FC = () => {
 
   // 新增：3D 模式相关状态
   const [viewMode, setViewMode] = useState<'2d' | '3d'>('2d');
+  const [is3DDragEnabled, setIs3DDragEnabled] = useState(false);
   const [stageConfig, setStageConfig] = useState<StageConfig>(createDefaultStageConfig);
   const [mediaCache, setMediaCache] = useState<Record<string, string>>({});
   const [pendingStageBackground, setPendingStageBackground] = useState<PendingStageBackground | null>(null);
@@ -503,6 +504,10 @@ const App: React.FC = () => {
   const activeProjectClipboardKey = currentProjectId
     ? `project:${currentProjectId}`
     : localProjectClipboardKey;
+
+  useEffect(() => {
+    setIs3DDragEnabled(false);
+  }, [activeProjectClipboardKey]);
 
   // Playback State
   const [currentTime, setCurrentTime] = useState(0);
@@ -4675,6 +4680,7 @@ const App: React.FC = () => {
               snapToGrid={snapToGrid}
               showDirectionArrows={showDirectionArrows}
               readonly={isPlaying}
+              dragEnabled={is3DDragEnabled}
             />
           )}
 
@@ -4981,6 +4987,29 @@ const App: React.FC = () => {
                 >
                   {showDirectionArrows ? <Eye size={18} /> : <EyeOff size={18} />}
                 </button>
+                {viewMode === '3d' && (
+                  <button
+                    type="button"
+                    onClick={() => setIs3DDragEnabled((enabled) => !enabled)}
+                    disabled={isPlaying}
+                    className={`rounded p-2 transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                      is3DDragEnabled
+                        ? 'bg-amber-500/15 text-amber-400'
+                        : theme === 'dark'
+                          ? 'text-slate-500 hover:bg-slate-800 hover:text-white'
+                          : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900'
+                    }`}
+                    aria-label={is3DDragEnabled ? '锁定 3D 对象' : '启用 3D 拖动编辑'}
+                    aria-pressed={is3DDragEnabled}
+                    title={isPlaying
+                      ? '播放中已临时锁定 3D 编辑'
+                      : is3DDragEnabled
+                        ? '锁定 3D 对象，恢复左键旋转视角'
+                        : '启用 3D 拖动编辑'}
+                  >
+                    {is3DDragEnabled ? <Unlock size={16} /> : <Lock size={16} />}
+                  </button>
+                )}
                 <div className={`w-px h-6 mx-1 ${theme === 'dark' ? 'bg-slate-700' : 'bg-gray-300'}`}></div>
                 <div className="flex items-center gap-2 px-2">
                   <button

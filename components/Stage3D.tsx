@@ -22,6 +22,7 @@ interface Stage3DProps {
   snapToGrid?: boolean;
   showDirectionArrows?: boolean;
   readonly?: boolean;
+  dragEnabled?: boolean;
   onDragStart?: (ids: string[]) => void;
   onDragEnd?: (ids: string[], finalUpdates?: { id: string; pos: Position }[]) => void;
 }
@@ -44,6 +45,7 @@ const Stage3D: React.FC<Stage3DProps> = ({
   snapToGrid = false,
   showDirectionArrows = true,
   readonly = false,
+  dragEnabled = false,
   onDragStart,
   onDragEnd
 }) => {
@@ -77,6 +79,7 @@ const Stage3D: React.FC<Stage3DProps> = ({
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}
           readonly={readonly}
+          dragEnabled={dragEnabled}
         />
       </Canvas>
     </div>

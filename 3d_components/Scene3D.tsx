@@ -1,4 +1,4 @@
-import React, { useRef, createContext, useContext } from 'react';
+import React, { useRef, useState, createContext, useContext } from 'react';
 import { OrbitControls } from '@react-three/drei';
 import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
@@ -10,10 +10,10 @@ import { Performer, Position, StageConfig } from '../types';
 import { getTotalStageWidth, mapTo2D } from '../utils/coordinates';
 import { buildPlatformOccupancy } from '../utils/platforms';
 import { snapStagePosition } from '../utils/stage-grid';
+import { resolveThreeInteractionPolicy } from '../utils/three-interaction';
 
 interface DragContextType {
   isDragging: boolean;
-  hasSelection: boolean;
   dragPlane: THREE.Plane | null;
   onPlaneDragStart: (id: string) => void;
   onPlaneDragMove: (id: string, point: THREE.Vector3) => void;
@@ -40,21 +40,11 @@ interface Scene3DProps {
   onDragEnd?: (ids: string[], finalUpdates?: { id: string; pos: Position }[]) => void;
   onPositionChange?: (updates: { id: string; pos: Position }[]) => void;
   readonly?: boolean;
-}
-
-interface DragContextType {
-  isDragging: boolean;
-  dragPlane: THREE.Plane | null;
-  onPlaneDragStart: (id: string) => void;
-  onPlaneDragMove: (id: string, point: THREE.Vector3) => void;
-  onPlaneDragEnd: () => void;
-  registerDraggable: (id: string, mesh: THREE.Object3D) => void;
-  unregisterDraggable: (id: string) => void;
+  dragEnabled?: boolean;
 }
 
 const DragContext = createContext<DragContextType>({
   isDragging: false,
-  hasSelection: false,
   dragPlane: null,
   onPlaneDragStart: () => {},
   onPlaneDragMove: () => {},
@@ -82,23 +72,31 @@ const Scene3D: React.FC<Scene3DProps> = ({
   onDragStart,
   onDragEnd,
   onPositionChange,
-  readonly = false
+  readonly = false,
+  dragEnabled = false
 }) => {
   const { camera, raycaster, pointer } = useThree();
+  const [isDragging, setIsDragging] = useState(false);
   const dragPlaneRef = useRef<THREE.Plane>(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0));
   const draggingIdRef = useRef<string | null>(null);
   const lastDragPositionRef = useRef<{ id: string; pos: Position } | null>(null);
   const draggablesRef = useRef<Map<string, THREE.Object3D>>(new Map());
+  const interactionPolicy = resolveThreeInteractionPolicy({
+    dragEnabled,
+    readonly,
+    isDragging,
+  });
 
   const onPlaneDragStart = (id: string) => {
-    if (readonly) return;
+    if (!interactionPolicy.canDragObjects) return;
+    setIsDragging(true);
     draggingIdRef.current = id;
     lastDragPositionRef.current = null;
     onDragStart?.([id]);
   };
 
   const onPlaneDragMove = (id: string, point: THREE.Vector3) => {
-    if (readonly || !onPositionChange || draggingIdRef.current !== id) return;
+    if (!interactionPolicy.canDragObjects || !onPositionChange || draggingIdRef.current !== id) return;
 
     // Convert 3D position to 2D percentage
     // Using the same logic as mapTo2D
@@ -119,6 +117,7 @@ const Scene3D: React.FC<Scene3DProps> = ({
     const lastUpdate = lastDragPositionRef.current;
     draggingIdRef.current = null;
     lastDragPositionRef.current = null;
+    setIsDragging(false);
     if (!draggedId || !lastUpdate || lastUpdate.id !== draggedId) {
       onDragEnd?.(draggedId ? [draggedId] : []);
       return;
@@ -142,8 +141,7 @@ const Scene3D: React.FC<Scene3DProps> = ({
   };
 
   const contextValue: DragContextType = {
-    isDragging: draggingIdRef.current !== null,
-    hasSelection: selectedIds.length > 0,
+    isDragging,
     dragPlane: dragPlaneRef.current,
     onPlaneDragStart,
     onPlaneDragMove,
@@ -162,10 +160,13 @@ const Scene3D: React.FC<Scene3DProps> = ({
   };
 
   const handleHeightDragStart = () => {
+    if (!interactionPolicy.canDragObjects) return;
+    setIsDragging(true);
     onDragStart?.([]);
   };
 
   const handleHeightDragEnd = () => {
+    setIsDragging(false);
     onDragEnd?.([]);
   };
 
@@ -180,8 +181,9 @@ const Scene3D: React.FC<Scene3DProps> = ({
         maxDistance={80}
         minDistance={5}
         target={[0, 0, 0]}
-        enableRotate={!contextValue.isDragging && !contextValue.hasSelection}
-        enablePan={!contextValue.isDragging}
+        enableRotate={interactionPolicy.enableRotate}
+        enablePan={interactionPolicy.enablePan}
+        enableZoom={interactionPolicy.enableZoom}
       />
       <LEDTV
         config={stageConfig}
@@ -203,7 +205,9 @@ const Scene3D: React.FC<Scene3DProps> = ({
           showDirectionArrows,
           onDragStart: handleHeightDragStart,
           onDragEnd: handleHeightDragEnd,
-          onPositionChange: readonly ? undefined : (newPos: Position) => handlePositionChange(p.id, newPos)
+          onPositionChange: interactionPolicy.canDragObjects
+            ? (newPos: Position) => handlePositionChange(p.id, newPos)
+            : undefined
         };
         if (p.type === 'prop') {
           return <Prop3D {...commonProps} platformLift={platformOccupancy.entityLiftById[p.id] ?? 0} />;

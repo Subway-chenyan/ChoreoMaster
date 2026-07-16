@@ -355,6 +355,28 @@ test('live 3D stage uses the background, LED depth, and direction arrows', async
   assert.match(await read('3d_components/DirectionArrow3D.tsx'), /0\.26, 0\.46, 16/);
 });
 
+test('3D drag editing is transient and uses the shared interaction policy', async () => {
+  const [appSource, stage3DSource, scene3DSource] = await Promise.all([
+    read('App.tsx'),
+    read('components/Stage3D.tsx'),
+    read('3d_components/Scene3D.tsx'),
+  ]);
+
+  assert.match(appSource, /const \[is3DDragEnabled, setIs3DDragEnabled\] = useState\(false\)/);
+  assert.match(appSource, /setIs3DDragEnabled\(false\)/);
+  assert.match(appSource, /viewMode === '3d'[\s\S]*aria-pressed=\{is3DDragEnabled\}/);
+  assert.match(appSource, /aria-label=\{is3DDragEnabled \? '锁定 3D 对象' : '启用 3D 拖动编辑'\}/);
+  assert.match(appSource, /<Stage3D[\s\S]*dragEnabled=\{is3DDragEnabled\}/);
+  assert.doesNotMatch(appSource, /localStorage[\s\S]{0,120}is3DDragEnabled/);
+  assert.match(stage3DSource, /dragEnabled\?: boolean/);
+  assert.match(stage3DSource, /dragEnabled=\{dragEnabled\}/);
+  assert.match(scene3DSource, /resolveThreeInteractionPolicy/);
+  assert.match(scene3DSource, /enableRotate=\{interactionPolicy\.enableRotate\}/);
+  assert.match(scene3DSource, /enablePan=\{interactionPolicy\.enablePan\}/);
+  assert.match(scene3DSource, /enableZoom=\{interactionPolicy\.enableZoom\}/);
+  assert.doesNotMatch(scene3DSource, /enableRotate=\{[^}]*hasSelection/);
+});
+
 test('offline 3D renderer includes stage background, LED depth, and arrows', async () => {
   const offline = await read('utils/OfflineRenderer3D.ts');
 
