@@ -91,7 +91,7 @@ win: {
 ### 4. Validation & Error Matrix
 
 - Missing or invalid Changeset intent -> fail pull-request quality checks.
-- Package, lock, structured history, changelog, or generated notes disagree -> fail release-data validation.
+- Package, lock, structured history, or changelog disagree -> fail release-data validation; generated notes are produced by `version-packages` and covered by release tests plus human review.
 - Signing certificate missing, signature invalid, or publisher different from `WINDOWS_PUBLISHER_NAME` -> fail before artifact upload.
 - COS bucket versioning is not `Closed` or the state is unreadable -> fail before every production write.
 - Existing immutable object has a different hash -> stop; never overwrite or delete it.
