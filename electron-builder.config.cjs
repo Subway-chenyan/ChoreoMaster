@@ -1,3 +1,10 @@
+const requireCodeSigning = process.env.COSSTAGE_REQUIRE_CODE_SIGNING === 'true';
+const publisherName = process.env.COSSTAGE_WINDOWS_PUBLISHER_NAME?.trim();
+
+if (requireCodeSigning && !publisherName) {
+  throw new Error('COSSTAGE_WINDOWS_PUBLISHER_NAME is required when code signing is enforced');
+}
+
 module.exports = {
   appId: 'com.choreomaster.app',
   productName: 'CosStage',
@@ -24,6 +31,10 @@ module.exports = {
     },
   ],
   extraResources: [],
+  forceCodeSigning: requireCodeSigning,
+  releaseInfo: {
+    releaseNotesFile: 'build/release-notes.md',
+  },
   win: {
     target: [
       {
@@ -33,6 +44,7 @@ module.exports = {
     ],
     icon: 'build/icon.ico',
     artifactName: '${productName}-Setup-${version}-${arch}.${ext}',
+    ...(publisherName ? { signtoolOptions: { publisherName: [publisherName] } } : {}),
   },
   nsis: {
     oneClick: false,
