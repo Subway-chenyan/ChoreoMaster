@@ -1,9 +1,20 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
-import { mergePublishedRelease } from '../scripts/release/published-index.mjs';
+import { fileURLToPath } from 'node:url';
+import {
+  mergePublishedRelease,
+  setStableVersion,
+} from '../scripts/release/published-index.mjs';
 
 const FIRST_PUBLISHED_AT = '2026-07-16T12:00:00.000Z';
 const RETRY_PUBLISHED_AT = '2026-07-17T12:00:00.000Z';
+const publishedIndexCli = fileURLToPath(
+  new URL('../scripts/release/published-index.mjs', import.meta.url),
+);
 
 function createRelease(version, kind = 'patch') {
   return {
@@ -212,4 +223,105 @@ test('does not mutate history or existing index inputs', () => {
 
   assert.deepEqual(history, historyBefore);
   assert.deepEqual(existing, existingBefore);
+});
+
+test('switches stable version without deleting release history or mutating the index', () => {
+  const history = createHistory(['1.2.0', '1.1.0']);
+  const existing = createPublishedIndex(history, ['1.2.0', '1.1.0']);
+  const existingBefore = structuredClone(existing);
+
+  const rolledBack = setStableVersion(existing, '1.1.0');
+
+  assert.equal(rolledBack.stableVersion, '1.1.0');
+  assert.deepEqual(
+    rolledBack.releases.map((release) => release.version),
+    ['1.2.0', '1.1.0'],
+  );
+  assert.deepEqual(existing, existingBefore);
+  assert.throws(() => setStableVersion(existing, '1.0.0'), /尚未发布/);
+});
+
+test('publish CLI requires an explicit publish subcommand', async (t) => {
+  const workspace = await mkdtemp(path.join(os.tmpdir(), 'cosstage-published-index-'));
+  t.after(() => rm(workspace, { recursive: true, force: true }));
+  const history = createHistory(['1.1.0']);
+  const historyPath = path.join(workspace, 'history.json');
+  const existingPath = path.join(workspace, 'existing.json');
+  const outputPath = path.join(workspace, 'output.json');
+  await writeFile(historyPath, JSON.stringify(history));
+  await writeFile(existingPath, '');
+
+  const result = spawnSync(
+    process.execPath,
+    [publishedIndexCli, 'publish', historyPath, existingPath, '1.1.0', outputPath],
+    { encoding: 'utf8' },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  const published = JSON.parse(await readFile(outputPath, 'utf8'));
+  assert.equal(published.currentVersion, '1.1.0');
+  assert.equal(published.stableVersion, '1.1.0');
+});
+
+test('rollback CLI switches only the stable pointer to an already-published version', async (t) => {
+  const workspace = await mkdtemp(path.join(os.tmpdir(), 'cosstage-published-index-'));
+  t.after(() => rm(workspace, { recursive: true, force: true }));
+  const history = createHistory(['1.2.0', '1.1.0']);
+  const existing = createPublishedIndex(history, ['1.2.0', '1.1.0']);
+  const existingPath = path.join(workspace, 'existing.json');
+  const outputPath = path.join(workspace, 'output.json');
+  await writeFile(existingPath, JSON.stringify(existing));
+
+  const result = spawnSync(
+    process.execPath,
+    [publishedIndexCli, 'rollback', existingPath, '1.1.0', outputPath],
+    { encoding: 'utf8' },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  const rolledBack = JSON.parse(await readFile(outputPath, 'utf8'));
+  assert.equal(rolledBack.currentVersion, '1.2.0');
+  assert.equal(rolledBack.stableVersion, '1.1.0');
+  assert.deepEqual(
+    rolledBack.releases.map((release) => release.version),
+    ['1.2.0', '1.1.0'],
+  );
+});
+
+test('CLI rejects the legacy invocation without an explicit subcommand', async (t) => {
+  const workspace = await mkdtemp(path.join(os.tmpdir(), 'cosstage-published-index-'));
+  t.after(() => rm(workspace, { recursive: true, force: true }));
+  const historyPath = path.join(workspace, 'history.json');
+  const existingPath = path.join(workspace, 'existing.json');
+  const outputPath = path.join(workspace, 'output.json');
+  await writeFile(historyPath, JSON.stringify(createHistory(['1.1.0'])));
+  await writeFile(existingPath, '');
+
+  const result = spawnSync(
+    process.execPath,
+    [publishedIndexCli, historyPath, existingPath, '1.1.0', outputPath],
+    { encoding: 'utf8' },
+  );
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /publish 或 rollback/);
+  await assert.rejects(readFile(outputPath), /ENOENT/);
+});
+
+test('rollback CLI rejects a malformed published index without writing output', async (t) => {
+  const workspace = await mkdtemp(path.join(os.tmpdir(), 'cosstage-published-index-'));
+  t.after(() => rm(workspace, { recursive: true, force: true }));
+  const existingPath = path.join(workspace, 'malformed.json');
+  const outputPath = path.join(workspace, 'output.json');
+  await writeFile(existingPath, JSON.stringify({ schemaVersion: 1, releases: [] }));
+
+  const result = spawnSync(
+    process.execPath,
+    [publishedIndexCli, 'rollback', existingPath, '1.1.0', outputPath],
+    { encoding: 'utf8' },
+  );
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /existing release index/);
+  await assert.rejects(readFile(outputPath), /ENOENT/);
 });

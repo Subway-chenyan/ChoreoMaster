@@ -1,0 +1,198 @@
+name: Desktop Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Existing published SemVer
+        required: true
+        type: string
+
+concurrency:
+  group: desktop-release-stable
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  rollback:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ inputs.version }}
+      TENCENT_SECRET_ID: ${{ secrets.TENCENT_SECRET_ID }}
+      TENCENT_SECRET_KEY: ${{ secrets.TENCENT_SECRET_KEY }}
+      CDN_URL: https://beat.cosdrama.cn/
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Validate dispatch context
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF" != 'refs/heads/main' ]; then
+            echo 'Desktop rollback must run from the main branch.' >&2
+            exit 1
+          fi
+          if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo 'VERSION must be a strict x.y.z SemVer.' >&2
+            exit 1
+          fi
+
+      - name: Install and configure verified Tencent CLIs
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${TENCENT_SECRET_ID:?Missing GitHub secret TENCENT_SECRET_ID}"
+          : "${TENCENT_SECRET_KEY:?Missing GitHub secret TENCENT_SECRET_KEY}"
+          coscli_file="$(mktemp)"
+          trap 'rm -f -- "$coscli_file"' EXIT
+          curl -fsSL --retry 5 --retry-delay 3 \
+            "https://github.com/tencentyun/coscli/releases/download/v1.0.8/coscli-v1.0.8-linux-amd64" \
+            -o "$coscli_file"
+          printf '%s  %s\n' \
+            '7165f2ae16c5f7ac495864c963ca574a76e04ec72680d7bc8a8eee3234d8cf91' \
+            "$coscli_file" | sha256sum --check --strict
+          sudo install -m 0755 "$coscli_file" /usr/local/bin/coscli
+          python -m pip install --disable-pip-version-check tccli==3.1.128.1
+          coscli config add \
+            --init-skip=true \
+            -a production \
+            -b beat-1317738912 \
+            -r ap-guangzhou \
+            -e cos.accelerate.myqcloud.com \
+            -i "$TENCENT_SECRET_ID" \
+            -k "$TENCENT_SECRET_KEY"
+
+      - name: Download authenticated historical release
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir rollback-workspace
+          mkdir rollback-workspace/release
+          coscli cp "cos://production/downloads/releases.json" rollback-workspace/releases.json \
+            --secret-id "$TENCENT_SECRET_ID" --secret-key "$TENCENT_SECRET_KEY"
+          coscli cp "cos://production/downloads/CosStage-Setup-$VERSION-x64.exe" \
+            "rollback-workspace/release/CosStage-Setup-$VERSION-x64.exe" \
+            --secret-id "$TENCENT_SECRET_ID" --secret-key "$TENCENT_SECRET_KEY"
+          coscli cp "cos://production/downloads/CosStage-Setup-$VERSION-x64.exe.blockmap" \
+            "rollback-workspace/release/CosStage-Setup-$VERSION-x64.exe.blockmap" \
+            --secret-id "$TENCENT_SECRET_ID" --secret-key "$TENCENT_SECRET_KEY"
+          coscli cp "cos://production/downloads/CosStage-Setup-$VERSION-x64.exe.sha256" \
+            "rollback-workspace/release/CosStage-Setup-$VERSION-x64.exe.remote.sha256" \
+            --secret-id "$TENCENT_SECRET_ID" --secret-key "$TENCENT_SECRET_KEY"
+          coscli cp "cos://production/downloads/metadata/$VERSION/latest.yml" \
+            rollback-workspace/release/latest.yml \
+            --secret-id "$TENCENT_SECRET_ID" --secret-key "$TENCENT_SECRET_KEY"
+          test -s rollback-workspace/releases.json
+          for file in rollback-workspace/release/*; do
+            test -f "$file" && test -s "$file"
+          done
+
+      - name: Verify historical release and select published stable version
+        shell: bash
+        run: |
+          set -euo pipefail
+          installer="CosStage-Setup-$VERSION-x64.exe"
+          (
+            cd rollback-workspace
+            node ../scripts/release/verify-builder-output.mjs "$VERSION"
+          )
+          cmp --silent \
+            "rollback-workspace/release/$installer.remote.sha256" \
+            "rollback-workspace/release/$installer.sha256"
+          (
+            cd rollback-workspace/release
+            sha256sum --check --strict "$installer.sha256"
+          )
+          node scripts/release/published-index.mjs rollback \
+            rollback-workspace/releases.json \
+            "$VERSION" \
+            rollback-workspace/releases.next.json
+
+      - name: Commit rollback pointers
+        shell: bash
+        run: |
+          set -euo pipefail
+          coscli cp rollback-workspace/release/CosStage-Setup-x64.exe \
+            "cos://production/downloads/CosStage-Setup-x64.exe" \
+            --secret-id "$TENCENT_SECRET_ID" \
+            --secret-key "$TENCENT_SECRET_KEY" \
+            --meta "Cache-Control:public,max-age=300#Content-Disposition:attachment; filename=CosStage-Setup-x64.exe#Content-Type:application/vnd.microsoft.portable-executable"
+          coscli cp rollback-workspace/releases.next.json \
+            "cos://production/downloads/releases.json" \
+            --secret-id "$TENCENT_SECRET_ID" \
+            --secret-key "$TENCENT_SECRET_KEY" \
+            --meta "Cache-Control:no-cache#Content-Type:application/json"
+          coscli cp rollback-workspace/release/latest.yml \
+            "cos://production/downloads/latest.yml" \
+            --secret-id "$TENCENT_SECRET_ID" \
+            --secret-key "$TENCENT_SECRET_KEY" \
+            --meta "Cache-Control:no-cache#Content-Type:text/yaml"
+          tccli cdn PurgeUrlsCache \
+            --secretId "$TENCENT_SECRET_ID" \
+            --secretKey "$TENCENT_SECRET_KEY" \
+            --region ap-guangzhou \
+            --Urls "[\"${CDN_URL}downloads/CosStage-Setup-x64.exe\",\"${CDN_URL}downloads/releases.json\",\"${CDN_URL}downloads/latest.yml\"]" \
+            --Area mainland
+
+      - name: Verify public rollback pointers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir rollback-workspace/public
+          expected_alias="$(sha256sum rollback-workspace/release/CosStage-Setup-x64.exe | awk '{print $1}')"
+          expected_index="$(sha256sum rollback-workspace/releases.next.json | awk '{print $1}')"
+          expected_latest="$(sha256sum rollback-workspace/release/latest.yml | awk '{print $1}')"
+
+          verify_public_pointers() {
+            local attempt="$1"
+            local query="rollback=$GITHUB_RUN_ID&attempt=$attempt"
+            curl -fsSL --retry 2 --retry-delay 1 -H 'Cache-Control: no-cache' \
+              -o rollback-workspace/public/installer.exe \
+              "${CDN_URL}downloads/CosStage-Setup-x64.exe?$query" || return 1
+            curl -fsSL --retry 2 --retry-delay 1 -H 'Cache-Control: no-cache' \
+              -o rollback-workspace/public/releases.json \
+              "${CDN_URL}downloads/releases.json?$query" || return 1
+            curl -fsSL --retry 2 --retry-delay 1 -H 'Cache-Control: no-cache' \
+              -o rollback-workspace/public/latest.yml \
+              "${CDN_URL}downloads/latest.yml?$query" || return 1
+            [ "$(sha256sum rollback-workspace/public/installer.exe | awk '{print $1}')" = \
+              "$expected_alias" ] || return 1
+            [ "$(sha256sum rollback-workspace/public/releases.json | awk '{print $1}')" = \
+              "$expected_index" ] || return 1
+            [ "$(sha256sum rollback-workspace/public/latest.yml | awk '{print $1}')" = \
+              "$expected_latest" ] || return 1
+          }
+
+          verify_attempts="${COSSTAGE_VERIFY_ATTEMPTS:-12}"
+          verify_delay="${COSSTAGE_VERIFY_DELAY:-5}"
+          if [[ ! "$verify_attempts" =~ ^[1-9][0-9]*$ ]] || [[ ! "$verify_delay" =~ ^[0-9]+$ ]]; then
+            echo 'Rollback verification retry settings are invalid.' >&2
+            exit 1
+          fi
+          verified=false
+          for ((attempt = 1; attempt <= verify_attempts; attempt += 1)); do
+            if verify_public_pointers "$attempt"; then
+              verified=true
+              break
+            fi
+            if [ "$attempt" -lt "$verify_attempts" ]; then
+              echo "Waiting for rollback CDN verification ($attempt/$verify_attempts)..." >&2
+              sleep "$verify_delay"
+            fi
+          done
+          if [ "$verified" != true ]; then
+            echo "Public rollback verification failed after $verify_attempts attempt(s)." >&2
+            exit 1
+          fi

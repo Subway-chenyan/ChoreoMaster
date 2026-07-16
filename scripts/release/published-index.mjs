@@ -126,14 +126,42 @@ export function mergePublishedRelease(history, existingIndex, version, published
   };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const [historyPath, existingPath, version, outputPath] = process.argv.slice(2);
-  if (!historyPath || !existingPath || !version || !outputPath) {
-    throw new Error('用法：node published-index.mjs <history> <existing> <version> <output>');
+export function setStableVersion(index, version) {
+  validateExistingIndex(index);
+  if (!index.releases.some((release) => release.version === version)) {
+    throw new Error(`版本 ${version} 尚未发布`);
   }
-  const history = JSON.parse(await readFile(historyPath, 'utf8'));
-  const existingSource = await readFile(existingPath, 'utf8');
-  const existing = existingSource.trim() ? JSON.parse(existingSource) : null;
-  const result = mergePublishedRelease(history, existing, version, new Date().toISOString());
-  await writeFile(outputPath, `${JSON.stringify(result, null, 2)}\n`);
+  return {
+    ...structuredClone(index),
+    stableVersion: version,
+  };
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const [command, ...args] = process.argv.slice(2);
+  if (command === 'publish') {
+    const [historyPath, existingPath, version, outputPath] = args;
+    if (!historyPath || !existingPath || !version || !outputPath || args.length !== 4) {
+      throw new Error(
+        '用法：node published-index.mjs publish <history> <existing> <version> <output>',
+      );
+    }
+    const history = JSON.parse(await readFile(historyPath, 'utf8'));
+    const existingSource = await readFile(existingPath, 'utf8');
+    const existing = existingSource.trim() ? JSON.parse(existingSource) : null;
+    const result = mergePublishedRelease(history, existing, version, new Date().toISOString());
+    await writeFile(outputPath, `${JSON.stringify(result, null, 2)}\n`);
+  } else if (command === 'rollback') {
+    const [existingPath, version, outputPath] = args;
+    if (!existingPath || !version || !outputPath || args.length !== 3) {
+      throw new Error(
+        '用法：node published-index.mjs rollback <existing> <version> <output>',
+      );
+    }
+    const existing = JSON.parse(await readFile(existingPath, 'utf8'));
+    const result = setStableVersion(existing, version);
+    await writeFile(outputPath, `${JSON.stringify(result, null, 2)}\n`);
+  } else {
+    throw new Error('命令必须为 publish 或 rollback');
+  }
 }

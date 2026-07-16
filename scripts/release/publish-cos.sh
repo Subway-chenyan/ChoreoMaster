@@ -139,7 +139,7 @@ upload_immutable "$sidecar_path" "downloads/$installer_name.sha256"
 upload_immutable "$latest_path" "downloads/metadata/$VERSION/latest.yml"
 upload_immutable "$notes_path" "downloads/release-notes-$VERSION.md"
 
-node scripts/release/published-index.mjs \
+node scripts/release/published-index.mjs publish \
   data/release-history.json \
   releases.previous.json \
   "$VERSION" \
