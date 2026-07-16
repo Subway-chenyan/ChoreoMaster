@@ -1,11 +1,34 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
+import type { ThreeEvent } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { Performer, Position, StageConfig } from '../types';
 import { mapTo3D, mapTo2D, degToRad, getTotalStageWidth } from '../utils/coordinates';
-import { useDragContext } from './Scene3D';
+import { canStartThreeObjectDrag } from '../utils/three-interaction';
 import DirectionArrow3D from './DirectionArrow3D';
+
+interface PointerCaptureApi extends EventTarget {
+  hasPointerCapture(pointerId: number): boolean;
+  releasePointerCapture(pointerId: number): void;
+  setPointerCapture(pointerId: number): void;
+}
+
+function getPointerCaptureApi(
+  event: ThreeEvent<PointerEvent>,
+): PointerCaptureApi | null {
+  const target = event.target;
+  if (
+    !target
+    || !('hasPointerCapture' in target)
+    || typeof target.hasPointerCapture !== 'function'
+    || !('releasePointerCapture' in target)
+    || typeof target.releasePointerCapture !== 'function'
+    || !('setPointerCapture' in target)
+    || typeof target.setPointerCapture !== 'function'
+  ) return null;
+  return target as PointerCaptureApi;
+}
 
 interface Performer3DProps {
   performer: Performer;
@@ -16,8 +39,9 @@ interface Performer3DProps {
   onSelect: (id: string) => void;
   stageConfig: StageConfig;
   showDirectionArrows?: boolean;
+  dragEnabled?: boolean;
   onDragStart?: () => void;
-  onDragEnd?: () => void;
+  onDragEnd?: (position?: Position) => void;
   onPositionChange?: (pos: Position) => void;
 }
 
@@ -30,12 +54,12 @@ const Performer3D: React.FC<Performer3DProps> = ({
   onSelect,
   stageConfig,
   showDirectionArrows = true,
+  dragEnabled = false,
   onDragStart,
   onDragEnd,
   onPositionChange
 }) => {
   const { camera, raycaster, pointer } = useThree();
-  const dragContext = useDragContext();
   const meshRef = useRef<THREE.Group>(null);
   const [hovered, setHover] = useState(false);
   const currentPositionRef = useRef<THREE.Vector3>(new THREE.Vector3(0, 0, 0));
@@ -50,7 +74,44 @@ const Performer3D: React.FC<Performer3DProps> = ({
   const isPlaneDraggingRef = useRef(false);
   const dragPlaneRef = useRef<THREE.Plane>(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0));
   const dragOffsetRef = useRef<THREE.Vector3>(new THREE.Vector3());
-  const arrowMeshRef = useRef<THREE.Group>(null);
+  const lastPlanePositionRef = useRef<Position | null>(null);
+  const capturedPointerRef = useRef<{
+    pointerId: number;
+    target: PointerCaptureApi;
+  } | null>(null);
+
+  const capturePointer = useCallback((event: ThreeEvent<PointerEvent>) => {
+    const target = getPointerCaptureApi(event);
+    if (!target) return;
+    target.setPointerCapture(event.pointerId);
+    capturedPointerRef.current = { pointerId: event.pointerId, target };
+  }, []);
+
+  const releaseCapturedPointer = useCallback(() => {
+    const captured = capturedPointerRef.current;
+    capturedPointerRef.current = null;
+    if (!captured || !captured.target.hasPointerCapture(captured.pointerId)) return;
+    captured.target.releasePointerCapture(captured.pointerId);
+  }, []);
+
+  const clearDragRefs = useCallback(() => {
+    isPlaneDraggingRef.current = false;
+    isHeightDraggingRef.current = false;
+    lastPlanePositionRef.current = null;
+    releaseCapturedPointer();
+  }, [releaseCapturedPointer]);
+
+  useEffect(() => {
+    if (dragEnabled) return;
+    const wasDragging = isPlaneDraggingRef.current || isHeightDraggingRef.current;
+    const finalPosition = lastPlanePositionRef.current ?? undefined;
+    clearDragRefs();
+    if (wasDragging) onDragEnd?.(finalPosition);
+  }, [clearDragRefs, dragEnabled, onDragEnd]);
+
+  useEffect(() => () => {
+    clearDragRefs();
+  }, [clearDragRefs]);
 
   // Initialize position on mount or when position changes significantly
   useEffect(() => {
@@ -89,11 +150,11 @@ const Performer3D: React.FC<Performer3DProps> = ({
     }
 
     // Handle plane dragging
-    if (isPlaneDraggingRef.current && onPositionChange) {
+    if (isPlaneDraggingRef.current && dragEnabled && onPositionChange) {
       raycaster.setFromCamera(pointer, camera);
       const intersectionPoint = new THREE.Vector3();
-      raycaster.ray.intersectPlane(dragPlaneRef.current, intersectionPoint);
-      if (intersectionPoint) {
+      const intersection = raycaster.ray.intersectPlane(dragPlaneRef.current, intersectionPoint);
+      if (intersection) {
         const clampedPoint = intersectionPoint.sub(dragOffsetRef.current);
         // Clamp to the full floor, including both wings.
         const totalWidth = getTotalStageWidth(stageConfig);
@@ -101,16 +162,23 @@ const Performer3D: React.FC<Performer3DProps> = ({
         clampedPoint.z = Math.max(-stageConfig.depth / 2, Math.min(stageConfig.depth / 2, clampedPoint.z));
 
         const newPos = mapTo2D(clampedPoint.x, position.z || 0, clampedPoint.z, stageConfig);
+        lastPlanePositionRef.current = newPos;
         onPositionChange(newPos);
       }
     }
   });
 
   // Plane drag handlers
-  const handlePlanePointerDown = useCallback((e: any) => {
-    if (!onPositionChange) return;
-    e.stopPropagation();
+  const handlePlanePointerDown = useCallback((event: ThreeEvent<PointerEvent>) => {
+    if (!onPositionChange || !canStartThreeObjectDrag({
+      dragEnabled,
+      readonly: false,
+      button: event.button,
+    })) return;
+    event.stopPropagation();
+    capturePointer(event);
     isPlaneDraggingRef.current = true;
+    lastPlanePositionRef.current = null;
 
     // Set up drag plane at y=0 (floor level)
     dragPlaneRef.current.setFromNormalAndCoplanarPoint(
@@ -121,54 +189,77 @@ const Performer3D: React.FC<Performer3DProps> = ({
     // Calculate offset from intersection point to object center
     raycaster.setFromCamera(pointer, camera);
     const intersectionPoint = new THREE.Vector3();
-    raycaster.ray.intersectPlane(dragPlaneRef.current, intersectionPoint);
-    if (intersectionPoint && meshRef.current) {
+    const intersection = raycaster.ray.intersectPlane(dragPlaneRef.current, intersectionPoint);
+    if (intersection && meshRef.current) {
       dragOffsetRef.current.copy(intersectionPoint).sub(meshRef.current.position);
     }
 
-    dragContext.onPlaneDragStart(performer.id);
-  }, [onPositionChange, camera, raycaster, pointer, dragContext, performer.id]);
+    onDragStart?.();
+  }, [camera, capturePointer, dragEnabled, onDragStart, onPositionChange, pointer, raycaster]);
 
-  const handlePlanePointerUp = useCallback((e: any) => {
-    e.stopPropagation();
+  const finishPlaneDrag = useCallback((event: ThreeEvent<PointerEvent>) => {
+    if (!isPlaneDraggingRef.current) return;
+    event.stopPropagation();
     isPlaneDraggingRef.current = false;
-    dragContext.onPlaneDragEnd();
-  }, [dragContext]);
+    releaseCapturedPointer();
+    const finalPosition = lastPlanePositionRef.current ?? undefined;
+    lastPlanePositionRef.current = null;
+    onDragEnd?.(finalPosition);
+  }, [onDragEnd, releaseCapturedPointer]);
+
+  const handlePlanePointerUp = finishPlaneDrag;
+  const handlePlanePointerCancel = finishPlaneDrag;
 
   // Height drag handlers (vertical arrow)
-  const handleHeightDragStart = useCallback((e: any) => {
-    e.stopPropagation();
+  const handleHeightDragStart = useCallback((event: ThreeEvent<PointerEvent>) => {
+    if (!onPositionChange || !canStartThreeObjectDrag({
+      dragEnabled,
+      readonly: false,
+      button: event.button,
+    })) return;
+    event.stopPropagation();
+    capturePointer(event);
     isHeightDraggingRef.current = true;
-    dragStartPointerYRef.current = e.pointer.y;
+    lastPlanePositionRef.current = null;
+    dragStartPointerYRef.current = event.pointer.y;
     dragStartHeightRef.current = position.z || 0;
     onDragStart?.();
-  }, [position.z, onDragStart]);
+  }, [capturePointer, dragEnabled, onDragStart, onPositionChange, position.z]);
 
-  const handleHeightDragMove = useCallback((e: any) => {
-    if (!isHeightDraggingRef.current || !onPositionChange) return;
-    e.stopPropagation();
+  const handleHeightDragMove = useCallback((event: ThreeEvent<PointerEvent>) => {
+    if (!isHeightDraggingRef.current || !dragEnabled || !onPositionChange) return;
+    event.stopPropagation();
 
-    const deltaY = e.pointer.y - dragStartPointerYRef.current;
+    const deltaY = event.pointer.y - dragStartPointerYRef.current;
     // Use camera distance to scale the movement appropriately
     const scaleFactor = Math.abs(camera.position.z || 20) / 500;
     const heightChange = -deltaY * scaleFactor; // Negative because dragging up (negative y) should increase height
     const newHeight = Math.max(0, Math.min(10, dragStartHeightRef.current + heightChange));
 
-    onPositionChange({
+    const newPosition = {
       x: position.x,
       y: position.y,
       z: newHeight
-    });
-  }, [onPositionChange, position.x, position.y]);
+    };
+    lastPlanePositionRef.current = newPosition;
+    onPositionChange(newPosition);
+  }, [camera.position.z, dragEnabled, onPositionChange, position.x, position.y]);
 
-  const handleHeightDragEnd = useCallback((e: any) => {
-    e.stopPropagation();
+  const finishHeightDrag = useCallback((event: ThreeEvent<PointerEvent>) => {
+    if (!isHeightDraggingRef.current) return;
+    event.stopPropagation();
     isHeightDraggingRef.current = false;
-    onDragEnd?.();
-  }, [onDragEnd]);
+    releaseCapturedPointer();
+    const finalPosition = lastPlanePositionRef.current ?? undefined;
+    lastPlanePositionRef.current = null;
+    onDragEnd?.(finalPosition);
+  }, [onDragEnd, releaseCapturedPointer]);
 
-  const handleClick = useCallback((e: any) => {
-    e.stopPropagation();
+  const handleHeightDragEnd = finishHeightDrag;
+  const handleHeightPointerCancel = finishHeightDrag;
+
+  const handleClick = useCallback((event: ThreeEvent<MouseEvent>) => {
+    event.stopPropagation();
     if (!isPlaneDraggingRef.current && !isHeightDraggingRef.current) {
       onSelect(performer.id);
     }
@@ -186,6 +277,8 @@ const Performer3D: React.FC<Performer3DProps> = ({
       onPointerOut={() => setHover(false)}
       onPointerDown={handlePlanePointerDown}
       onPointerUp={handlePlanePointerUp}
+      onPointerCancel={handlePlanePointerCancel}
+      onLostPointerCapture={handlePlanePointerCancel}
     >
       {showDirectionArrows && <DirectionArrow3D scale={0.9} />}
       {isSelected && (
@@ -216,6 +309,8 @@ const Performer3D: React.FC<Performer3DProps> = ({
           onPointerDown={handleHeightDragStart}
           onPointerMove={handleHeightDragMove}
           onPointerUp={handleHeightDragEnd}
+          onPointerCancel={handleHeightPointerCancel}
+          onLostPointerCapture={handleHeightPointerCancel}
         >
           <mesh>
             <coneGeometry args={[0.15, 0.3, 8]} />

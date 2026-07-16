@@ -475,6 +475,25 @@ test('3D drag editing is transient and uses the shared interaction policy', asyn
   assert.doesNotMatch(scene3DSource, /enableRotate=\{[^}]*hasSelection/);
 });
 
+test('3D pointer lifecycle captures accepted drags and commits exact final updates', async () => {
+  const [performer3DSource, prop3DSource, scene3DSource] = await Promise.all([
+    read('3d_components/Performer3D.tsx'),
+    read('3d_components/Prop3D.tsx'),
+    read('3d_components/Scene3D.tsx'),
+  ]);
+
+  assert.match(performer3DSource, /canStartThreeObjectDrag/);
+  assert.match(prop3DSource, /canStartThreeObjectDrag/);
+  assert.match(performer3DSource, /event\.button/);
+  assert.match(prop3DSource, /event\.button/);
+  assert.match(performer3DSource, /setPointerCapture/);
+  assert.match(prop3DSource, /setPointerCapture/);
+  assert.match(performer3DSource, /onPointerCancel=\{handlePlanePointerCancel\}/);
+  assert.match(prop3DSource, /onPointerCancel=\{handlePlanePointerCancel\}/);
+  assert.match(prop3DSource, /getPropAnchorFromCenter/);
+  assert.match(scene3DSource, /onDragEnd\?\.\(\[draggedId\], \[committedUpdate\]\)/);
+});
+
 test('offline 3D renderer includes stage background, LED depth, and arrows', async () => {
   const offline = await read('utils/OfflineRenderer3D.ts');
 

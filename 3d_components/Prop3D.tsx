@@ -1,13 +1,36 @@
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
+import type { ThreeEvent } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { Performer, Position, ExtrudedTextures, StageConfig } from '../types';
 import { mapTo3D, mapTo2D, degToRad, getTotalStageWidth } from '../utils/coordinates';
-import { useDragContext } from './Scene3D';
+import { canStartThreeObjectDrag } from '../utils/three-interaction';
 import DirectionArrow3D from './DirectionArrow3D';
 import { denormalizePoints } from '../components/prop-editor/PolygonUtils';
-import { getPropCenterFromAnchor } from '../utils/prop-pivot';
+import { getPropAnchorFromCenter, getPropCenterFromAnchor } from '../utils/prop-pivot';
+
+interface PointerCaptureApi extends EventTarget {
+  hasPointerCapture(pointerId: number): boolean;
+  releasePointerCapture(pointerId: number): void;
+  setPointerCapture(pointerId: number): void;
+}
+
+function getPointerCaptureApi(
+  event: ThreeEvent<PointerEvent>,
+): PointerCaptureApi | null {
+  const target = event.target;
+  if (
+    !target
+    || !('hasPointerCapture' in target)
+    || typeof target.hasPointerCapture !== 'function'
+    || !('releasePointerCapture' in target)
+    || typeof target.releasePointerCapture !== 'function'
+    || !('setPointerCapture' in target)
+    || typeof target.setPointerCapture !== 'function'
+  ) return null;
+  return target as PointerCaptureApi;
+}
 
 function createFaceMaterial(faceTexture?: { dataUrl?: string }, fallbackColor: string = '#475569'): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial({ color: fallbackColor, transparent: true, opacity: 1, side: THREE.FrontSide });
@@ -29,8 +52,9 @@ interface Prop3DProps {
   onSelect: (id: string) => void;
   stageConfig: StageConfig;
   showDirectionArrows?: boolean;
+  dragEnabled?: boolean;
   onDragStart?: () => void;
-  onDragEnd?: () => void;
+  onDragEnd?: (position?: Position) => void;
   onPositionChange?: (pos: Position) => void;
 }
 
@@ -43,12 +67,12 @@ const Prop3D: React.FC<Prop3DProps> = ({
   onSelect,
   stageConfig,
   showDirectionArrows = true,
+  dragEnabled = false,
   onDragStart,
   onDragEnd,
   onPositionChange
 }) => {
   const { camera, raycaster, pointer } = useThree();
-  const dragContext = useDragContext();
   const meshRef = useRef<THREE.Group>(null);
   const [hovered, setHover] = useState(false);
   const currentPositionRef = useRef<THREE.Vector3>(new THREE.Vector3(0, 0, 0));
@@ -58,6 +82,43 @@ const Prop3D: React.FC<Prop3DProps> = ({
   const isPlaneDraggingRef = useRef(false);
   const dragPlaneRef = useRef<THREE.Plane>(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0));
   const dragOffsetRef = useRef<THREE.Vector3>(new THREE.Vector3());
+  const lastPlanePositionRef = useRef<Position | null>(null);
+  const capturedPointerRef = useRef<{
+    pointerId: number;
+    target: PointerCaptureApi;
+  } | null>(null);
+
+  const capturePointer = useCallback((event: ThreeEvent<PointerEvent>) => {
+    const target = getPointerCaptureApi(event);
+    if (!target) return;
+    target.setPointerCapture(event.pointerId);
+    capturedPointerRef.current = { pointerId: event.pointerId, target };
+  }, []);
+
+  const releaseCapturedPointer = useCallback(() => {
+    const captured = capturedPointerRef.current;
+    capturedPointerRef.current = null;
+    if (!captured || !captured.target.hasPointerCapture(captured.pointerId)) return;
+    captured.target.releasePointerCapture(captured.pointerId);
+  }, []);
+
+  const clearDragRefs = useCallback(() => {
+    isPlaneDraggingRef.current = false;
+    lastPlanePositionRef.current = null;
+    releaseCapturedPointer();
+  }, [releaseCapturedPointer]);
+
+  useEffect(() => {
+    if (dragEnabled) return;
+    const wasDragging = isPlaneDraggingRef.current;
+    const finalPosition = lastPlanePositionRef.current ?? undefined;
+    clearDragRefs();
+    if (wasDragging) onDragEnd?.(finalPosition);
+  }, [clearDragRefs, dragEnabled, onDragEnd]);
+
+  useEffect(() => () => {
+    clearDragRefs();
+  }, [clearDragRefs]);
 
   const dims = { width: performer.width || 1, height: performer.height || 1, depth: performer.depth || 1 };
 
@@ -172,28 +233,46 @@ const Prop3D: React.FC<Prop3DProps> = ({
     }
 
     // Handle plane dragging
-    if (isPlaneDraggingRef.current && onPositionChange) {
+    if (isPlaneDraggingRef.current && dragEnabled && onPositionChange) {
       raycaster.setFromCamera(pointer, camera);
       const intersectionPoint = new THREE.Vector3();
-      raycaster.ray.intersectPlane(dragPlaneRef.current, intersectionPoint);
-      if (intersectionPoint) {
+      const intersection = raycaster.ray.intersectPlane(dragPlaneRef.current, intersectionPoint);
+      if (intersection) {
         const clampedPoint = intersectionPoint.sub(dragOffsetRef.current);
         // Clamp to the full floor, including both wings.
         const totalWidth = getTotalStageWidth(stageConfig);
         clampedPoint.x = Math.max(-totalWidth / 2, Math.min(totalWidth / 2, clampedPoint.x));
         clampedPoint.z = Math.max(-stageConfig.depth / 2, Math.min(stageConfig.depth / 2, clampedPoint.z));
 
-        const newPos = mapTo2D(clampedPoint.x, position.z || 0, clampedPoint.z, stageConfig);
+        const movedCenter = mapTo2D(
+          clampedPoint.x,
+          position.z || 0,
+          clampedPoint.z,
+          stageConfig,
+        );
+        const newPos = getPropAnchorFromCenter(
+          movedCenter,
+          rotationDeg,
+          performer,
+          stageConfig,
+        );
+        lastPlanePositionRef.current = newPos;
         onPositionChange(newPos);
       }
     }
   });
 
   // Plane drag handlers
-  const handlePlanePointerDown = useCallback((e: any) => {
-    if (!onPositionChange) return;
-    e.stopPropagation();
+  const handlePlanePointerDown = useCallback((event: ThreeEvent<PointerEvent>) => {
+    if (!onPositionChange || !canStartThreeObjectDrag({
+      dragEnabled,
+      readonly: false,
+      button: event.button,
+    })) return;
+    event.stopPropagation();
+    capturePointer(event);
     isPlaneDraggingRef.current = true;
+    lastPlanePositionRef.current = null;
 
     // Set up drag plane at y=0 (floor level)
     dragPlaneRef.current.setFromNormalAndCoplanarPoint(
@@ -204,22 +283,29 @@ const Prop3D: React.FC<Prop3DProps> = ({
     // Calculate offset from intersection point to object center
     raycaster.setFromCamera(pointer, camera);
     const intersectionPoint = new THREE.Vector3();
-    raycaster.ray.intersectPlane(dragPlaneRef.current, intersectionPoint);
-    if (intersectionPoint && meshRef.current) {
+    const intersection = raycaster.ray.intersectPlane(dragPlaneRef.current, intersectionPoint);
+    if (intersection && meshRef.current) {
       dragOffsetRef.current.copy(intersectionPoint).sub(meshRef.current.position);
     }
 
-    dragContext.onPlaneDragStart(performer.id);
-  }, [onPositionChange, camera, raycaster, pointer, dragContext, performer.id]);
+    onDragStart?.();
+  }, [camera, capturePointer, dragEnabled, onDragStart, onPositionChange, pointer, raycaster]);
 
-  const handlePlanePointerUp = useCallback((e: any) => {
-    e.stopPropagation();
+  const finishPlaneDrag = useCallback((event: ThreeEvent<PointerEvent>) => {
+    if (!isPlaneDraggingRef.current) return;
+    event.stopPropagation();
     isPlaneDraggingRef.current = false;
-    dragContext.onPlaneDragEnd();
-  }, [dragContext]);
+    releaseCapturedPointer();
+    const finalPosition = lastPlanePositionRef.current ?? undefined;
+    lastPlanePositionRef.current = null;
+    onDragEnd?.(finalPosition);
+  }, [onDragEnd, releaseCapturedPointer]);
 
-  const handleClick = useCallback((e: any) => {
-    e.stopPropagation();
+  const handlePlanePointerUp = finishPlaneDrag;
+  const handlePlanePointerCancel = finishPlaneDrag;
+
+  const handleClick = useCallback((event: ThreeEvent<MouseEvent>) => {
+    event.stopPropagation();
     if (!isPlaneDraggingRef.current) {
       onSelect(performer.id);
     }
@@ -233,6 +319,8 @@ const Prop3D: React.FC<Prop3DProps> = ({
       onPointerOut={() => setHover(false)}
       onPointerDown={handlePlanePointerDown}
       onPointerUp={handlePlanePointerUp}
+      onPointerCancel={handlePlanePointerCancel}
+      onLostPointerCapture={handlePlanePointerCancel}
     >
       {showDirectionArrows && <DirectionArrow3D scale={Math.max(0.75, Math.min(1.5, dims.width))} y={-dims.height / 2 + 0.06} />}
       {isExtruded && extrudeGeometry ? (

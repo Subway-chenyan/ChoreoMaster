@@ -1,26 +1,13 @@
-import React, { useRef, useState, createContext, useContext } from 'react';
+import React, { useState } from 'react';
 import { OrbitControls } from '@react-three/drei';
-import { useThree } from '@react-three/fiber';
-import * as THREE from 'three';
 import StageFloor from './StageFloor';
 import Performer3D from './Performer3D';
 import Prop3D from './Prop3D';
 import LEDTV from '../components/LEDTV';
 import { Performer, Position, StageConfig } from '../types';
-import { getTotalStageWidth, mapTo2D } from '../utils/coordinates';
 import { buildPlatformOccupancy } from '../utils/platforms';
 import { snapStagePosition } from '../utils/stage-grid';
 import { resolveThreeInteractionPolicy } from '../utils/three-interaction';
-
-interface DragContextType {
-  isDragging: boolean;
-  dragPlane: THREE.Plane | null;
-  onPlaneDragStart: (id: string) => void;
-  onPlaneDragMove: (id: string, point: THREE.Vector3) => void;
-  onPlaneDragEnd: () => void;
-  registerDraggable: (id: string, mesh: THREE.Object3D) => void;
-  unregisterDraggable: (id: string) => void;
-}
 
 interface Scene3DProps {
   performers: Performer[];
@@ -43,18 +30,6 @@ interface Scene3DProps {
   dragEnabled?: boolean;
 }
 
-const DragContext = createContext<DragContextType>({
-  isDragging: false,
-  dragPlane: null,
-  onPlaneDragStart: () => {},
-  onPlaneDragMove: () => {},
-  onPlaneDragEnd: () => {},
-  registerDraggable: () => {},
-  unregisterDraggable: () => {}
-});
-
-export const useDragContext = () => useContext(DragContext);
-
 const Scene3D: React.FC<Scene3DProps> = ({
   performers,
   positions,
@@ -75,79 +50,34 @@ const Scene3D: React.FC<Scene3DProps> = ({
   readonly = false,
   dragEnabled = false
 }) => {
-  const { camera, raycaster, pointer } = useThree();
   const [isDragging, setIsDragging] = useState(false);
-  const dragPlaneRef = useRef<THREE.Plane>(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0));
-  const draggingIdRef = useRef<string | null>(null);
-  const lastDragPositionRef = useRef<{ id: string; pos: Position } | null>(null);
-  const draggablesRef = useRef<Map<string, THREE.Object3D>>(new Map());
   const interactionPolicy = resolveThreeInteractionPolicy({
     dragEnabled,
     readonly,
     isDragging,
   });
 
-  const onPlaneDragStart = (id: string) => {
+  const handleDragStart = (id: string) => {
     if (!interactionPolicy.canDragObjects) return;
     setIsDragging(true);
-    draggingIdRef.current = id;
-    lastDragPositionRef.current = null;
     onDragStart?.([id]);
   };
 
-  const onPlaneDragMove = (id: string, point: THREE.Vector3) => {
-    if (!interactionPolicy.canDragObjects || !onPositionChange || draggingIdRef.current !== id) return;
-
-    // Convert 3D position to 2D percentage
-    // Using the same logic as mapTo2D
-    const newPos = mapTo2D(point.x, positions[id]?.z || 0, point.z, stageConfig);
-
-    // Clamp to stage bounds
-    const totalWidth = getTotalStageWidth(stageConfig);
-    const halfWingPercent = ((totalWidth - stageConfig.width) / 2 / stageConfig.width) * 100;
-    newPos.x = Math.max(-halfWingPercent, Math.min(100 + halfWingPercent, newPos.x));
-    newPos.y = Math.max(0, Math.min(100, newPos.y));
-
-    lastDragPositionRef.current = { id, pos: newPos };
-    onPositionChange([{ id, pos: newPos }]);
-  };
-
-  const onPlaneDragEnd = () => {
-    const draggedId = draggingIdRef.current;
-    const lastUpdate = lastDragPositionRef.current;
-    draggingIdRef.current = null;
-    lastDragPositionRef.current = null;
+  const handleDragEnd = (draggedId: string, position?: Position) => {
     setIsDragging(false);
-    if (!draggedId || !lastUpdate || lastUpdate.id !== draggedId) {
-      onDragEnd?.(draggedId ? [draggedId] : []);
+    if (!position) {
+      onDragEnd?.([draggedId]);
       return;
     }
+    const snappedPosition = snapToGrid
+      ? snapStagePosition(position, gridScale, stageConfig)
+      : position;
     const committedUpdate = {
       id: draggedId,
-      pos: snapToGrid
-        ? snapStagePosition(lastUpdate.pos, gridScale, stageConfig)
-        : lastUpdate.pos,
+      pos: snappedPosition,
     };
     if (snapToGrid) onPositionChange?.([committedUpdate]);
     onDragEnd?.([draggedId], [committedUpdate]);
-  };
-
-  const registerDraggable = (id: string, mesh: THREE.Object3D) => {
-    draggablesRef.current.set(id, mesh);
-  };
-
-  const unregisterDraggable = (id: string) => {
-    draggablesRef.current.delete(id);
-  };
-
-  const contextValue: DragContextType = {
-    isDragging,
-    dragPlane: dragPlaneRef.current,
-    onPlaneDragStart,
-    onPlaneDragMove,
-    onPlaneDragEnd,
-    registerDraggable,
-    unregisterDraggable
   };
 
   const visiblePerformers = performers.filter(p => !p.groupId || !hiddenGroupIds.includes(p.groupId));
@@ -159,19 +89,8 @@ const Scene3D: React.FC<Scene3DProps> = ({
     }
   };
 
-  const handleHeightDragStart = () => {
-    if (!interactionPolicy.canDragObjects) return;
-    setIsDragging(true);
-    onDragStart?.([]);
-  };
-
-  const handleHeightDragEnd = () => {
-    setIsDragging(false);
-    onDragEnd?.([]);
-  };
-
   return (
-    <DragContext.Provider value={contextValue}>
+    <>
       <ambientLight intensity={0.6} />
       <directionalLight position={[10, 20, 10]} intensity={0.8} castShadow />
       <OrbitControls
@@ -203,8 +122,9 @@ const Scene3D: React.FC<Scene3DProps> = ({
           onSelect,
           stageConfig,
           showDirectionArrows,
-          onDragStart: handleHeightDragStart,
-          onDragEnd: handleHeightDragEnd,
+          dragEnabled: interactionPolicy.canDragObjects,
+          onDragStart: () => handleDragStart(p.id),
+          onDragEnd: (position?: Position) => handleDragEnd(p.id, position),
           onPositionChange: interactionPolicy.canDragObjects
             ? (newPos: Position) => handlePositionChange(p.id, newPos)
             : undefined
@@ -217,7 +137,7 @@ const Scene3D: React.FC<Scene3DProps> = ({
       <mesh position={[0, 0, -stageConfig.depth / 2 - 5]} scale={[100, 100, 1]} visible={false} onClick={() => onSelect('')}>
         <planeGeometry />
       </mesh>
-    </DragContext.Provider>
+    </>
   );
 };
 
