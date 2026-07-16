@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import bundledHistory from '../data/release-history.json' with { type: 'json' };
+import packageManifest from '../package.json' with { type: 'json' };
 import {
   loadProductReleaseHistory,
   ordinaryReleaseChangeText,
@@ -68,16 +70,26 @@ test('desktop reads the installed app version, filters bundled releases, and nev
   assert.deepEqual(result.history.releases, []);
 });
 
-test('desktop visible history reports its newest retained release for installed 1.0 and 1.1', async () => {
-  for (const installedVersion of ['1.0.0', '1.1.0']) {
+test('desktop visible history reports its newest retained bundled release', async () => {
+  assert.equal(bundledHistory.currentVersion, packageManifest.version);
+
+  const installedVersions = new Set(['1.0.0', packageManifest.version]);
+  for (const installedVersion of installedVersions) {
+    const installedIndex = bundledHistory.releases.findIndex(
+      (release) => release.version === installedVersion,
+    );
+    assert.notEqual(installedIndex, -1, `bundled history is missing ${installedVersion}`);
+    const expectedVersions = bundledHistory.releases
+      .slice(installedIndex)
+      .map((release) => release.version);
     const result = await loadProductReleaseHistory({
       isElectron: true,
       getAppVersion: async () => installedVersion,
     });
 
     assert.equal(result.currentVersion, installedVersion);
-    assert.equal(result.history.latestVisibleVersion, '1.0.0');
-    assert.deepEqual(result.history.releases.map((release) => release.version), ['1.0.0']);
+    assert.equal(result.history.latestVisibleVersion, expectedVersions[0]);
+    assert.deepEqual(result.history.releases.map((release) => release.version), expectedVersions);
   }
 });
 
