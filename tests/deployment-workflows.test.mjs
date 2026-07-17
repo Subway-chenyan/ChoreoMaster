@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { access, chmod, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -26,6 +26,11 @@ const actionVersions = {
 
 function normalizeSource(source) {
   return source.replace(/\r\n?/g, '\n');
+}
+
+async function canonicalPath(candidate) {
+  const resolved = await realpath(candidate);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
 }
 
 async function readWorkflow(name) {
@@ -378,7 +383,10 @@ esac
   assert.equal(publish.status, 0, publish.stderr);
   assert.match(publish.output, /mode=publish/);
 
-  assert.equal(path.resolve(run('git', ['rev-parse', '--show-toplevel'], { cwd: repo })), path.resolve(repo));
+  assert.equal(
+    await canonicalPath(run('git', ['rev-parse', '--show-toplevel'], { cwd: repo })),
+    await canonicalPath(repo),
+  );
   assert.equal(run('git', ['tag', '--list', 'v1.1.0'], { cwd: repo }), '');
   run('git', ['tag', '-a', 'v1.1.0', '-m', '1.1.0'], { cwd: repo });
   await writeFile(path.join(repo, 'aggregate.txt'), 'next aggregate change\n');
