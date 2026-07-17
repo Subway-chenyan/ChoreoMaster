@@ -73,6 +73,8 @@ win: {
 - Mutable pointers, in commit order: `downloads/CosStage-Setup-x64.exe`, `downloads/releases.json`, `downloads/latest.yml`.
 - Production secrets: `TENCENT_SECRET_ID`, `TENCENT_SECRET_KEY`, `CSC_LINK`, `CSC_KEY_PASSWORD`.
 - Production variable: `WINDOWS_PUBLISHER_NAME`.
+- Temporary unsigned build environment: `CSC_IDENTITY_AUTO_DISCOVERY=false` and `COSSTAGE_REQUIRE_CODE_SIGNING=false`.
+- Temporary unsigned verification: `verify-windows-signature.ps1` receives `AllowUnsigned = $true` and no expected publisher.
 
 ### 3. Contracts
 
@@ -87,12 +89,15 @@ win: {
 - Public verification compares complete SHA-256 values before creating a tag or GitHub Release.
 - Manual rollback changes `stableVersion` and the three stable pointers only. It preserves `currentVersion`, versioned objects, tags, and releases; it never auto-downgrades clients already running a higher version.
 - Pin third-party GitHub Actions to reviewed commit SHAs and verify downloaded CLIs by exact version and checksum.
+- A human-authorized temporary unsigned release must be explicit and deterministic: disable certificate auto-discovery, omit every signing secret and publisher reference from the workflow, pass `AllowUnsigned` only at the signature-verification boundary, and disclose the Windows "Unknown publisher" warning in release documentation and the Changeset. Restore the normal fail-closed signing contract as soon as a trusted Authenticode certificate is available.
 
 ### 4. Validation & Error Matrix
 
 - Missing or invalid Changeset intent -> fail pull-request quality checks.
 - Package, lock, structured history, or changelog disagree -> fail release-data validation; generated notes are produced by `version-packages` and covered by release tests plus human review.
 - Signing certificate missing, signature invalid, or publisher different from `WINDOWS_PUBLISHER_NAME` -> fail before artifact upload.
+- Temporary unsigned mode still references `CSC_LINK`, `CSC_KEY_PASSWORD`, or `WINDOWS_PUBLISHER_NAME` -> fail the workflow contract test; do not allow ambient credentials to change artifact identity.
+- Unsigned artifact without the explicit `AllowUnsigned` verifier flag -> fail before artifact upload.
 - COS bucket versioning is not `Closed` or the state is unreadable -> fail before every production write.
 - Existing immutable object has a different hash -> stop; never overwrite or delete it.
 - Pointer/public verification fails while the signed artifact is retained -> use **Re-run failed jobs** in the original workflow run so the same artifact is reused.
@@ -103,6 +108,7 @@ win: {
 ### 5. Good/Base/Bad Cases
 
 - Good: a human merges the aggregate Release PR; CI signs once, validates Builder metadata, writes immutable objects, converges the three pointers, verifies the public CDN, creates the tag/Release, and then deploys the web guide.
+- Good temporary exception: CI explicitly disables signing discovery, verifies `NotSigned`, publishes release notes that warn about "Unknown publisher", and retains the same immutable-object protections.
 - Base: a non-version `main` commit deploys the web build while desktop release detection skips publication.
 - Bad: a failed publish is retried with **Re-run all jobs**, producing a differently timestamped signed installer for an already-created immutable version.
 
@@ -110,12 +116,35 @@ win: {
 
 - Release tests validate Changeset intent, aggregate version output, structured history, and explicit `publish`/`rollback` CLI subcommands.
 - Workflow tests parse YAML and assert pinned action SHAs, production/main gates, shared concurrency, verified Tencent CLIs, authenticated COS reads, pointer order, and absence of destructive tag/object deletion.
+- While the temporary unsigned exception is active, workflow tests assert both unsigned environment flags, `AllowUnsigned`, and the complete absence of signing secret or publisher expressions.
 - Artifact tests validate Builder SHA-512, size, blockmap, exact ProductVersion, Authenticode publisher, and explicit unsigned-only local mode.
 - Publish tests cover fresh creation, same-hash reuse, uncertain-create recovery, mismatched immutable failure, public verification failure, and temp cleanup.
 - Deployment tests prove the current web hash is public and treat legacy PWA URLs as diagnostics only.
 - Run `npm run release:dry-run` on Windows and simulate the aggregate Release PR in a clean clone before allowing the first governed release.
 
 ### 7. Wrong vs Correct
+
+#### Wrong
+
+```yaml
+# An empty signing configuration fails late and can vary with ambient runner credentials.
+env:
+  COSSTAGE_REQUIRE_CODE_SIGNING: 'true'
+  COSSTAGE_WINDOWS_PUBLISHER_NAME: ${{ vars.WINDOWS_PUBLISHER_NAME }}
+```
+
+#### Correct
+
+```yaml
+# Temporary exception only; restore enforced signing when a trusted certificate exists.
+env:
+  CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+  COSSTAGE_REQUIRE_CODE_SIGNING: 'false'
+```
+
+```powershell
+$signatureArgs = @{ AllowUnsigned = $true }
+```
 
 #### Wrong
 

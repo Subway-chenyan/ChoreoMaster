@@ -239,7 +239,7 @@ test('web gate deploys ordinary commits but waits only for a package version cha
   assert.match(await runGate(missingParentPackage, gate.run), /deploy=true/);
 });
 
-test('desktop workflow detects safe modes, builds signed artifacts, and gates stable writes to main', async () => {
+test('desktop workflow detects safe modes, builds explicitly unsigned artifacts, and gates stable writes to main', async () => {
   const { source, workflow } = await readWorkflow('desktop-release.yml');
 
   assert.equal(workflow.name, 'Desktop Release');
@@ -278,16 +278,17 @@ test('desktop workflow detects safe modes, builds signed artifacts, and gates st
   const build = workflow.jobs['build-windows'];
   assert.equal(build.if, "needs.detect.outputs.mode == 'publish'");
   assert.equal(build.environment, 'production');
-  const signed = findStep(build, 'Build signed installer');
-  assert.deepEqual(signed.env, {
-    CSC_LINK: '${{ secrets.CSC_LINK }}',
-    CSC_KEY_PASSWORD: '${{ secrets.CSC_KEY_PASSWORD }}',
-    COSSTAGE_REQUIRE_CODE_SIGNING: 'true',
-    COSSTAGE_WINDOWS_PUBLISHER_NAME: '${{ vars.WINDOWS_PUBLISHER_NAME }}',
+  const unsigned = findStep(build, 'Build explicitly unsigned installer');
+  assert.deepEqual(unsigned.env, {
+    CSC_IDENTITY_AUTO_DISCOVERY: 'false',
+    COSSTAGE_REQUIRE_CODE_SIGNING: 'false',
   });
-  const verify = findStep(build, 'Verify signed release artifacts').run;
+  const verify = findStep(build, 'Verify explicitly unsigned release artifacts').run;
   assert.match(verify, /verify-builder-output\.mjs/);
   assert.match(verify, /verify-windows-signature\.ps1/);
+  assert.match(verify, /AllowUnsigned\s*=\s*\$true/);
+  assert.doesNotMatch(verify, /ExpectedPublisher/);
+  assert.doesNotMatch(source, /secrets\.CSC_LINK|secrets\.CSC_KEY_PASSWORD|vars\.WINDOWS_PUBLISHER_NAME/);
   const artifact = build.steps.find((step) => step.uses === actionRefs.uploadArtifact);
   assert.ok(artifact);
   for (const required of [
