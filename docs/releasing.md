@@ -80,6 +80,8 @@ Environment variable：
 
 腾讯云 COS 存储桶 `beat-1317738912` 的 bucket versioning 必须为 `Closed`。所有会写入生产 COS 的工作流（`Desktop Release`、`Desktop Rollback`、`Deploy Web`）都会在首次写入前通过已认证的 COS API 检查该状态；如果无法读取或状态不是 `Closed`，工作流会 fail closed。不要为了重试临时启用或暂停 bucket versioning。
 
+COS CLI v1.0.8 可能把对象不存在诊断（例如 `cos object not found:downloads/releases.json`）写入 stdout。所有用于区分“首次发布缺少对象”和“真实读取故障”的探测必须合并捕获 stdout 与 stderr；只重定向 stderr 会把合法首发误判为故障。其他错误仍须 fail closed。
+
 仓库还必须创建 `release:none` 标签。该标签只用于明确声明普通 PR 没有产品版本影响，不能用于跳过 Release PR 的人工审核。
 
 密钥、证书内容和密码不得写入 `.env`、提交日志、构建产物或文档。根目录 `.env.example` 只记录本地 dry-run 开关和本地发布者名称。

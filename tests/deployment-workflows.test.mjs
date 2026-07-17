@@ -316,8 +316,8 @@ test('desktop workflow detects safe modes, builds explicitly unsigned artifacts,
   assert.match(installTencent, /bucket versioning status is Closed/);
   const downloadIndex = findStep(publish, 'Download existing release index').run;
   assert.match(downloadIndex, /coscli cp cos:\/\/production\/downloads\/releases\.json/);
-  assert.match(downloadIndex, /NoSuchKey/);
-  assert.match(downloadIndex, /404/);
+  assert.match(downloadIndex, />"\$index_error" 2>&1/);
+  assert.match(downloadIndex, /cos object not found:/);
   assert.doesNotMatch(downloadIndex, /CDN_URL|curl/);
 
   const repair = workflow.jobs['repair-release'];

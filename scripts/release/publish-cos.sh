@@ -89,7 +89,7 @@ upload_immutable() {
   if coscli cp "cos://production/$object" "$remote_file" \
     --secret-id "$TENCENT_SECRET_ID" \
     --secret-key "$TENCENT_SECRET_KEY" \
-    2>"$error_file"; then
+    >"$error_file" 2>&1; then
     remote_hash="$(sha256sum "$remote_file" | awk '{print $1}')"
     if [ "$source_hash" != "$remote_hash" ]; then
       echo "Immutable object differs: $object" >&2
@@ -98,7 +98,7 @@ upload_immutable() {
     return
   fi
 
-  if ! grep -Eiq 'NoSuchKey|HTTP[^0-9]*404|status[^0-9]*404|not[[:space:]-]+found' "$error_file"; then
+  if ! grep -Eiq 'NoSuchKey|HTTP[^0-9]*404|status[^0-9]*404|not[[:space:]-]+found|cos object not found:' "$error_file"; then
     cat "$error_file" >&2
     echo "Unable to check immutable COS object: $object" >&2
     exit 1

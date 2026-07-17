@@ -99,6 +99,7 @@ win: {
 - Temporary unsigned mode still references `CSC_LINK`, `CSC_KEY_PASSWORD`, or `WINDOWS_PUBLISHER_NAME` -> fail the workflow contract test; do not allow ambient credentials to change artifact identity.
 - Unsigned artifact without the explicit `AllowUnsigned` verifier flag -> fail before artifact upload.
 - COS bucket versioning is not `Closed` or the state is unreadable -> fail before every production write.
+- COS CLI missing-object probes must capture stdout and stderr together because v1.0.8 can emit `cos object not found:<key>` on stdout. Match that exact diagnostic as missing; all other read failures remain fail-closed.
 - Existing immutable object has a different hash -> stop; never overwrite or delete it.
 - Pointer/public verification fails while the signed artifact is retained -> use **Re-run failed jobs** in the original workflow run so the same artifact is reused.
 - Signed artifact expired before a tag exists -> do not rebuild the same version. Roll back only when the prior stable index and all historical artifacts are complete; otherwise enter incident recovery and publish a higher Patch.
@@ -116,6 +117,7 @@ win: {
 
 - Release tests validate Changeset intent, aggregate version output, structured history, and explicit `publish`/`rollback` CLI subcommands.
 - Workflow tests parse YAML and assert pinned action SHAs, production/main gates, shared concurrency, verified Tencent CLIs, authenticated COS reads, pointer order, and absence of destructive tag/object deletion.
+- COS publication tests emit the real stdout-only `cos object not found:<key>` diagnostic and prove that fresh immutable creation succeeds while access errors still abort before writes.
 - While the temporary unsigned exception is active, workflow tests assert both unsigned environment flags, `AllowUnsigned`, and the complete absence of signing secret or publisher expressions.
 - Artifact tests validate Builder SHA-512, size, blockmap, exact ProductVersion, Authenticode publisher, and explicit unsigned-only local mode.
 - Publish tests cover fresh creation, same-hash reuse, uncertain-create recovery, mismatched immutable failure, public verification failure, and temp cleanup.
