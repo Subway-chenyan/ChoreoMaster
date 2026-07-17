@@ -129,15 +129,15 @@ jobs:
       - name: Run quality gate
         run: npm test
 
-      - name: Build signed installer
+      # Temporary exception: no trusted Authenticode certificate is currently available.
+      # Keep this explicit and deterministic until production signing is restored.
+      - name: Build explicitly unsigned installer
         env:
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          COSSTAGE_REQUIRE_CODE_SIGNING: 'true'
-          COSSTAGE_WINDOWS_PUBLISHER_NAME: ${{ vars.WINDOWS_PUBLISHER_NAME }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          COSSTAGE_REQUIRE_CODE_SIGNING: 'false'
         run: npm run build:electron:win
 
-      - name: Verify signed release artifacts
+      - name: Verify explicitly unsigned release artifacts
         shell: pwsh
         run: |
           $version = '${{ needs.detect.outputs.version }}'
@@ -145,7 +145,7 @@ jobs:
           $signatureArgs = @{
             InstallerPath = "release/CosStage-Setup-$version-x64.exe"
             ExpectedVersion = $version
-            ExpectedPublisher = '${{ vars.WINDOWS_PUBLISHER_NAME }}'
+            AllowUnsigned = $true
           }
           ./scripts/release/verify-windows-signature.ps1 @signatureArgs
           Copy-Item -LiteralPath build/release-notes.md -Destination release/release-notes.md -Force

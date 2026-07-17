@@ -2,11 +2,13 @@
 
 本文说明 CosStage 桌面版本从日常变更、聚合 Release PR、Windows 签名、COS 发布到回滚的完整流程。生产发布以 GitHub Actions 中的 `production` Environment 为边界；不要在本地直接改写 COS 稳定指针、创建版本标签或发布 GitHub Release。
 
+> 临时未签名例外（自 1.1.0 起）：当前尚未取得受信任的 Windows Authenticode 证书，生产工作流会显式关闭证书自动发现，并通过 `AllowUnsigned` 校验未签名状态。安装时 Windows 会显示“未知发布者”。取得正式证书后必须删除该例外、恢复强制签名，并在 Release PR 合并前完成真实签名预检。
+
 ## 发布模型与人工授权
 
 CosStage 采用 Changesets 聚合发布：多项日常变更先合入 `main`，`Release PR` 工作流持续创建或更新一个 `chore: version packages` PR。实现分支或普通 PR 合入 `main` 只会聚合发布信息，不会发布新的桌面版本，也不会移动桌面下载的 stable 指针。
 
-只有发布负责人检查并人工合并 Release PR，才表示授权生产发布。版本变化提交进入 `main` 后，`Desktop Release` 才会构建、签名并发布该版本。不要自动合并 Release PR。
+只有发布负责人检查并人工合并 Release PR，才表示授权生产发布。版本变化提交进入 `main` 后，`Desktop Release` 才会按当前签名策略构建并发布该版本。不要自动合并 Release PR。
 
 普通非版本提交仍可能由 `Deploy Web` 更新 Web 站点；这不等于发布新的桌面版本。
 
@@ -65,16 +67,16 @@ npm test
 
 在 GitHub 仓库 Settings → Environments 中创建 `production`，配置 required reviewers，并限制只有发布负责人可以批准。Deployment branches 只允许 `main` 和 Changesets Release PR 分支 `changeset-release/main`；禁止任意功能分支或临时分支进入 production。桌面构建、生产发布、Web 部署与回滚都使用该 Environment。
 
-Environment secrets：
+Environment secrets（正式签名恢复后再增加后两项）：
 
 - `TENCENT_SECRET_ID`
 - `TENCENT_SECRET_KEY`
-- `CSC_LINK`
-- `CSC_KEY_PASSWORD`
+- `CSC_LINK`（临时未签名期间不配置）
+- `CSC_KEY_PASSWORD`（临时未签名期间不配置）
 
 Environment variable：
 
-- `WINDOWS_PUBLISHER_NAME`：必须与 Windows Authenticode 证书 Subject 中的发布者一致。
+- `WINDOWS_PUBLISHER_NAME`：正式签名恢复后配置，且必须与 Windows Authenticode 证书 Subject 中的发布者一致；临时未签名期间不配置。
 
 腾讯云 COS 存储桶 `beat-1317738912` 的 bucket versioning 必须为 `Closed`。所有会写入生产 COS 的工作流（`Desktop Release`、`Desktop Rollback`、`Deploy Web`）都会在首次写入前通过已认证的 COS API 检查该状态；如果无法读取或状态不是 `Closed`，工作流会 fail closed。不要为了重试临时启用或暂停 bucket versioning。
 
@@ -100,9 +102,9 @@ node scripts/release/verify-builder-output.mjs 1.0.0
   -AllowUnsigned
 ```
 
-将示例中的 `1.0.0` 替换为当前工作区版本。`-AllowUnsigned` 只能用于本地 dry-run；生产工作流设置 `COSSTAGE_REQUIRE_CODE_SIGNING=true`，不允许 unsigned 安装包通过。
+将示例中的 `1.0.0` 替换为当前工作区版本。正常情况下 `-AllowUnsigned` 只能用于本地 dry-run；当前生产工作流存在经过授权的临时例外，显式设置 `COSSTAGE_REQUIRE_CODE_SIGNING=false` 与 `CSC_IDENTITY_AUTO_DISCOVERY=false`，并要求验证器确认安装包确实处于未签名状态。
 
-如需在合并 Release PR 前验证真实签名，只能在 GitHub Actions 中选择 Changesets Release PR 分支 `changeset-release/main`，再手工运行 `Desktop Release`。不得从任意功能分支或临时分支发起 production 签名预检。Windows build job 仍需 `production` reviewer 批准；`publish` 与 `repair-release` 必须因 `github.ref != 'refs/heads/main'` 显示 skipped。下载 CI artifact 后执行 `Get-AuthenticodeSignature`，确认 `Status` 为 `Valid`，且证书 Subject 包含 `WINDOWS_PUBLISHER_NAME`。不要在该分支运行回滚或任何 COS 写操作。
+正式签名恢复后，如需在合并 Release PR 前验证真实签名，只能在 GitHub Actions 中选择 Changesets Release PR 分支 `changeset-release/main`，再手工运行 `Desktop Release`。不得从任意功能分支或临时分支发起 production 签名预检。Windows build job 仍需 `production` reviewer 批准；`publish` 与 `repair-release` 必须因 `github.ref != 'refs/heads/main'` 显示 skipped。下载 CI artifact 后执行 `Get-AuthenticodeSignature`，确认 `Status` 为 `Valid`，且证书 Subject 包含 `WINDOWS_PUBLISHER_NAME`。不要在该分支运行回滚或任何 COS 写操作。
 
 合并 Release PR 前，production reviewer 还必须在腾讯云控制台或经认证的 COS CLI 中确认 bucket versioning 返回 `Closed`。发布日志中的版本控制预检必须成功；状态无法确认时不得批准生产发布。
 
@@ -110,8 +112,8 @@ node scripts/release/verify-builder-output.mjs 1.0.0
 
 人工合并 Release PR 后，观察 `.github/workflows/desktop-release.yml` 对应的 `Desktop Release` 运行。工作流会：
 
-1. 在 Windows runner 执行完整质量门禁并生成已签名安装包。
-2. 验证 Authenticode、Builder 原始 `latest.yml`、blockmap、文件大小及校验值。
+1. 在 Windows runner 执行完整质量门禁，并按当前临时策略生成明确未签名的安装包。
+2. 验证安装包为未签名状态，同时验证 Builder 原始 `latest.yml`、blockmap、文件大小及校验值。
 3. 先创建版本化不可变制品，再依次更新稳定安装包、`releases.json`、根 `latest.yml`。
 4. 清理 CDN 缓存并按完整 SHA-256 验证公网文件。
 5. 公网验证成功后创建 `vX.Y.Z` tag 和 GitHub Release。
@@ -120,7 +122,7 @@ node scripts/release/verify-builder-output.mjs 1.0.0
 以下信号全部满足才算发布完成：
 
 - Windows build、`publish`（或 `repair-release`）和 `deploy-web` job 成功。
-- 安装包 Authenticode 状态为 `Valid`，发布者与 `WINDOWS_PUBLISHER_NAME` 一致。
+- 临时未签名期间，安装包 Authenticode 状态为 `NotSigned`；正式签名恢复后必须为 `Valid`，且发布者与 `WINDOWS_PUBLISHER_NAME` 一致。
 - `https://beat.cosdrama.cn/downloads/CosStage-Setup-x64.exe` 可下载且哈希与本次版本一致。
 - `https://beat.cosdrama.cn/downloads/releases.json` 的 `currentVersion` 与 `stableVersion` 都是本次版本。
 - `https://beat.cosdrama.cn/downloads/latest.yml` 与版本化 `downloads/metadata/X.Y.Z/latest.yml` 一致。
