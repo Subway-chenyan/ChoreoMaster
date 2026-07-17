@@ -394,8 +394,11 @@ test('creates a named project from the verified ChinaJoy template and reuses its
     assert.notEqual(first.projectId, second.projectId);
     assert.equal(third.data.name, 'ChinaJoy 缓存恢复');
     assert.match(first.data.performers[2].boxTextures.front.dataUrl, /^choreo-asset:\/\//);
-    assert.equal(first.warnings[0].code, 'missing_asset');
-    assert.match(first.warnings[0].resource, /\.mp4$/);
+    assert.equal(first.warnings.length, 0);
+    assert.match(
+      first.mediaUrls[first.data.stageConfig.ledContent.value],
+      /^choreo-asset:\/\//,
+    );
   });
 });
 

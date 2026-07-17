@@ -25,12 +25,12 @@ const PROJECT_TEMPLATES: ProjectTemplateDefinition[] = [
   {
     id: 'chinajoy',
     name: 'ChinaJoy',
-    description: '包含完整舞台结构、侧台和 4 个道具贴图的预设项目',
+    description: '包含完整舞台结构、LED 背景和 4 个道具贴图的预设项目',
     version: '1',
-    estimatedBytes: 3_934_852,
+    estimatedBytes: 5_997_411,
     fileName: 'chinajoy-v1.zip',
     url: 'https://beat.cosdrama.cn/templates/chinajoy-v1.zip',
-    sha256: '64a909c860c08cf7893bcd5904b64e9af435d20f0677dfbfb55822c9bcb7e925',
+    sha256: 'f21506b902e8fd0ebf4cdba6897e4ed7a037051f4176408343b46c346e9eb268',
   },
 ];
 
