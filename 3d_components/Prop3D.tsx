@@ -5,7 +5,10 @@ import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { Performer, Position, ExtrudedTextures, StageConfig } from '../types';
 import { mapTo3D, mapTo2D, degToRad, getTotalStageWidth } from '../utils/coordinates';
-import { canStartThreeObjectDrag } from '../utils/three-interaction';
+import {
+  canStartThreeObjectDrag,
+  isMatchingCapturedPointer,
+} from '../utils/three-interaction';
 import DirectionArrow3D from './DirectionArrow3D';
 import { denormalizePoints } from '../components/prop-editor/PolygonUtils';
 import { getPropAnchorFromCenter, getPropCenterFromAnchor } from '../utils/prop-pivot';
@@ -118,7 +121,7 @@ const Prop3D: React.FC<Prop3DProps> = ({
 
   const handleCanvasPointerTermination = useCallback((event: PointerEvent) => {
     const captured = capturedPointerRef.current;
-    if (!captured || captured.pointerId !== event.pointerId) return;
+    if (!isMatchingCapturedPointer(captured?.pointerId, event.pointerId)) return;
     finishActiveDrag();
   }, [finishActiveDrag]);
 
@@ -314,6 +317,7 @@ const Prop3D: React.FC<Prop3DProps> = ({
 
   const handlePlanePointerUp = useCallback((event: ThreeEvent<PointerEvent>) => {
     if (!isPlaneDraggingRef.current) return;
+    if (!isMatchingCapturedPointer(capturedPointerRef.current?.pointerId, event.pointerId)) return;
     event.stopPropagation();
     finishActiveDrag();
   }, [finishActiveDrag]);

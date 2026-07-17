@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   canStartThreeObjectDrag,
+  isMatchingCapturedPointer,
   resolveThreeHeightFromPointerDrag,
   resolveThreeInteractionPolicy,
 } from '../utils/three-interaction.ts';
@@ -64,6 +65,12 @@ test('only a primary button can start an enabled writable object drag', () => {
   assert.equal(canStartThreeObjectDrag({ dragEnabled: true, readonly: false, button: 1 }), false);
   assert.equal(canStartThreeObjectDrag({ dragEnabled: true, readonly: false, button: 2 }), false);
   assert.equal(canStartThreeObjectDrag({ dragEnabled: true, readonly: false, button: -1 }), false);
+});
+
+test('only the captured pointer can terminate an active object drag', () => {
+  assert.equal(isMatchingCapturedPointer(7, 7), true);
+  assert.equal(isMatchingCapturedPointer(7, 8), false);
+  assert.equal(isMatchingCapturedPointer(null, 7), false);
 });
 
 test('performer height drag uses client-pixel direction and camera-distance scaling', () => {

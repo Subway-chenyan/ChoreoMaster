@@ -31,6 +31,13 @@ export function canStartThreeObjectDrag(input: {
   return input.dragEnabled && !input.readonly && input.button === 0;
 }
 
+export function isMatchingCapturedPointer(
+  capturedPointerId: number | null | undefined,
+  eventPointerId: number,
+): boolean {
+  return capturedPointerId === eventPointerId;
+}
+
 export function resolveThreeHeightFromPointerDrag(input: {
   startHeight: number;
   startClientY: number;

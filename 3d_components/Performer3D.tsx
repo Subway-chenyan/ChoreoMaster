@@ -7,6 +7,7 @@ import { Performer, Position, StageConfig } from '../types';
 import { mapTo3D, mapTo2D, degToRad, getTotalStageWidth } from '../utils/coordinates';
 import {
   canStartThreeObjectDrag,
+  isMatchingCapturedPointer,
   resolveThreeHeightFromPointerDrag,
 } from '../utils/three-interaction';
 import DirectionArrow3D from './DirectionArrow3D';
@@ -114,7 +115,7 @@ const Performer3D: React.FC<Performer3DProps> = ({
 
   const handleCanvasPointerTermination = useCallback((event: PointerEvent) => {
     const captured = capturedPointerRef.current;
-    if (!captured || captured.pointerId !== event.pointerId) return;
+    if (!isMatchingCapturedPointer(captured?.pointerId, event.pointerId)) return;
     finishActiveDrag();
   }, [finishActiveDrag]);
 
@@ -223,6 +224,7 @@ const Performer3D: React.FC<Performer3DProps> = ({
 
   const handlePlanePointerUp = useCallback((event: ThreeEvent<PointerEvent>) => {
     if (!isPlaneDraggingRef.current) return;
+    if (!isMatchingCapturedPointer(capturedPointerRef.current?.pointerId, event.pointerId)) return;
     event.stopPropagation();
     finishActiveDrag();
   }, [finishActiveDrag]);
@@ -270,6 +272,7 @@ const Performer3D: React.FC<Performer3DProps> = ({
 
   const handleHeightDragEnd = useCallback((event: ThreeEvent<PointerEvent>) => {
     if (!isHeightDraggingRef.current) return;
+    if (!isMatchingCapturedPointer(capturedPointerRef.current?.pointerId, event.pointerId)) return;
     event.stopPropagation();
     finishActiveDrag();
   }, [finishActiveDrag]);

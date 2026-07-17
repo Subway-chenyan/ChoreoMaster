@@ -484,6 +484,8 @@ test('3D pointer lifecycle captures accepted drags and commits exact final updat
   ]);
 
   assert.match(performer3DSource, /canStartThreeObjectDrag/);
+  assert.match(performer3DSource, /isMatchingCapturedPointer/);
+  assert.match(prop3DSource, /isMatchingCapturedPointer/);
   assert.match(prop3DSource, /canStartThreeObjectDrag/);
   assert.match(performer3DSource, /event\.button/);
   assert.match(prop3DSource, /event\.button/);
@@ -498,7 +500,7 @@ test('3D pointer lifecycle captures accepted drags and commits exact final updat
     assert.match(source, /canvas\.addEventListener\('lostpointercapture', handleCanvasPointerTermination\)/);
     assert.match(source, /canvas\.removeEventListener\('pointercancel', handleCanvasPointerTermination\)/);
     assert.match(source, /canvas\.removeEventListener\('lostpointercapture', handleCanvasPointerTermination\)/);
-    assert.match(source, /captured\.pointerId !== event\.pointerId/);
+    assert.match(source, /isMatchingCapturedPointer\(captured\?\.pointerId, event\.pointerId\)/);
     assert.match(source, /const finishActiveDrag = useCallback\(\(notifyDragEnd: boolean = true\) => \{/);
     assert.match(source, /if \(dragEnabled\) return;\s*finishActiveDrag\(\);/);
     assert.match(source, /finishActiveDrag\(false\);/);
