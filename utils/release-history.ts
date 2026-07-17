@@ -288,22 +288,28 @@ export function visibleReleases(history: ReleaseHistory, maxVersion?: string): R
   ));
 }
 
+export function bundledProductReleaseHistory(
+  currentVersion: string = bundledHistory.currentVersion,
+): LoadedProductReleaseHistory {
+  const history = parseReleaseHistory(bundledHistory);
+  const releases = visibleReleases(history, currentVersion);
+  return {
+    history: {
+      schemaVersion: history.schemaVersion,
+      latestVisibleVersion: releases[0]?.version,
+      releases,
+    },
+    currentVersion,
+  };
+}
+
 export async function loadProductReleaseHistory(
   electronAPI: ProductReleaseElectronAPI | undefined = getDefaultElectronAPI(),
   fetchImpl: ReleaseHistoryFetch = defaultFetch,
 ): Promise<LoadedProductReleaseHistory> {
   if (electronAPI?.isElectron === true) {
     const currentVersion = await electronAPI.getAppVersion();
-    const history = parseReleaseHistory(bundledHistory);
-    const releases = visibleReleases(history, currentVersion);
-    return {
-      history: {
-        schemaVersion: history.schemaVersion,
-        latestVisibleVersion: releases[0]?.version,
-        releases,
-      },
-      currentVersion,
-    };
+    return bundledProductReleaseHistory(currentVersion);
   }
 
   let response: ReleaseHistoryResponse;

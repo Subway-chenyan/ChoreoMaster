@@ -526,6 +526,60 @@ application dialogs and full-screen overlays.
 Keep application overlays above this local range and add a regression assertion
 when introducing new Drei HTML labels.
 
+## Scenario: Application Version Badge and Release History Fallback
+
+### 1. Scope / Trigger
+
+Use this contract whenever the visible application version or Product Guide release history changes. It prevents the build version, installed desktop version, and remotely selected stable release from being treated as the same value.
+
+### 2. Signatures
+
+```ts
+export const APP_VERSION: string;
+export function bundledProductReleaseHistory(currentVersion?: string): LoadedProductReleaseHistory;
+export function loadProductReleaseHistory(): Promise<LoadedProductReleaseHistory>;
+```
+
+### 3. Contracts
+
+- `AppVersionBadge` displays `package.json.version` as `vX.Y.Z`; the Release PR owns updates to that field.
+- Electron uses `getAppVersion()` and filters bundled entries newer than the installed build.
+- Web loads `https://beat.cosdrama.cn/downloads/releases.json` with `cache: 'no-store'`; `stableVersion` is the displayed online current version.
+- The Product Guide catches online load or validation failures and displays `bundledProductReleaseHistory()` with a visible `离线记录` status. The low-level online loader must still reject invalid data so corruption remains testable.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Valid published index | Display all published entries and its `stableVersion`. |
+| Network, HTTP, JSON, or schema failure | Display bundled entries and label them as offline. |
+| Electron installed version older than bundled history | Hide entries newer than the installed version. |
+| Bundled/package version mismatch | Fail release-data validation; do not patch the badge independently. |
+
+### 5. Good / Base / Bad Cases
+
+- Good: published index loads and the guide displays the selected stable release.
+- Base: the endpoint is unavailable and the same build still displays its bundled history with an offline notice.
+- Bad: swallowing malformed online data inside `loadProductReleaseHistory()` or showing an unlabelled fallback.
+
+### 6. Tests Required
+
+- Unit-test that bundled fallback exposes `package.json.version` and all locally visible entries.
+- Regression-test both `AppVersionBadge` placements and the visible offline label.
+- Keep runtime schema rejection tests for malformed published indexes.
+- Run type-check, desktop tests, release tests, and the production Vite build.
+
+### 7. Wrong vs Correct
+
+```tsx
+// Wrong: manually maintained version text and an empty error-only state.
+<span>v1.0.0</span>
+
+// Correct: build-owned version text plus an explicitly labelled bundled fallback.
+<AppVersionBadge />
+const fallback = bundledProductReleaseHistory();
+```
+
 ---
 
 ## Quick Reference

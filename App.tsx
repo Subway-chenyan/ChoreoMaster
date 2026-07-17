@@ -31,6 +31,7 @@ import { HelpModal } from './components/HelpModal';
 import { StageBackgroundDialog } from './components/StageBackgroundDialog';
 import { PerformerNoteDrawer } from './components/PerformerNoteDrawer';
 import { ProductGuide } from './components/ProductGuide';
+import { AppVersionBadge } from './components/AppVersionBadge';
 import { UpdateNotification } from './components/UpdateNotification';
 import { useTheme } from './contexts/ThemeContext';
 import { DEFAULT_COLORS, STAGE_ASPECT_RATIO } from './constants';
@@ -4446,6 +4447,7 @@ const App: React.FC = () => {
           <div className="flex items-center gap-2">
             <img src="./icons/icon-192.png" alt="CosStage" className="w-6 h-6" />
             <h1 className={`text-base sm:text-lg font-bold ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>CosStage</h1>
+            <AppVersionBadge />
           </div>
         </div>
         <div className="flex items-center gap-2">

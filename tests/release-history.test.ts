@@ -3,6 +3,7 @@ import test from 'node:test';
 import bundledHistory from '../data/release-history.json' with { type: 'json' };
 import packageManifest from '../package.json' with { type: 'json' };
 import {
+  bundledProductReleaseHistory,
   loadProductReleaseHistory,
   ordinaryReleaseChangeText,
   productGuideVersionsView,
@@ -91,6 +92,17 @@ test('desktop visible history reports its newest retained bundled release', asyn
     assert.equal(result.history.latestVisibleVersion, expectedVersions[0]);
     assert.deepEqual(result.history.releases.map((release) => release.version), expectedVersions);
   }
+});
+
+test('bundled fallback exposes the build version and complete local release history', () => {
+  const result = bundledProductReleaseHistory();
+
+  assert.equal(result.currentVersion, packageManifest.version);
+  assert.equal(result.history.latestVisibleVersion, packageManifest.version);
+  assert.deepEqual(
+    result.history.releases.map((release) => release.version),
+    bundledHistory.releases.map((release) => release.version),
+  );
 });
 
 test('web fetches the published index without cache and does not call the desktop boundary', async () => {

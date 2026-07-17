@@ -522,7 +522,7 @@ test('3D pointer lifecycle captures accepted drags and commits exact final updat
   assert.match(performer3DSource, /onLostPointerCapture=\{handleHeightPointerCancel\}/);
   assert.match(
     performer3DSource,
-    /const handleHeightDragEnd = useCallback\([\s\S]{0,220}finishActiveDrag\(\);/,
+    /const handleHeightDragEnd = useCallback\([\s\S]*?finishActiveDrag\(\);[\s\S]*?\}, \[finishActiveDrag\]\);/,
   );
   assert.match(performer3DSource, /event\.nativeEvent\.clientY/);
   assert.doesNotMatch(performer3DSource, /event\.pointer\.y/);
@@ -632,19 +632,27 @@ test('cross-project clipboard carries entities, scene state, and portable assets
   assert.match(help, /跨项目/);
 });
 
-test('product guide renders release history with explicit async states and no web bundled fallback', async () => {
-  const [guide, versions, releaseHistory] = await Promise.all([
+test('product guide renders release history with a bundled fallback and visible app version', async () => {
+  const [app, badge, guide, versions, releaseHistory] = await Promise.all([
+    read('App.tsx'),
+    read('components/AppVersionBadge.tsx'),
     read('components/ProductGuide.tsx'),
     read('components/ProductGuideVersions.tsx'),
     read('utils/release-history.ts'),
   ]);
 
+  assert.match(app, /<AppVersionBadge \/>/);
+  assert.match(badge, /packageManifest\.version/);
+  assert.match(badge, />v\{APP_VERSION\}</);
   assert.match(guide, /import \{ ProductGuideVersions \} from '\.\/ProductGuideVersions'/);
+  assert.match(guide, /<AppVersionBadge \/>/);
   assert.match(guide, /scrollToSection\('operations'\)[\s\S]*scrollToSection\('versions'\)[\s\S]*scrollToSection\('terms'\)/);
   assert.match(guide, /<ProductGuideOperations \/>[\s\S]*<ProductGuideVersions \/>[\s\S]*<section id="terms"/);
   assert.match(versions, /view\.status === 'loading'/);
   assert.match(versions, /view\.status === 'error'/);
   assert.match(versions, /view\.status === 'success'/);
+  assert.match(versions, /bundledProductReleaseHistory\(\)/);
+  assert.match(versions, /离线记录/);
   assert.match(versions, /let active = true/);
   assert.match(versions, /return \(\) => \{ active = false; \}/);
   assert.match(versions, /aria-label="版本更新"/);
