@@ -476,10 +476,11 @@ test('3D drag editing is transient and uses the shared interaction policy', asyn
 });
 
 test('3D pointer lifecycle captures accepted drags and commits exact final updates', async () => {
-  const [performer3DSource, prop3DSource, scene3DSource] = await Promise.all([
+  const [performer3DSource, prop3DSource, scene3DSource, appSource] = await Promise.all([
     read('3d_components/Performer3D.tsx'),
     read('3d_components/Prop3D.tsx'),
     read('3d_components/Scene3D.tsx'),
+    read('App.tsx'),
   ]);
 
   assert.match(performer3DSource, /canStartThreeObjectDrag/);
@@ -521,8 +522,15 @@ test('3D pointer lifecycle captures accepted drags and commits exact final updat
     performer3DSource,
     /const handleHeightDragEnd = useCallback\([\s\S]{0,220}finishActiveDrag\(\);/,
   );
+  assert.match(performer3DSource, /event\.nativeEvent\.clientY/);
+  assert.doesNotMatch(performer3DSource, /event\.pointer\.y/);
+  assert.match(performer3DSource, /camera\.position\.distanceTo/);
+  assert.match(performer3DSource, /resolveThreeHeightFromPointerDrag/);
   assert.match(prop3DSource, /getPropAnchorFromCenter/);
   assert.match(scene3DSource, /onDragEnd\?\.\(\[draggedId\], \[committedUpdate\]\)/);
+  assert.match(appSource, /type: 'move-performers',[\s\S]{0,220}before:[\s\S]{0,220}after:/);
+  assert.match(appSource, /if \(last\.type === 'move-performers'\)[\s\S]{0,260}last\.before/);
+  assert.match(appSource, /if \(last\.type === 'move-performers'\)[\s\S]{0,260}last\.after/);
 });
 
 test('offline 3D renderer includes stage background, LED depth, and arrows', async () => {

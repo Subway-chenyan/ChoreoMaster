@@ -5,7 +5,10 @@ import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { Performer, Position, StageConfig } from '../types';
 import { mapTo3D, mapTo2D, degToRad, getTotalStageWidth } from '../utils/coordinates';
-import { canStartThreeObjectDrag } from '../utils/three-interaction';
+import {
+  canStartThreeObjectDrag,
+  resolveThreeHeightFromPointerDrag,
+} from '../utils/three-interaction';
 import DirectionArrow3D from './DirectionArrow3D';
 
 interface PointerCaptureApi extends EventTarget {
@@ -237,7 +240,7 @@ const Performer3D: React.FC<Performer3DProps> = ({
     capturePointer(event);
     isHeightDraggingRef.current = true;
     lastPlanePositionRef.current = null;
-    dragStartPointerYRef.current = event.pointer.y;
+    dragStartPointerYRef.current = event.nativeEvent.clientY;
     dragStartHeightRef.current = position.z || 0;
     onDragStart?.();
   }, [capturePointer, dragEnabled, onDragStart, onPositionChange, position.z]);
@@ -246,11 +249,15 @@ const Performer3D: React.FC<Performer3DProps> = ({
     if (!isHeightDraggingRef.current || !dragEnabled || !onPositionChange) return;
     event.stopPropagation();
 
-    const deltaY = event.pointer.y - dragStartPointerYRef.current;
-    // Use camera distance to scale the movement appropriately
-    const scaleFactor = Math.abs(camera.position.z || 20) / 500;
-    const heightChange = -deltaY * scaleFactor; // Negative because dragging up (negative y) should increase height
-    const newHeight = Math.max(0, Math.min(10, dragStartHeightRef.current + heightChange));
+    const cameraDistance = camera.position.distanceTo(
+      meshRef.current?.position ?? currentPositionRef.current,
+    );
+    const newHeight = resolveThreeHeightFromPointerDrag({
+      startHeight: dragStartHeightRef.current,
+      startClientY: dragStartPointerYRef.current,
+      currentClientY: event.nativeEvent.clientY,
+      cameraDistance,
+    });
 
     const newPosition = {
       x: position.x,
@@ -259,7 +266,7 @@ const Performer3D: React.FC<Performer3DProps> = ({
     };
     lastPlanePositionRef.current = newPosition;
     onPositionChange(newPosition);
-  }, [camera.position.z, dragEnabled, onPositionChange, position.x, position.y]);
+  }, [camera.position, dragEnabled, onPositionChange, position.x, position.y]);
 
   const handleHeightDragEnd = useCallback((event: ThreeEvent<PointerEvent>) => {
     if (!isHeightDraggingRef.current) return;

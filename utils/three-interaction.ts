@@ -30,3 +30,16 @@ export function canStartThreeObjectDrag(input: {
 }): boolean {
   return input.dragEnabled && !input.readonly && input.button === 0;
 }
+
+export function resolveThreeHeightFromPointerDrag(input: {
+  startHeight: number;
+  startClientY: number;
+  currentClientY: number;
+  cameraDistance: number;
+}): number {
+  const cameraDistance = Math.max(5, Math.min(80, input.cameraDistance));
+  const metersPerPixel = cameraDistance / 500;
+  const height = input.startHeight
+    + (input.startClientY - input.currentClientY) * metersPerPixel;
+  return Math.max(0, Math.min(10, height));
+}

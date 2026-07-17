@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   canStartThreeObjectDrag,
+  resolveThreeHeightFromPointerDrag,
   resolveThreeInteractionPolicy,
 } from '../utils/three-interaction.ts';
 import {
@@ -63,6 +64,36 @@ test('only a primary button can start an enabled writable object drag', () => {
   assert.equal(canStartThreeObjectDrag({ dragEnabled: true, readonly: false, button: 1 }), false);
   assert.equal(canStartThreeObjectDrag({ dragEnabled: true, readonly: false, button: 2 }), false);
   assert.equal(canStartThreeObjectDrag({ dragEnabled: true, readonly: false, button: -1 }), false);
+});
+
+test('performer height drag uses client-pixel direction and camera-distance scaling', () => {
+  assert.equal(resolveThreeHeightFromPointerDrag({
+    startHeight: 2,
+    startClientY: 300,
+    currentClientY: 250,
+    cameraDistance: 20,
+  }), 4);
+  assert.equal(resolveThreeHeightFromPointerDrag({
+    startHeight: 2,
+    startClientY: 300,
+    currentClientY: 350,
+    cameraDistance: 20,
+  }), 0);
+});
+
+test('performer height drag clamps height and extreme camera distances', () => {
+  assert.equal(resolveThreeHeightFromPointerDrag({
+    startHeight: 9,
+    startClientY: 300,
+    currentClientY: 200,
+    cameraDistance: 1_000,
+  }), 10);
+  assert.equal(resolveThreeHeightFromPointerDrag({
+    startHeight: 1,
+    startClientY: 300,
+    currentClientY: 400,
+    cameraDistance: 1_000,
+  }), 0);
 });
 
 test('moving a hinged prop center preserves its stored anchor semantics', () => {
