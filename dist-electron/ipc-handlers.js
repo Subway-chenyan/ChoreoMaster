@@ -1,8 +1,9 @@
-import { ipcMain, dialog, app, shell } from 'electron';
+import { ipcMain, dialog, app, net, shell } from 'electron';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { createManagedProject, deleteManagedProject, duplicateManagedProject, exportChoreographyDocument, exportProjectPackage, importChoreographyDocument, importLegacyProject, importProjectPackage, ingestProjectAsset, listManagedProjects, listProjectRecoverySnapshots, loadManagedProject, resolveManagedProjectPath, renameManagedProject, restoreProjectRecoverySnapshot, saveManagedProject, } from './project-service.js';
+import { createManagedProject, deleteManagedProject, duplicateManagedProject, exportChoreographyDocument, exportProjectPackage, importChoreographyDocument, importProjectPackage, ingestProjectAsset, listManagedProjects, listProjectRecoverySnapshots, loadManagedProject, resolveManagedProjectPath, renameManagedProject, restoreProjectRecoverySnapshot, saveManagedProject, } from './project-service.js';
+import { createProjectFromTemplate, listProjectTemplates } from './project-template-service.js';
 import { updaterManager } from './updater.js';
 // ==================== Default Settings ====================
 const DEFAULT_STORAGE_PATH = path.join(os.homedir(), '.choreo');
@@ -227,6 +228,18 @@ export function registerIpcHandlers(mainWindow) {
         await saveSettings(settings);
         return result;
     });
+    ipcMain.handle('project:listTemplates', async () => {
+        return listProjectTemplates();
+    });
+    ipcMain.handle('project:createFromTemplate', async (_, templateId, projectName) => {
+        const settings = await loadSettings();
+        await ensureStorageDir(settings.storagePath);
+        const result = await createProjectFromTemplate(settings.storagePath, path.join(app.getPath('userData'), 'project-template-cache'), templateId, projectName, (url) => net.fetch(url));
+        settings.recentProjects = [result.projectId, ...settings.recentProjects.filter((id) => id !== result.projectId)]
+            .slice(0, settings.maxRecentProjects);
+        await saveSettings(settings);
+        return result;
+    });
     ipcMain.handle('project:listRecoverySnapshots', async (_, projectId) => {
         const settings = await loadSettings();
         return listProjectRecoverySnapshots(settings.storagePath, projectId);
@@ -235,23 +248,6 @@ export function registerIpcHandlers(mainWindow) {
         const settings = await loadSettings();
         const result = await restoreProjectRecoverySnapshot(settings.storagePath, snapshotId);
         settings.recentProjects = [result.projectId, ...settings.recentProjects.filter((id) => id !== result.projectId)]
-            .slice(0, settings.maxRecentProjects);
-        await saveSettings(settings);
-        return result;
-    });
-    ipcMain.handle('project:importLegacy', async () => {
-        const { filePaths } = await dialog.showOpenDialog(mainWindow, {
-            properties: ['openFile'],
-            filters: [
-                { name: 'Legacy ChoreoMaster JSON', extensions: ['json'] },
-                { name: 'JSON Files', extensions: ['json'] },
-            ],
-        });
-        if (filePaths.length === 0)
-            return null;
-        const settings = await loadSettings();
-        const result = await importLegacyProject(settings.storagePath, filePaths[0]);
-        settings.recentProjects = [result.projectId, ...settings.recentProjects.filter(p => p !== result.projectId)]
             .slice(0, settings.maxRecentProjects);
         await saveSettings(settings);
         return result;

@@ -13,7 +13,6 @@ import {
   exportChoreographyDocument,
   exportProjectPackage,
   importChoreographyDocument,
-  importLegacyProject,
   importProjectPackage,
   ingestProjectAsset,
   listManagedProjects,
@@ -24,6 +23,10 @@ import {
   restoreProjectRecoverySnapshot,
   saveManagedProject,
 } from '../dist-electron/project-service.js';
+import {
+  createProjectFromTemplate,
+  listProjectTemplates,
+} from '../dist-electron/project-template-service.js';
 
 const ONE_PIXEL_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
@@ -323,12 +326,13 @@ test('exports and imports a complete project as a new managed project', async ()
     const packagePath = path.join(storagePath, 'portable.choreo');
     await exportProjectPackage(created.path, packagePath);
     const firstImport = await importProjectPackage(storagePath, packagePath);
-    const secondImport = await importProjectPackage(storagePath, packagePath);
+    const secondImport = await importProjectPackage(storagePath, packagePath, { name: 'Renamed Copy' });
 
     assert.notEqual(firstImport.projectId, created.id);
     assert.notEqual(secondImport.projectId, firstImport.projectId);
     assert.match(firstImport.audioUrl, /^choreo-asset:\/\//);
     assert.equal(firstImport.data.frames.length, 1);
+    assert.equal(secondImport.data.name, 'Renamed Copy');
   });
 });
 
@@ -348,19 +352,50 @@ test('continues loading when a referenced asset is missing', async () => {
   });
 });
 
-test('migrates legacy JSON into a managed project with warnings', async () => {
+test('creates a named project from the verified ChinaJoy template and reuses its cache', async () => {
   await withTempDir(async (storagePath) => {
-    const legacyPath = path.join(storagePath, 'legacy.json');
-    await writeFile(legacyPath, JSON.stringify({
-      ...projectDocument('Legacy Project'),
-      version: '1.2',
-      musicName: 'lost.mp3',
-    }));
+    const packageBytes = await readFile(new URL('../public/templates/chinajoy-v1.zip', import.meta.url));
+    let fetchCount = 0;
+    const fetcher = async () => {
+      fetchCount += 1;
+      return new Response(packageBytes, {
+        headers: { 'content-length': String(packageBytes.byteLength) },
+      });
+    };
+    const cacheRoot = path.join(storagePath, 'template-cache');
 
-    const imported = await importLegacyProject(storagePath, legacyPath);
-    assert.equal(imported.data.name, 'Legacy Project');
-    assert.equal(imported.warnings[0].code, 'legacy_resource_missing');
-    assert.equal(imported.data.frames.length, 1);
+    const first = await createProjectFromTemplate(
+      storagePath,
+      cacheRoot,
+      'chinajoy',
+      'ChinaJoy 演示',
+      fetcher,
+    );
+    const second = await createProjectFromTemplate(
+      storagePath,
+      cacheRoot,
+      'chinajoy',
+      'ChinaJoy 副本',
+      fetcher,
+    );
+    await writeFile(path.join(cacheRoot, 'chinajoy-v1.zip'), 'corrupt-cache');
+    const third = await createProjectFromTemplate(
+      storagePath,
+      cacheRoot,
+      'chinajoy',
+      'ChinaJoy 缓存恢复',
+      fetcher,
+    );
+
+    assert.equal(fetchCount, 2);
+    assert.equal(listProjectTemplates()[0].id, 'chinajoy');
+    assert.equal(first.data.name, 'ChinaJoy 演示');
+    assert.equal(second.data.name, 'ChinaJoy 副本');
+    assert.notEqual(first.projectId, second.projectId);
+    assert.equal(third.data.name, 'ChinaJoy 缓存恢复');
+    assert.match(first.data.performers[2].boxTextures.front.dataUrl, /^choreo-asset:\/\//);
+    assert.equal(first.warnings[0].code, 'missing_asset');
+    assert.match(first.warnings[0].resource, /\.mp4$/);
   });
 });
 

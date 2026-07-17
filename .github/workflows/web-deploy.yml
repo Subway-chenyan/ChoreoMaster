@@ -75,7 +75,9 @@ jobs:
 
       - name: Build web
         if: steps.gate.outputs.deploy == 'true'
-        run: npm run build
+        run: |
+          npm run build
+          test -s dist/templates/chinajoy-v1.zip
 
       - name: Install verified Tencent CLIs
         if: steps.gate.outputs.deploy == 'true'
@@ -171,6 +173,8 @@ jobs:
           done
           grep -Fq "$expected_asset" <<< "$deployed_html"
           curl -fsSI --retry 5 --retry-delay 3 "${CDN_URL}$expected_asset" >/dev/null
+          curl -fsSI --retry 5 --retry-delay 3 \
+            "${CDN_URL}templates/chinajoy-v1.zip?deploy=$GITHUB_SHA" >/dev/null
 
           report_legacy_url() {
             local object_path="$1"

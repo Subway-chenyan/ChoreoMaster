@@ -9,6 +9,7 @@ import type {
   ProjectLoadResult,
   ProjectMeta,
   ProjectRecoverySnapshot,
+  ProjectTemplateSummary,
 } from './project-contract.js';
 import type { UpdateState } from './update-contract.js';
 
@@ -34,7 +35,8 @@ export interface ElectronAPI {
     importPackage: () => Promise<ProjectImportResult | null>;
     exportChoreography: (projectId: string) => Promise<string | null>;
     importChoreography: () => Promise<ProjectImportResult | null>;
-    importLegacy: () => Promise<ProjectImportResult | null>;
+    listTemplates: () => Promise<ProjectTemplateSummary[]>;
+    createFromTemplate: (templateId: string, projectName: string) => Promise<ProjectImportResult>;
     listRecoverySnapshots: (projectId?: string) => Promise<ProjectRecoverySnapshot[]>;
     restoreRecoverySnapshot: (snapshotId: string) => Promise<ProjectImportResult>;
     delete: (projectId: string) => Promise<void>;
@@ -86,7 +88,10 @@ const electronAPI: ElectronAPI = {
     importPackage: () => ipcRenderer.invoke('project:importPackage'),
     exportChoreography: (projectId) => ipcRenderer.invoke('project:exportChoreography', projectId),
     importChoreography: () => ipcRenderer.invoke('project:importChoreography'),
-    importLegacy: () => ipcRenderer.invoke('project:importLegacy'),
+    listTemplates: () => ipcRenderer.invoke('project:listTemplates'),
+    createFromTemplate: (templateId, projectName) => (
+      ipcRenderer.invoke('project:createFromTemplate', templateId, projectName)
+    ),
     listRecoverySnapshots: (projectId) => ipcRenderer.invoke('project:listRecoverySnapshots', projectId),
     restoreRecoverySnapshot: (snapshotId) => ipcRenderer.invoke('project:restoreRecoverySnapshot', snapshotId),
     delete: (projectId) => ipcRenderer.invoke('project:delete', projectId),

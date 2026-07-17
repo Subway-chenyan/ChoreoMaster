@@ -302,6 +302,14 @@ export interface ProjectDocument {
 
 export type ProjectTemplateData = Partial<ProjectDocument>;
 
+export interface ProjectTemplateSummary {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  estimatedBytes: number;
+}
+
 export interface ChoreographyDocument {
   format: 'cosstage-choreography';
   schemaVersion: 1;

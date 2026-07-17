@@ -22,7 +22,8 @@ project.ingestAsset(
 ): Promise<ProjectAssetResult>;
 project.exportPackage(projectId: string): Promise<string | null>;
 project.importPackage(): Promise<ProjectImportResult | null>;
-project.importLegacy(): Promise<ProjectImportResult | null>;
+project.exportChoreography(projectId: string): Promise<string | null>;
+project.importChoreography(): Promise<ProjectImportResult | null>;
 ```
 
 All filesystem and archive operations belong in the main process. IPC handlers must remain thin.
@@ -38,7 +39,7 @@ All filesystem and archive operations belong in the main process. IPC handlers m
 
 Binary assets must not be embedded in IPC payloads or portable JSON as base64 after migration. The renderer receives `choreo-asset://` URLs for playback/rendering.
 
-Desktop's primary import/export controls must call `project.importPackage()` and `project.exportPackage(projectId)` so project JSON and all managed assets move together. Legacy loose JSON import is compatibility-only and must remain visually separate from the primary package path.
+Desktop exposes one import button and one export button. Each opens a choice between a complete project package and choreography-only JSON. Loose legacy project JSON import is not supported.
 
 Import always creates a new managed project ID and automatically opens that project. It never overwrites the active project.
 
@@ -73,7 +74,7 @@ Archive extraction must occur under a temporary staging directory. Move the dire
 - Build an archive with a traversal entry; assert rejection.
 - Build an archive with 501 entries; assert rejection before installation.
 - Fail import before manifest validation; assert no partial project remains.
-- Import legacy JSON; assert it becomes a managed project and reports unavailable legacy media.
+- Assert the renderer, preload, and main process do not expose a legacy project JSON import method.
 
 ### 7. Wrong vs Correct
 
@@ -196,7 +197,7 @@ project.importChoreography(): Promise<ProjectImportResult | null>;
 - The renderer must save a dirty active project before opening an import dialog or applying an import result.
 - Export omits `musicAsset`, stage/background media, performer texture paths, texture data URLs, and face texture maps.
 - Non-media stage geometry, groups, frames, transitions, audio markers, and notes remain portable.
-- Full project package controls and choreography-only JSON controls must be visibly distinct.
+- The merged import/export menus must label the two choices explicitly as `项目压缩包` and `编排 JSON`.
 
 ### 4. Validation & Error Matrix
 
@@ -237,6 +238,88 @@ setFrames([...frames, ...raw.frames]);
 ```typescript
 const imported = await window.electronAPI.project.importChoreography();
 if (imported) await applyLoadedProject(imported.projectId, imported);
+```
+
+## Scenario: Trusted Remote Project Templates
+
+### 1. Scope / Trigger
+
+Use this contract whenever the new-project flow offers a project package hosted on COS/CDN as an initialization template.
+
+### 2. Signatures
+
+```typescript
+interface ProjectTemplateSummary {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  estimatedBytes: number;
+}
+
+project.listTemplates(): Promise<ProjectTemplateSummary[]>;
+project.createFromTemplate(templateId: string, projectName: string): Promise<ProjectImportResult>;
+
+createProjectFromTemplate(
+  storagePath: string,
+  cacheRoot: string,
+  templateId: string,
+  projectName: string,
+  fetcher: TemplateFetcher,
+): Promise<ProjectImportResult>;
+```
+
+### 3. Contracts
+
+- The main process owns a trusted template registry containing the immutable URL, versioned file name, expected byte estimate, and SHA-256 digest.
+- The renderer sends only a template ID and project name. It must never supply a URL, cache path, or reusable filesystem capability.
+- Template archives live under `public/templates/`, are copied into `dist/templates/`, and are uploaded by the existing Web COS sync.
+- Download occurs only when the versioned cache file is missing or its SHA-256 does not match. Write to a temporary file and rename only after size and digest validation.
+- Installation must reuse `importProjectPackage(..., { name })`, including its traversal, entry-count, extracted-size, staging, normalization, and unique-ID rules.
+- A template contains only source assets that actually exist. Missing references already present in the source project remain structured load warnings; do not invent or silently remove user data.
+
+### 4. Validation & Error Matrix
+
+| Condition | Behavior |
+| --- | --- |
+| Unknown template ID | Reject before network or filesystem mutation |
+| HTTP response is not successful | Reject and do not create a project |
+| Declared or actual download exceeds 64 MiB | Reject and remove the temporary download |
+| Empty body or SHA-256 mismatch | Reject and remove the temporary download |
+| Cached digest mismatches | Delete the corrupt cache and download the trusted version again |
+| Package parsing/import fails | Preserve the active project and remove normal import staging output |
+| Valid cached package | Create a new project without another network request |
+
+### 5. Good / Base / Bad Cases
+
+- Good: first selection downloads a verified package, creates a user-named project, and hydrates bundled textures.
+- Base: the verified cache already exists, so another independently named project is created without fetching.
+- Bad: the renderer passes an arbitrary URL or the service imports a download before checking its digest.
+
+### 6. Tests Required
+
+- Assert `listTemplates()` exposes only summary fields and never exposes the URL or digest.
+- Create from a real template archive; assert the user name overrides the manifest name and bundled texture URLs hydrate.
+- Create twice; assert only one fetch and unique project IDs.
+- Corrupt the cache; assert the next create fetches again and succeeds.
+- Desktop regression asserts a fixed versioned COS URL, digest validation, trusted-ID IPC, and absence of URL arguments in preload.
+- Web workflow test asserts `dist/templates/<versioned-name>.zip` exists and the deployed CDN object is reachable.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```typescript
+// Renderer can make the main process download and import an arbitrary URL.
+project.createFromTemplate(userProvidedUrl, name);
+```
+
+#### Correct
+
+```typescript
+// Main process resolves the trusted ID to a versioned URL and digest.
+const result = await window.electronAPI.project.createFromTemplate('chinajoy', name);
+await applyLoadedProject(result.projectId, result);
 ```
 
 ## Scenario: Managed Project Lifecycle and Recovery

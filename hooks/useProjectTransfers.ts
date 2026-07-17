@@ -11,7 +11,6 @@ interface UseProjectTransfersOptions {
 interface ProjectTransfers {
   importProjectPackage: () => Promise<void>;
   importChoreography: () => Promise<void>;
-  importLegacyProject: () => Promise<void>;
   exportProjectPackage: () => Promise<boolean>;
   exportChoreography: () => Promise<boolean>;
   restoreRecoverySnapshot: (snapshotId: string) => Promise<boolean>;
@@ -48,18 +47,6 @@ export function useProjectTransfers({
     } catch (error) {
       console.error('Choreography JSON import failed:', error);
       setMessages(['编排 JSON 导入失败，请确认文件由 CosStage 编排导出功能生成']);
-    }
-  }, [applyLoadedProject, saveBeforeProjectOperation, setMessages]);
-
-  const importLegacyProject = useCallback(async (): Promise<void> => {
-    if (!window.electronAPI?.isElectron) return;
-    if (!await saveBeforeProjectOperation()) return;
-    try {
-      const result = await window.electronAPI.project.importLegacy();
-      if (result) await applyLoadedProject(result.projectId, result);
-    } catch (error) {
-      console.error('Legacy project import failed:', error);
-      setMessages(['旧版项目 JSON 导入失败，文件可能已损坏或格式不受支持']);
     }
   }, [applyLoadedProject, saveBeforeProjectOperation, setMessages]);
 
@@ -117,7 +104,6 @@ export function useProjectTransfers({
   return {
     importProjectPackage,
     importChoreography,
-    importLegacyProject,
     exportProjectPackage,
     exportChoreography,
     restoreRecoverySnapshot,

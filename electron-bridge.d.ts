@@ -7,6 +7,7 @@ import type {
   ProjectLoadResult,
   ProjectMeta,
   ProjectRecoverySnapshot,
+  ProjectTemplateSummary,
 } from './electron/project-contract';
 import type { UpdateState } from './electron/update-contract.js';
 
@@ -34,7 +35,8 @@ declare global {
         importPackage: () => Promise<ProjectImportResult | null>;
         exportChoreography: (projectId: string) => Promise<string | null>;
         importChoreography: () => Promise<ProjectImportResult | null>;
-        importLegacy: () => Promise<ProjectImportResult | null>;
+        listTemplates: () => Promise<ProjectTemplateSummary[]>;
+        createFromTemplate: (templateId: string, projectName: string) => Promise<ProjectImportResult>;
         listRecoverySnapshots: (projectId?: string) => Promise<ProjectRecoverySnapshot[]>;
         restoreRecoverySnapshot: (snapshotId: string) => Promise<ProjectImportResult>;
         delete: (projectId: string) => Promise<void>;

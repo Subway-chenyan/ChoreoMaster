@@ -192,6 +192,8 @@ test('web workflow is reusable, least-privilege, production-concurrent, and supp
   assert.match(verify, /expected_asset/);
   assert.match(verify, /navigator\\\.serviceWorker\|serviceWorker\\\.register/);
   assert.match(verify, /report_legacy_url/);
+  assert.match(findStep(workflow.jobs.deploy, 'Build web').run, /dist\/templates\/chinajoy-v1\.zip/);
+  assert.match(verify, /templates\/chinajoy-v1\.zip/);
   assert.doesNotMatch(verify, /wait_until_unreachable/);
   assert.doesNotMatch(source, /Generate latest\.yml/);
   assert.doesNotMatch(source, /set -x|echo\s+.*TENCENT_SECRET/);

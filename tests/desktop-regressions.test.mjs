@@ -29,11 +29,13 @@ test('tutorial example resolves beside the current document for packaged Electro
   assert.doesNotMatch(source, /fetch\('\/tutorial-project\.json'\)/);
 });
 
-test('desktop project import and export use portable packages instead of loose JSON', async () => {
-  const [app, ipc, browser] = await Promise.all([
+test('desktop project transfers use merged package and choreography menus without legacy JSON', async () => {
+  const [app, ipc, browser, preload, transfers] = await Promise.all([
     read('App.tsx'),
     read('electron/ipc-handlers.ts'),
     read('components/ProjectBrowser.tsx'),
+    read('electron/preload.cts'),
+    read('hooks/useProjectTransfers.ts'),
   ]);
 
   assert.match(app, /const handleExportProject = async \(\): Promise<boolean> => \{[\s\S]{0,180}projectTransfers\.exportProjectPackage\(\)/);
@@ -43,7 +45,32 @@ test('desktop project import and export use portable packages instead of loose J
   assert.match(ipc, /defaultName = `\$\{content\.name \|\| 'CosStage-project'\}\.zip`/);
   assert.match(ipc, /name: '项目压缩包 \(\*\.zip\)', extensions: \['zip'\]/);
   assert.match(ipc, /extensions: \['zip', 'choreo'\]/);
-  assert.match(browser, /导出项目压缩包/);
+  assert.match(browser, /transferMenu === 'import'/);
+  assert.match(browser, /项目压缩包/);
+  assert.match(browser, /编排 JSON/);
+  assert.doesNotMatch(`${app}\n${ipc}\n${browser}\n${preload}\n${transfers}`, /importLegacy|导入旧 JSON/);
+});
+
+test('preset projects are listed through IPC and downloaded only from the trusted ChinaJoy template', async () => {
+  const [app, browser, ipc, preload, service, templateService] = await Promise.all([
+    read('App.tsx'),
+    read('components/ProjectBrowser.tsx'),
+    read('electron/ipc-handlers.ts'),
+    read('electron/preload.cts'),
+    read('electron/project-service.ts'),
+    read('electron/project-template-service.ts'),
+  ]);
+
+  assert.match(browser, /初始化模板/);
+  assert.match(browser, /window\.electronAPI\.project\.listTemplates\(\)/);
+  assert.match(app, /createFromTemplate\(templateId, name\)/);
+  assert.match(ipc, /project:createFromTemplate/);
+  assert.match(preload, /project:listTemplates/);
+  assert.match(templateService, /https:\/\/beat\.cosdrama\.cn\/templates\/chinajoy-v1\.zip/);
+  assert.match(templateService, /sha256/);
+  assert.match(templateService, /project-template-cache|cacheRoot/);
+  assert.match(service, /options: \{ name\?: string \} = \{\}/);
+  assert.doesNotMatch(preload, /createFromTemplate: \(url/);
 });
 
 test('project reset backup prompt is localized and does not use browser confirm', async () => {
@@ -185,6 +212,7 @@ test('Electron build excludes the embedded Agent and FFmpeg', async () => {
   assert.doesNotMatch(main, /AgentBackendManager|agent-backend/);
   assert.doesNotMatch(preload, /agent:getRuntime|agent:restart/);
   assert.doesNotMatch(agentService, /electronAPI\.agent|agent:getRuntime/);
+  assert.match(builder, /dist-electron\/project-template-service\.js/);
 });
 
 test('COS deploy verification does not fail on reachable legacy PWA URLs', async () => {
@@ -574,16 +602,14 @@ test('stage selection box converts client pixels into transformed local coordina
   assert.match(stage, /style=\{getSelectionBoxStyle\(\)\}/);
 });
 
-test('CosStage rebrand preserves upgrade and legacy compatibility identifiers', async () => {
-  const [pkg, builder, ipc] = await Promise.all([
+test('CosStage rebrand preserves upgrade compatibility identifiers', async () => {
+  const [pkg, builder] = await Promise.all([
     read('package.json'),
     read('electron-builder.config.cjs'),
-    read('electron/ipc-handlers.ts'),
   ]);
 
   assert.match(pkg, /"name": "cosstage-desktop"/);
   assert.match(builder, /appId: 'com\.choreomaster\.app'/);
-  assert.match(ipc, /Legacy ChoreoMaster JSON/);
 });
 
 test('timeline native scrollbar is isolated from seeking and wheel input scrolls horizontally', async () => {

@@ -23,6 +23,7 @@ export type {
   ProjectLoadResult,
   ProjectMeta,
   ProjectTemplateData,
+  ProjectTemplateSummary,
   ProjectRecoverySnapshot,
   ProjectWarning,
   PropCategory,

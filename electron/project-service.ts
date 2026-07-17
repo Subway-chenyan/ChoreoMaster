@@ -901,6 +901,7 @@ function parseChoreographyDocument(value: unknown, fallbackName: string): Choreo
 export async function importProjectPackage(
   storagePath: string,
   packagePath: string,
+  options: { name?: string } = {},
 ): Promise<ProjectImportResult> {
   const stagingRoot = path.join(storagePath, '.import-staging');
   await fs.mkdir(stagingRoot, { recursive: true });
@@ -910,11 +911,13 @@ export async function importProjectPackage(
     await extractPackage(packagePath, stagingDir);
     const raw = JSON.parse(await fs.readFile(path.join(stagingDir, PROJECT_FILE_NAME), 'utf8')) as unknown;
     const document = parseProjectDocument(raw, path.basename(packagePath, path.extname(packagePath)));
-    const id = createProjectId(document.name);
+    const importedName = options.name ? sanitizeName(options.name) : document.name;
+    const id = createProjectId(importedName);
     installedDir = resolveManagedProjectPath(storagePath, id);
     await fs.mkdir(path.dirname(installedDir), { recursive: true });
     const importedDocument: ProjectDocument = {
       ...document,
+      name: importedName,
       version: PROJECT_VERSION,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -931,26 +934,6 @@ export async function importProjectPackage(
     throw error;
   } finally {
     await fs.rm(stagingDir, { recursive: true, force: true });
-  }
-}
-
-export async function importLegacyProject(
-  storagePath: string,
-  jsonPath: string,
-): Promise<ProjectImportResult> {
-  const raw = JSON.parse(await fs.readFile(jsonPath, 'utf8')) as unknown;
-  const document = parseProjectDocument(raw, path.basename(jsonPath, path.extname(jsonPath)));
-  const created = await createManagedProject(storagePath, document.name);
-  try {
-    await saveManagedProject(storagePath, created.id, {
-      ...document,
-      version: PROJECT_VERSION,
-      musicAsset: null,
-    });
-    return { projectId: created.id, ...await loadManagedProject(storagePath, created.id) };
-  } catch (error) {
-    await fs.rm(created.path, { recursive: true, force: true });
-    throw error;
   }
 }
 

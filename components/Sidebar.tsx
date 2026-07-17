@@ -30,7 +30,6 @@ interface SidebarProps {
     onImportProject: (e?: React.ChangeEvent<HTMLInputElement>) => void;
     onImportProjectPackage?: () => void;
     onImportChoreography?: () => void;
-    onImportLegacyProject?: () => void;
     onExportProjectPackage?: () => void;
     onExportChoreography?: () => void;
     onRestoreRecovery?: (snapshotId: string) => Promise<boolean>;
@@ -70,6 +69,7 @@ interface SidebarProps {
     currentProjectId?: string | null;
     onLoadProject?: (projectId: string) => void;
     onCreateProject?: (name: string) => Promise<string>;
+    onCreateFromPresetTemplate?: (name: string, templateId: string) => Promise<string>;
     onCreateFromTemplate?: (templateData: ProjectTemplateData) => Promise<string>;
     onLoadTemplate?: (templateData: ProjectTemplateData) => void;
     onSaveProject?: () => Promise<boolean>;
@@ -182,7 +182,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     onImportProject,
     onImportProjectPackage,
     onImportChoreography,
-    onImportLegacyProject,
     onExportProjectPackage,
     onExportChoreography,
     onRestoreRecovery,
@@ -221,6 +220,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     currentProjectId,
     onLoadProject,
     onCreateProject,
+    onCreateFromPresetTemplate,
     onCreateFromTemplate,
     onLoadTemplate,
     onSaveProject,
@@ -668,12 +668,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             currentProjectId={currentProjectId || null}
                             onLoadProject={onLoadProject || (() => {})}
                             onCreateProject={onCreateProject || (async () => '')}
+                            onCreateFromPresetTemplate={onCreateFromPresetTemplate}
                             onCreateFromTemplate={onCreateFromTemplate}
                             onLoadTemplate={onLoadTemplate}
                             onDeletedCurrentProject={onDeletedCurrentProject}
                             onImportPackage={onImportProjectPackage}
                             onImportChoreography={onImportChoreography}
-                            onImportLegacy={onImportLegacyProject}
                             onExportPackage={onExportProjectPackage}
                             onExportChoreography={onExportChoreography}
                             onRestoreRecovery={onRestoreRecovery}

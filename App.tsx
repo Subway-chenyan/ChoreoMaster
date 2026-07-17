@@ -1414,6 +1414,21 @@ const App: React.FC = () => {
     }
   };
 
+  const handleCreateFromPresetTemplate = async (name: string, templateId: string): Promise<string> => {
+    if (!window.electronAPI?.isElectron) return '';
+    if (!await saveBeforeProjectOperation()) return '';
+    try {
+      const result = await window.electronAPI.project.createFromTemplate(templateId, name);
+      await applyLoadedProject(result.projectId, result);
+      setProjectMessages([`已从“${name}”模板创建项目`]);
+      return result.projectId;
+    } catch (error) {
+      console.error('Failed to create project from preset template:', error);
+      setProjectMessages([`模板项目创建失败：${getErrorMessage(error)}`]);
+      return '';
+    }
+  };
+
   const handleLoadTemplate = (templateData: ProjectTemplateData) => {
     const performers = normalizePerformers(templateData.performers);
     const groups = templateData.performerGroups || [];
@@ -4513,7 +4528,6 @@ const App: React.FC = () => {
             onImportProject={handleImportProject}
             onImportProjectPackage={projectTransfers.importProjectPackage}
             onImportChoreography={projectTransfers.importChoreography}
-            onImportLegacyProject={projectTransfers.importLegacyProject}
             onExportProjectPackage={projectTransfers.exportProjectPackage}
             onExportChoreography={projectTransfers.exportChoreography}
             onRestoreRecovery={projectTransfers.restoreRecoverySnapshot}
@@ -4551,6 +4565,7 @@ const App: React.FC = () => {
             currentProjectId={currentProjectId}
             onLoadProject={handleLoadProject}
             onCreateProject={handleCreateProject}
+            onCreateFromPresetTemplate={handleCreateFromPresetTemplate}
             onCreateFromTemplate={handleCreateFromTemplate}
             onLoadTemplate={handleLoadTemplate}
             onSaveProject={handleSaveProject}

@@ -21,6 +21,7 @@ module.exports = {
     'dist-electron/update-contract.js',
     'dist-electron/project-contract.js',
     'dist-electron/project-service.js',
+    'dist-electron/project-template-service.js',
     'dist/**/*',
     'package.json',
   ],

@@ -15,19 +15,26 @@ import {
   X,
   GraduationCap,
   History,
+  Download,
+  Upload,
 } from 'lucide-react';
-import type { ProjectMeta, ProjectRecoverySnapshot, ProjectTemplateData } from '../types';
+import type {
+  ProjectMeta,
+  ProjectRecoverySnapshot,
+  ProjectTemplateData,
+  ProjectTemplateSummary,
+} from '../types';
 
 interface ProjectBrowserProps {
   currentProjectId: string | null;
   onLoadProject: (projectId: string) => void;
   onCreateProject: (name: string) => Promise<string>;
+  onCreateFromPresetTemplate?: (name: string, templateId: string) => Promise<string>;
   onDeletedCurrentProject: () => void;
   onCreateFromTemplate?: (templateData: ProjectTemplateData) => Promise<string>;
   onLoadTemplate?: (templateData: ProjectTemplateData) => void;
   onImportPackage?: () => void;
   onImportChoreography?: () => void;
-  onImportLegacy?: () => void;
   onExportPackage?: () => void;
   onExportChoreography?: () => void;
   onRestoreRecovery?: (snapshotId: string) => Promise<boolean>;
@@ -37,12 +44,12 @@ export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
   currentProjectId,
   onLoadProject,
   onCreateProject,
+  onCreateFromPresetTemplate,
   onDeletedCurrentProject,
   onCreateFromTemplate,
   onLoadTemplate,
   onImportPackage,
   onImportChoreography,
-  onImportLegacy,
   onExportPackage,
   onExportChoreography,
   onRestoreRecovery,
@@ -52,6 +59,8 @@ export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [showNewProjectForm, setShowNewProjectForm] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
+  const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const [projectTemplates, setProjectTemplates] = useState<ProjectTemplateSummary[]>([]);
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [isUsingTemplate, setIsUsingTemplate] = useState(false);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
@@ -62,6 +71,7 @@ export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
   const [pendingDeleteProjectId, setPendingDeleteProjectId] = useState<string | null>(null);
   const [isDeletingProject, setIsDeletingProject] = useState(false);
   const [restoringSnapshotId, setRestoringSnapshotId] = useState<string | null>(null);
+  const [transferMenu, setTransferMenu] = useState<'import' | 'export' | null>(null);
   const [contextMenu, setContextMenu] = useState<{
     show: boolean;
     x: number;
@@ -103,6 +113,13 @@ export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
     loadRecoverySnapshots();
   }, [loadProjects, loadRecoverySnapshots, currentProjectId]);
 
+  useEffect(() => {
+    if (!isElectron) return;
+    void window.electronAPI.project.listTemplates()
+      .then(setProjectTemplates)
+      .catch((error) => console.error('Failed to load project templates:', error));
+  }, [isElectron]);
+
   // Close context menu on click outside
   useEffect(() => {
     const handleClick = () => setContextMenu({ show: false, x: 0, y: 0, projectId: null });
@@ -116,9 +133,12 @@ export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
     if (!newProjectName.trim() || isCreatingProject) return;
     setIsCreatingProject(true);
     try {
-      const projectId = await onCreateProject(newProjectName.trim());
+      const projectId = selectedTemplateId && onCreateFromPresetTemplate
+        ? await onCreateFromPresetTemplate(newProjectName.trim(), selectedTemplateId)
+        : await onCreateProject(newProjectName.trim());
       if (!projectId) return;
       setNewProjectName('');
+      setSelectedTemplateId('');
       setShowNewProjectForm(false);
       await loadProjects();
     } catch (error) {
@@ -329,6 +349,36 @@ export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
             className="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 mb-2"
             autoFocus
           />
+          {projectTemplates.length > 0 && (
+            <div className="mb-2">
+              <label className="mb-1 block text-[11px] text-slate-400" htmlFor="new-project-template">
+                初始化模板
+              </label>
+              <select
+                id="new-project-template"
+                value={selectedTemplateId}
+                disabled={isCreatingProject}
+                onChange={(event) => {
+                  const templateId = event.target.value;
+                  setSelectedTemplateId(templateId);
+                  const template = projectTemplates.find((item) => item.id === templateId);
+                  if (template && !newProjectName.trim()) setNewProjectName(template.name);
+                }}
+                className="w-full rounded border border-slate-600 bg-slate-900 px-3 py-2 text-xs text-slate-200 focus:border-blue-500 focus:outline-none"
+              >
+                <option value="">空白项目</option>
+                {projectTemplates.map((template) => (
+                  <option key={template.id} value={template.id}>{template.name}</option>
+                ))}
+              </select>
+              {selectedTemplateId && (
+                <p className="mt-1 text-[10px] leading-4 text-slate-500">
+                  {projectTemplates.find((item) => item.id === selectedTemplateId)?.description}
+                  {' · 首次使用时按需下载'}
+                </p>
+              )}
+            </div>
+          )}
           <div className="flex gap-2">
             <button
               onClick={handleCreateProject}
@@ -341,6 +391,7 @@ export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
               onClick={() => {
                 setShowNewProjectForm(false);
                 setNewProjectName('');
+                setSelectedTemplateId('');
               }}
               className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded text-slate-300 text-xs"
             >
@@ -359,51 +410,48 @@ export const ProjectBrowser: React.FC<ProjectBrowserProps> = ({
       )}
 
       {isElectron && (
-        <div className="grid grid-cols-3 gap-2 mb-3">
-          <button
-            type="button"
-            onClick={onImportPackage}
-            className="px-2 py-2 rounded bg-blue-900/40 hover:bg-blue-900/60 text-xs text-blue-200"
-          >
-            导入项目压缩包
-          </button>
-          <button
-            type="button"
-            onClick={onImportLegacy}
-            className="px-2 py-2 rounded bg-slate-800 hover:bg-slate-700 text-xs text-slate-300"
-          >
-            导入旧 JSON
-          </button>
-          <button
-            type="button"
-            onClick={onExportPackage}
-            disabled={!currentProjectId}
-            className="px-2 py-2 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-xs text-slate-300"
-          >
-            导出项目压缩包
-          </button>
-        </div>
-      )}
-
-      {isElectron && (
         <div className="mb-3 space-y-2">
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
-              onClick={onImportChoreography}
-              className="px-2 py-2 rounded bg-emerald-900/40 hover:bg-emerald-900/60 text-xs text-emerald-200"
+              onClick={() => setTransferMenu((current) => current === 'import' ? null : 'import')}
+              className="flex items-center justify-center gap-2 rounded bg-blue-900/40 px-2 py-2 text-xs text-blue-200 hover:bg-blue-900/60"
             >
-              导入编排 JSON
+              <Upload size={13} /> 导入
             </button>
             <button
               type="button"
-              onClick={onExportChoreography}
+              onClick={() => setTransferMenu((current) => current === 'export' ? null : 'export')}
               disabled={!currentProjectId}
-              className="px-2 py-2 rounded bg-emerald-900/40 hover:bg-emerald-900/60 disabled:opacity-40 text-xs text-emerald-200"
+              className="flex items-center justify-center gap-2 rounded bg-emerald-900/40 px-2 py-2 text-xs text-emerald-200 hover:bg-emerald-900/60 disabled:opacity-40"
             >
-              导出编排 JSON
+              <Download size={13} /> 导出
             </button>
           </div>
+          {transferMenu && (
+            <div className="grid grid-cols-2 gap-2 rounded border border-slate-700 bg-slate-950/70 p-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setTransferMenu(null);
+                  void (transferMenu === 'import' ? onImportPackage?.() : onExportPackage?.());
+                }}
+                className="rounded bg-slate-800 px-2 py-2 text-xs text-slate-300 hover:bg-slate-700"
+              >
+                项目压缩包
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setTransferMenu(null);
+                  void (transferMenu === 'import' ? onImportChoreography?.() : onExportChoreography?.());
+                }}
+                className="rounded bg-slate-800 px-2 py-2 text-xs text-slate-300 hover:bg-slate-700"
+              >
+                编排 JSON
+              </button>
+            </div>
+          )}
           <button
             type="button"
             onClick={() => {
