@@ -133,7 +133,7 @@ if [ "\${1:-}" = 'cp' ] && [[ "\${2:-}" == cos://production/* ]]; then
     esac
     exit 0
   fi
-  echo "NoSuchKey: HTTP 404" >&2
+  echo "ERRO cos object not found:$object"
   exit 1
 fi
 if [ "$MOCK_SCENARIO" = 'upload-uncertain-same' ] \
