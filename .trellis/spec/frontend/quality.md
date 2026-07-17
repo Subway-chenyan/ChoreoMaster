@@ -173,6 +173,31 @@ import { EXTENSION_TO_MIME } from '../shared/constants/file-limits';
 
 ---
 
+## Canonical Filesystem Paths in Cross-Platform Tests
+
+### Convention: Resolve Paths Before Comparing Them
+
+**What**: Tests that compare paths returned by separate operating-system tools must resolve both values with `fs.realpath()` first. On Windows, compare the resolved values case-insensitively.
+
+**Why**: A Windows runner can expose one directory as both a long path such as `C:\\Users\\runneradmin` and an equivalent 8.3 short path such as `C:\\Users\\RUNNER~1`. `path.resolve()` only normalizes syntax and does not prove that these strings identify the same directory.
+
+**Example**:
+
+```js
+import { realpath } from 'node:fs/promises';
+
+async function canonicalPath(candidate) {
+  const resolved = await realpath(candidate);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+assert.equal(await canonicalPath(actualPath), await canonicalPath(expectedPath));
+```
+
+Do not remove the assertion or compare only basenames: release workflow tests must still prove that commands execute in the intended repository.
+
+---
+
 ## Performance Guidelines
 
 ### Avoid Unnecessary Re-renders
