@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useTheme } from '../contexts/ThemeContext';
 import {
+  bundledProductReleaseHistory,
   loadProductReleaseHistory,
   ordinaryReleaseChangeText,
   productGuideVersionsView,
@@ -43,6 +44,7 @@ export const ProductGuideVersions: React.FC = () => {
   const isDark = theme === 'dark';
   const [data, setData] = useState<LoadedProductReleaseHistory | null>(null);
   const [hasError, setHasError] = useState(false);
+  const [isBundledFallback, setIsBundledFallback] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -51,7 +53,13 @@ export const ProductGuideVersions: React.FC = () => {
         if (active) setData(result);
       })
       .catch(() => {
-        if (active) setHasError(true);
+        if (!active) return;
+        try {
+          setData(bundledProductReleaseHistory());
+          setIsBundledFallback(true);
+        } catch {
+          setHasError(true);
+        }
       });
     return () => { active = false; };
   }, []);
@@ -84,6 +92,14 @@ export const ProductGuideVersions: React.FC = () => {
 
         {view.status === 'success' && (
           <>
+            {isBundledFallback && (
+              <p
+                className={`mt-4 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm ${isDark ? 'text-amber-200' : 'text-amber-800'}`}
+                role="status"
+              >
+                线上发布记录暂时不可用，当前展示随此版本内置的离线记录。
+              </p>
+            )}
             <div className="mt-4 flex flex-wrap items-end justify-between gap-4">
               <div>
                 <h2
@@ -99,7 +115,7 @@ export const ProductGuideVersions: React.FC = () => {
                 )}
               </div>
               <span className="rounded-full bg-blue-500/10 px-3 py-1 text-sm font-semibold text-blue-500">
-                稳定 / 已安装
+                {isBundledFallback ? '离线记录' : '稳定 / 已安装'}
               </span>
             </div>
 

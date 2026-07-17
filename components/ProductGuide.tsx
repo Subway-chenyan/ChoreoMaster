@@ -16,6 +16,7 @@ import {
   WandSparkles,
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
+import { AppVersionBadge } from './AppVersionBadge';
 import { ProductGuideOperations } from './ProductGuideOperations';
 import { ProductGuideVersions } from './ProductGuideVersions';
 
@@ -119,13 +120,16 @@ export const ProductGuide: React.FC<ProductGuideProps> = ({ onClose }) => {
             返回编辑器
           </button>
           <div className={`h-5 w-px ${isDark ? 'bg-slate-800' : 'bg-slate-300'}`} />
-          <button
-            type="button"
-            onClick={() => scrollToSection('overview')}
-            className="mr-auto text-sm font-semibold tracking-tight"
-          >
-            CosStage
-          </button>
+          <div className="mr-auto flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => scrollToSection('overview')}
+              className="text-sm font-semibold tracking-tight"
+            >
+              CosStage
+            </button>
+            <AppVersionBadge />
+          </div>
           <nav className="product-guide__nav flex items-center gap-1 overflow-x-auto text-sm">
             <button type="button" onClick={() => scrollToSection('overview')} className={navClass}>
               产品介绍
