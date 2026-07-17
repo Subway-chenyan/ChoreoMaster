@@ -1,7 +1,22 @@
 {
   "schemaVersion": 1,
-  "currentVersion": "1.1.1",
+  "currentVersion": "1.1.2",
   "releases": [
+    {
+      "version": "1.1.2",
+      "date": "2026-07-17",
+      "kind": "patch",
+      "title": "CosStage 1.1.2",
+      "summary": "新增 ChinaJoy 按需下载项目模板，并合并项目压缩包与编排 JSON 的导入导出入口。",
+      "changes": [
+        {
+          "kind": "patch",
+          "text": "新增 ChinaJoy 按需下载项目模板，并合并项目压缩包与编排 JSON 的导入导出入口。"
+        }
+      ],
+      "breakingChanges": [],
+      "migrationSteps": []
+    },
     {
       "version": "1.1.1",
       "date": "2026-07-17",
