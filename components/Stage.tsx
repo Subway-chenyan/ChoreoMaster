@@ -874,7 +874,7 @@ export const Stage: React.FC<StageProps> = ({
         </div>
 
         {/* Stage Front Ruler */}
-        <div className="absolute bottom-0 left-0 right-0 h-7 border-t border-slate-400/70 bg-slate-950/75 pointer-events-none">
+        <div className="absolute left-0 right-0 top-full z-20 h-7 border-t border-slate-400/70 bg-slate-950/75 pointer-events-none">
           <div className="absolute inset-x-0 bottom-0 text-center text-[8px] tracking-[0.2em] text-slate-400">舞台前沿</div>
           {gridMarks.map((mark) => (
             <div

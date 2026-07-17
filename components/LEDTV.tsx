@@ -1,8 +1,8 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { StageConfig } from '../types';
-import { getLedBottomHeight, getLedZPosition } from '../utils/stage-config';
+import type { StageConfig } from '../types';
+import { getLedBottomHeight, getLedZPosition, resolveStageMediaUrl } from '../utils/stage-config';
 
 interface LEDTVProps {
   config: StageConfig;
@@ -24,6 +24,7 @@ const LEDTV: React.FC<LEDTVProps> = ({ config, mediaCache = {}, currentTime = 0,
   const width = config.ledWidth ?? config.width;
   const bottomHeight = getLedBottomHeight(config);
   const content = config.ledContent;
+  const contentUrl = resolveStageMediaUrl(content?.value, mediaCache);
 
   useEffect(() => {
     desiredTimeRef.current = currentTime / 1000;
@@ -61,10 +62,10 @@ const LEDTV: React.FC<LEDTVProps> = ({ config, mediaCache = {}, currentTime = 0,
   };
 
   useEffect(() => {
-    if (content?.type === 'video' && content.value && mediaCache[content.value]) {
+    if (content?.type === 'video' && contentUrl) {
       const video = document.createElement('video');
       video.crossOrigin = 'anonymous';
-      video.src = mediaCache[content.value];
+      video.src = contentUrl;
       video.loop = content.loop ?? true;
       video.muted = true;
       video.playsInline = true;
@@ -124,34 +125,34 @@ const LEDTV: React.FC<LEDTVProps> = ({ config, mediaCache = {}, currentTime = 0,
       videoTextureRef.current = null;
       setVideoTexture(null);
     }
-  }, [content, mediaCache]);
+  }, [content, contentUrl]);
 
   useEffect(() => {
-    if (content?.type !== 'image' || !content.value || !mediaCache[content.value]) {
+    if (content?.type !== 'image' || !contentUrl) {
       setImageTexture(null);
       return;
     }
 
     let texture: THREE.Texture | null = null;
-    const image = new Image();
-    image.onload = () => {
-      texture = new THREE.CanvasTexture(image);
-      configureTexture(texture);
-      texture.needsUpdate = true;
-      setImageTexture(texture);
-    };
-    image.onerror = error => {
-      console.error('Failed to load image texture:', error);
-    };
-    image.src = mediaCache[content.value];
+    new THREE.TextureLoader().load(
+      contentUrl,
+      (loadedTexture) => {
+        texture = loadedTexture;
+        configureTexture(loadedTexture);
+        loadedTexture.needsUpdate = true;
+        setImageTexture(loadedTexture);
+      },
+      undefined,
+      (error) => {
+        console.error('Failed to load LED image texture:', error);
+      },
+    );
 
     return () => {
-      image.onload = null;
-      image.onerror = null;
       setImageTexture(current => current === texture ? null : current);
       texture?.dispose();
     };
-  }, [content, mediaCache]);
+  }, [content, contentUrl]);
 
   const getTimelineVideoTime = (video: HTMLVideoElement, timelineTimeSec: number, shouldLoop: boolean) => {
     const duration = video.duration;

@@ -50,6 +50,13 @@ export function resolveStageBackgroundUrl(
   config: StageConfig,
   mediaCache: Record<string, string>,
 ): string | null {
-  const value = config.background?.value;
+  return resolveStageMediaUrl(config.background?.value, mediaCache);
+}
+
+/** Resolve both persisted project assets and browser-local media URLs. */
+export function resolveStageMediaUrl(
+  value: string | undefined,
+  mediaCache: Record<string, string>,
+): string | null {
   return value ? mediaCache[value] ?? value : null;
 }

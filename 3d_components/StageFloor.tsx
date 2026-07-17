@@ -125,8 +125,8 @@ const StageFloor: React.FC<StageFloorProps> = ({ stageConfig, mediaCache = {}, g
         </>
       )}
 
-      {/* Red line at front (z = -depth/2, towards camera) */}
-      <mesh position={[0, 0.02, -depth / 2]}>
+      {/* Front marker sits just outside the playable stage area, towards the audience. */}
+      <mesh position={[0, 0.02, depth / 2 + 0.05]}>
         <boxGeometry args={[totalWidth, 0.05, 0.1]} />
         <meshBasicMaterial color="#ef4444" />
       </mesh>

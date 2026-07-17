@@ -345,6 +345,8 @@ test('live 3D stage uses the background, LED depth, and direction arrows', async
   assert.match(floor, /showStageLines/);
   assert.match(led, /getLedZPosition/);
   assert.match(led, /getLedBottomHeight/);
+  assert.match(led, /resolveStageMediaUrl/);
+  assert.match(led, /new THREE\.TextureLoader\(\)\.load/);
   assert.match(led, /bottomHeight \+ height \/ 2/);
   assert.match(performer, /DirectionArrow3D/);
   assert.match(prop, /DirectionArrow3D/);
@@ -354,6 +356,18 @@ test('live 3D stage uses the background, LED depth, and direction arrows', async
   assert.match(prop, /\{showDirectionArrows && <DirectionArrow3D/);
   assert.match(await read('3d_components/DirectionArrow3D.tsx'), /0\.14, 0\.055, 0\.64/);
   assert.match(await read('3d_components/DirectionArrow3D.tsx'), /0\.26, 0\.46, 16/);
+});
+
+test('stage-front guide is rendered outside the playable stage in every 3D path', async () => {
+  const [stage, floor, offline] = await Promise.all([
+    read('components/Stage.tsx'),
+    read('3d_components/StageFloor.tsx'),
+    read('utils/OfflineRenderer3D.ts'),
+  ]);
+
+  assert.match(stage, /top-full z-20 h-7/);
+  assert.match(floor, /depth \/ 2 \+ 0\.05/);
+  assert.match(offline, /depth \/ 2 \+ 0\.05/);
 });
 
 test('3D drag editing is transient and uses the shared interaction policy', async () => {

@@ -128,11 +128,11 @@ function createStageFloor(stageConfig: StageConfig, gridScale: number, includeGr
     });
   }
 
-  // Red line at front edge
+  // Front marker sits just outside the playable stage area, towards the audience.
   const redGeo = new THREE.BoxGeometry(totalWidth, 0.05, 0.1);
   const redMat = new THREE.MeshBasicMaterial({ color: 0xef4444 });
   const redLine = new THREE.Mesh(redGeo, redMat);
-  redLine.position.set(0, 0.02, -depth / 2);
+  redLine.position.set(0, 0.02, depth / 2 + 0.05);
   group.add(redLine);
 
   // Blue line at back edge

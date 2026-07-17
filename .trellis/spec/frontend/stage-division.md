@@ -103,6 +103,7 @@ getLedBottomHeight(stageConfig);
 getLedDistanceFromBack(stageConfig);
 getLedStageYPercent(stageConfig);
 getLedZPosition(stageConfig);
+resolveStageMediaUrl(value, mediaCache);
 ```
 
 ### 3. Contracts
@@ -114,6 +115,8 @@ getLedZPosition(stageConfig);
 - `showStageLines !== false` is the compatibility default. It gates wing boundary lines and the two horizontal third-division lines, but not the vertical meter grid.
 - `ledDistanceFromBack` uses meters, defaults to `0`, and is clamped to `0..stage depth`.
 - `ledBottomHeight` uses meters, defaults to `0`, is clamped to `0..30`, and means the LED screen bottom edge height above the stage floor. Live 3D and offline 3D position the LED center at `getLedBottomHeight(stageConfig) + ledHeight / 2`.
+- `ledContent.value` is resolved through `resolveStageMediaUrl(value, mediaCache)` before texture creation. This supports both hydrated managed-project asset URLs and browser-local URLs. LED images use `THREE.TextureLoader`; do not construct a `CanvasTexture` from an image upload.
+- The front guide is outside the playable stage: the 2D ruler is positioned below the stage surface, while live and offline 3D place its red marker at `z = depth / 2 + 0.05` (audience side).
 - Performer and prop direction arrows consume the same per-frame rotation used by geometry in live 2D/3D and exports.
 - Rotation `0deg` means facing the stage front. In the 2D editor/canvas this is visually downward; in 3D it is the same world direction used by `mapTo3D` for the front edge. Do not flip only one renderer.
 - Direction indicators are operational cues, not decorative marks. Keep them legible at the default zoom: use a fixed SVG arrow in the 2D editor, a thicker canvas arrow in 2D export, and matching larger geometry in live/offline 3D.
@@ -128,6 +131,7 @@ getLedZPosition(stageConfig);
 - Missing/non-finite LED distance -> `0`; out-of-range value -> clamp to `0..depth`.
 - Missing/non-finite LED bottom height -> `0`; out-of-range value -> clamp to `0..30`.
 - Missing managed background asset -> return a `missing_asset` warning and continue loading the project.
+- Missing LED media URL or a failed LED image texture load -> keep the LED's dark fallback material and log the load error; do not render a black texture as a successful image state.
 - 3D export texture load failure -> warn once and continue with the dark floor.
 
 ### 5. Good/Base/Bad Cases
@@ -141,6 +145,7 @@ getLedZPosition(stageConfig);
 - Pure utility tests assert dimension derivation, invalid widths, opacity normalization, and LED clamping/coordinate conversion.
 - Project-service tests assert data URL externalization, `mediaUrls` hydration, exact option persistence, and legacy defaults.
 - Desktop regression tests assert all four renderer paths reference the shared URL/LED helpers, LED bottom-height positioning, and both actor/prop components include direction arrows.
+- Desktop regression tests assert LED image textures use `resolveStageMediaUrl` and `THREE.TextureLoader`, and assert both 3D front markers remain outside the playable depth.
 - Desktop regression tests assert 2D direction arrows default toward the stage front and canvas export rotates arrows with the same sign as the editor.
 - Desktop regression tests assert the 2D arrow uses a visible SVG size/stroke and the live/offline 3D arrows use matching enlarged geometry.
 - Desktop regression tests assert the toolbar toggle state gates 2D arrows, live 3D arrows, and offline 3D export arrows without touching rotation values.
@@ -154,6 +159,7 @@ getLedZPosition(stageConfig);
 ```typescript
 const ledZ = -stageConfig.depth / 2 + (stageConfig.ledDistanceFromBack ?? 0);
 const backgroundUrl = stageConfig.background?.value;
+const imageTexture = new THREE.CanvasTexture(uploadedImage);
 ```
 
 This duplicates clamping and fails for managed project asset paths.
@@ -164,4 +170,6 @@ This duplicates clamping and fails for managed project asset paths.
 const ledZ = getLedZPosition(stageConfig);
 const ledY = getLedBottomHeight(stageConfig) + (stageConfig.ledHeight ?? 6) / 2;
 const backgroundUrl = resolveStageBackgroundUrl(stageConfig, mediaCache);
+const ledUrl = resolveStageMediaUrl(stageConfig.ledContent?.value, mediaCache);
+const imageTexture = new THREE.TextureLoader().load(ledUrl);
 ```
