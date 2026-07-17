@@ -1,7 +1,22 @@
 {
   "schemaVersion": 1,
-  "currentVersion": "1.1.0",
+  "currentVersion": "1.1.1",
   "releases": [
+    {
+      "version": "1.1.1",
+      "date": "2026-07-17",
+      "kind": "patch",
+      "title": "CosStage 1.1.1",
+      "summary": "修复舞台 LED 上传图片后黑屏的问题，并将舞台前沿标线移至舞台范围外，使舞台方向标识更清晰。",
+      "changes": [
+        {
+          "kind": "patch",
+          "text": "修复舞台 LED 上传图片后黑屏的问题，并将舞台前沿标线移至舞台范围外，使舞台方向标识更清晰。"
+        }
+      ],
+      "breakingChanges": [],
+      "migrationSteps": []
+    },
     {
       "version": "1.1.0",
       "date": "2026-07-17",
