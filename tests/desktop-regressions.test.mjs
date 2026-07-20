@@ -518,7 +518,7 @@ test('3D drag editing is transient and uses the shared interaction policy', asyn
   );
   assert.match(
     scene3DSource,
-    /onPositionChange: interactionPolicy\.canDragObjects\s*\? \(newPos: Position\) => handlePositionChange\(p\.id, newPos\)\s*: undefined/,
+    /onPositionChange: interactionPolicy\.canDragObjects && !isLocked\s*\? \(newPos: Position\) => handlePositionChange\(p\.id, newPos\)\s*: undefined/,
   );
   assert.match(scene3DSource, /enableRotate=\{interactionPolicy\.enableRotate\}/);
   assert.match(scene3DSource, /enablePan=\{interactionPolicy\.enablePan\}/);
@@ -812,4 +812,29 @@ test('performer group visibility and deletion undo contracts remain wired', asyn
   assert.match(app, /type: 'delete-editor-state'/);
   assert.match(app, /applyDeletionState\(last\.before\)/);
   assert.match(app, /applyDeletionState\(last\.after\)/);
+});
+
+test('performer and group locks persist and gate every stage editing surface', async () => {
+  const [contract, app, sidebar, stage, stage3d, scene3d] = await Promise.all([
+    read('electron/project-contract.ts'),
+    read('App.tsx'),
+    read('components/Sidebar.tsx'),
+    read('components/Stage.tsx'),
+    read('components/Stage3D.tsx'),
+    read('3d_components/Scene3D.tsx'),
+  ]);
+
+  assert.match(contract, /export interface Performer[\s\S]*locked\?: boolean/);
+  assert.match(contract, /export interface PerformerGroup[\s\S]*locked\?: boolean/);
+  assert.match(sidebar, /在所有队形中锁定/);
+  assert.match(sidebar, /解除所有队形锁定/);
+  assert.match(sidebar, /双击或右键解除锁定/);
+  assert.match(sidebar, /onSetPerformersLocked\(\[p\.id\], false\)/);
+  assert.match(sidebar, /onSetGroupLocked\(group\.id, false\)/);
+  assert.match(app, /getEffectivelyLockedPerformerIds\(performers, performerGroups\)/);
+  assert.match(app, /updates\.filter\(\(update\) => !effectivelyLockedPerformerIds\.has\(update\.id\)\)/);
+  assert.match(stage, /lockedPerformerIdSet\.has\(pid\)/);
+  assert.match(stage, /!lockedPerformerIdSet\.has\(performer\.id\)/);
+  assert.match(stage3d, /lockedPerformerIds=\{lockedPerformerIds\}/);
+  assert.match(scene3d, /interactionPolicy\.canDragObjects && !isLocked/);
 });

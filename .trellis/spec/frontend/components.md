@@ -633,6 +633,72 @@ const fallback = bundledProductReleaseHistory();
 
 ---
 
+## Scenario: Persistent Performer and Group Locks
+
+### 1. Scope / Trigger
+
+Use this contract whenever an actor, prop, or group can be locked across formations. The lock is a persisted project rule, not a transient selection or current-frame flag.
+
+### 2. Signatures
+
+```ts
+interface Performer { locked?: boolean }
+interface PerformerGroup { locked?: boolean }
+
+getEffectivelyLockedPerformerIds(
+  performers: Performer[],
+  groups: PerformerGroup[],
+): Set<string>;
+```
+
+### 3. Contracts
+
+- A performer is effectively locked when `performer.locked === true` or its current group has `group.locked === true`.
+- `locked` travels with project save, import/export, templates, recovery snapshots, and clipboard payloads through the existing object contracts.
+- The sidebar exposes `在所有队形中锁定` and `解除所有队形锁定`. A directly locked row displays a lock action in the row action area; double-clicking it unlocks the entity. Right-clicking a locked row exposes only the unlock action.
+- A group lock freezes the group metadata and every current member. A member locked only by its group must direct the user to unlock the group rather than silently overriding group policy.
+- 2D drag, rotation, prop resize, formation presence, group membership, transition-path editing, presets, deletion, and 3D drag must all use the same effective lock set. Selection and group collapse remain allowed.
+- Lock and unlock callbacks are dedicated privileged actions. Generic `onUpdatePerformer` and `onUpdateGroup` handlers must reject effective locks so another editor cannot bypass the policy.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| Unlocked performer | Existing editing behavior remains available. |
+| `performer.locked=true` | Show its lock icon and reject every project-data edit except unlock. |
+| `group.locked=true` | Reject group edits and all member edits, including members without their own lock flag. |
+| Mixed locked/unlocked selection | Apply edits or deletion only to unlocked IDs; never mutate locked IDs. |
+| Locked object in 3D edit mode | Keep it selectable but omit its position callback and reject drag start. |
+| Legacy project without `locked` | Treat all entities and groups as unlocked. |
+
+### 5. Good / Base / Bad Cases
+
+- Good: a group is locked once, every member stays fixed in all formations and both 2D/3D editors, and the group lock icon unlocks it.
+- Base: an old project has no lock fields and behaves exactly as before.
+- Bad: the sidebar shows a lock icon while keyboard deletion, transition handles, presets, or 3D dragging can still change the entity.
+
+### 6. Tests Required
+
+- Unit-test direct locks, inherited group locks, legacy unlocked values, and mixed-selection filtering.
+- Desktop source regression must assert persisted contract fields, sidebar lock/unlock actions, double-click unlock, App-level update filtering, 2D handle suppression, and 3D callback suppression.
+- Runtime acceptance must lock and unlock a tutorial entity through both double-click and context menu, confirm row actions disappear while locked, and inspect the console for errors.
+- Run `npm run typecheck`, `npm run test:desktop`, `npm test`, and `git diff --check`.
+
+### 7. Wrong vs Correct
+
+```ts
+// Wrong: visual-only lock; another mutation path still writes coordinates.
+if (performer.locked) return <Lock />;
+onPositionChange(allUpdates);
+
+// Correct: one effective set gates both UI affordances and authoritative writes.
+const lockedIds = getEffectivelyLockedPerformerIds(performers, groups);
+const editableUpdates = updates.filter(({ id }) => !lockedIds.has(id));
+onPositionChange(editableUpdates);
+```
+
+---
+
 ## Quick Reference
 
 | Pattern                    | When to Use                 |

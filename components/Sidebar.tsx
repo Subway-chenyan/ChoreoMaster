@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Performer, Frame, PerformerShape, PerformerGroup, PerformerType, PropCategory, AIConfig, AIChoreoPlan, ProjectTemplateData } from '../types';
-import { Plus, Users, Trash2, Download, Grid, Music, Sparkles, Wand2, Film, Copy, Search, Settings, Scaling, Upload, FilePlus, Circle, Square, Triangle, UserCheck, UserX, Eye, EyeOff, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreVertical, Palette, Edit2, Box, Library, Save, StickyNote } from 'lucide-react';
+import { Plus, Users, Trash2, Download, Grid, Music, Sparkles, Wand2, Film, Copy, Search, Settings, Scaling, Upload, FilePlus, Circle, Square, Triangle, UserCheck, UserX, Eye, EyeOff, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreVertical, Palette, Edit2, Box, Library, Save, StickyNote, Lock, Unlock } from 'lucide-react';
 import { PRESET_SHAPES, DEFAULT_COLORS } from '../constants';
 import { StageConfig } from '../types';
 import { ProjectBrowser } from './ProjectBrowser';
@@ -22,6 +22,7 @@ interface SidebarProps {
     onRemovePerformer: (id: string) => void;
     onRemovePerformers: (ids: string[]) => void;
     onShowPerformersInAllFrames: (ids: string[]) => void;
+    onSetPerformersLocked: (ids: string[], locked: boolean) => void;
     onUpdatePerformer: (id: string, updates: Partial<Performer>) => void;
     onTogglePerformerInFrame: (id: string) => void;
     onDuplicateSelected: () => void;
@@ -52,6 +53,7 @@ interface SidebarProps {
     onAddGroup: (name: string, color: string, type?: 'performer' | 'prop') => string;
     onRemoveGroup: (groupId: string) => void;
     onShowGroupInAllFrames: (groupId: string) => void;
+    onSetGroupLocked: (groupId: string, locked: boolean) => void;
     onUpdateGroup: (groupId: string, updates: Partial<PerformerGroup>) => void;
     onAddPerformersToGroup: (performerIds: string[], groupId: string) => void;
     onRemovePerformersFromGroup: (performerIds: string[]) => void;
@@ -177,6 +179,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     onRemovePerformer,
     onRemovePerformers,
     onShowPerformersInAllFrames,
+    onSetPerformersLocked,
     onUpdatePerformer,
     onTogglePerformerInFrame,
     onDuplicateSelected,
@@ -207,6 +210,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     onAddGroup,
     onRemoveGroup,
     onShowGroupInAllFrames,
+    onSetGroupLocked,
     onUpdateGroup,
     onAddPerformersToGroup,
     onRemovePerformersFromGroup,
@@ -342,6 +346,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const currentFrame = useMemo(() => {
         return frames.find(f => f.id === currentFrameId);
     }, [frames, currentFrameId]);
+
+    const contextMenuPerformers = useMemo(() => (
+        performers.filter((performer) => contextMenuState.performerIds.includes(performer.id))
+    ), [contextMenuState.performerIds, performers]);
+    const contextMenuHasEffectiveLock = contextMenuPerformers.some((performer) => (
+        performer.locked
+        || (performer.groupId && performerGroups.some((group) => group.id === performer.groupId && group.locked))
+    ));
+    const contextMenuGroup = contextMenuState.groupId
+        ? performerGroups.find((group) => group.id === contextMenuState.groupId)
+        : undefined;
 
     const handleAdd = () => {
         if (newPerformerName.trim()) {
@@ -481,7 +496,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     };
 
     const handleDragOverGroup = (e: React.DragEvent, group: PerformerGroup) => {
-        if (!dragState || !isPerformerGroupCompatible(group, dragState.performerType)) return;
+        if (!dragState || group.locked || !isPerformerGroupCompatible(group, dragState.performerType)) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
         if (dragState.overGroupId !== group.id || dragState.overUngrouped) {
@@ -490,7 +505,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     };
 
     const handleDropOnGroup = (e: React.DragEvent, group: PerformerGroup) => {
-        if (!dragState || !isPerformerGroupCompatible(group, dragState.performerType)) return;
+        if (!dragState || group.locked || !isPerformerGroupCompatible(group, dragState.performerType)) return;
         e.preventDefault();
         onAddPerformersToGroup(dragState.performerIds, group.id);
         setDragState(null);
@@ -520,11 +535,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const renderPerformerItem = (p: Performer) => {
         const inFrame = currentFrame?.positions[p.id] !== undefined;
         const isHiddenByGroup = p.groupId && currentFrame?.hiddenGroupIds?.includes(p.groupId);
+        const isLockedByGroup = Boolean(p.groupId && performerGroups.some((group) => group.id === p.groupId && group.locked));
+        const isEffectivelyLocked = Boolean(p.locked || isLockedByGroup);
 
         return (
             <div
                 key={p.id}
-                draggable
+                draggable={!isEffectivelyLocked}
                 onDragStart={(e) => handleDragStart(e, p.id)}
                 onDragEnd={handleDragEnd}
                 onClick={(e) => handlePerformerClick(e, p.id)}
@@ -577,6 +594,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     <div
                         onDoubleClick={(e) => {
                             e.stopPropagation();
+                            if (isEffectivelyLocked) return;
                             setEditingPerformerId(p.id);
                             setEditingPerformerName(p.name);
                         }}
@@ -599,6 +617,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
                 {/* Actions: Toggle In/Out of Frame, Delete */}
                 <div className="flex items-center gap-1">
+                    {p.locked && (
+                        <button
+                            type="button"
+                            onClick={(event) => event.stopPropagation()}
+                            onDoubleClick={(event) => {
+                                event.stopPropagation();
+                                onSetPerformersLocked([p.id], false);
+                            }}
+                            onContextMenu={(event) => handleContextMenu(event, p.id)}
+                            className="p-1 rounded text-amber-400 hover:bg-amber-500/10"
+                            title="已在所有队形中锁定；双击或右键解除锁定"
+                            aria-label={`解除锁定${p.name}`}
+                        >
+                            <Lock size={14} />
+                        </button>
+                    )}
+                    {isLockedByGroup && !p.locked && (
+                        <span className="p-1 text-amber-400/70" title="所属分组已锁定，请在分组上解除锁定">
+                            <Lock size={14} />
+                        </span>
+                    )}
+                    {!isEffectivelyLocked && (
+                        <>
                     {onOpenNoteDrawer && (() => {
                         const noteCount = performerNotes.filter(n => n.performerId === p.id).length;
                         return (
@@ -631,6 +672,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     >
                         <Trash2 size={14} />
                     </button>
+                        </>
+                    )}
                 </div>
             </div>
         );
@@ -1303,6 +1346,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                                 <div
                                                     onDoubleClick={(e) => {
                                                         e.stopPropagation();
+                                                        if (group.locked) return;
                                                         setEditingGroupId(group.id);
                                                         setEditingGroupName(group.name);
                                                     }}
@@ -1315,9 +1359,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                                 </div>
                                             )}
 
-                                            <button onClick={(e) => { e.stopPropagation(); onToggleGroupVisibility(group.id); }} className={`p-1 rounded ${!(currentFrame?.hiddenGroupIds?.includes(group.id)) ? 'text-blue-400 hover:bg-slate-700' : 'text-slate-600 hover:bg-slate-700'}`} title={!(currentFrame?.hiddenGroupIds?.includes(group.id)) ? "隐藏分组" : "显示分组"}>
-                                                {!(currentFrame?.hiddenGroupIds?.includes(group.id)) ? <Eye size={14} /> : <EyeOff size={14} />}
-                                            </button>
+                                            {group.locked ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={(event) => event.stopPropagation()}
+                                                    onDoubleClick={(event) => {
+                                                        event.stopPropagation();
+                                                        onSetGroupLocked(group.id, false);
+                                                    }}
+                                                    onContextMenu={(event) => handleContextMenu(event, null, group.id)}
+                                                    className="p-1 rounded text-amber-400 hover:bg-amber-500/10"
+                                                    title="已在所有队形中锁定；双击或右键解除锁定"
+                                                    aria-label={`解除锁定分组${group.name}`}
+                                                >
+                                                    <Lock size={14} />
+                                                </button>
+                                            ) : (
+                                                <button onClick={(e) => { e.stopPropagation(); onToggleGroupVisibility(group.id); }} className={`p-1 rounded ${!(currentFrame?.hiddenGroupIds?.includes(group.id)) ? 'text-blue-400 hover:bg-slate-700' : 'text-slate-600 hover:bg-slate-700'}`} title={!(currentFrame?.hiddenGroupIds?.includes(group.id)) ? "隐藏分组" : "显示分组"}>
+                                                    {!(currentFrame?.hiddenGroupIds?.includes(group.id)) ? <Eye size={14} /> : <EyeOff size={14} />}
+                                                </button>
+                                            )}
                                             <button onClick={(e) => { e.stopPropagation(); handleContextMenu(e, null, group.id); }} className="p-1 text-slate-500 hover:text-white hover:bg-slate-700 rounded opacity-0 group-hover/header:opacity-100 transition-opacity">
                                                 <MoreVertical size={14} />
                                             </button>
@@ -1371,6 +1432,36 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     >
                         {contextMenuState.performerIds.length > 0 && contextMenuState.performerType && (
                             <>
+                                {(() => {
+                                    const targets = performers.filter((performer) => contextMenuState.performerIds.includes(performer.id));
+                                    const lockedByGroup = targets.some((performer) => (
+                                        performer.groupId
+                                        && performerGroups.some((group) => group.id === performer.groupId && group.locked)
+                                    ));
+                                    const allDirectlyLocked = targets.length > 0 && targets.every((performer) => performer.locked);
+                                    if (lockedByGroup && !allDirectlyLocked) {
+                                        return (
+                                            <div className="px-3 py-2 text-sm text-amber-300 flex items-center gap-2">
+                                                <Lock size={12} /> 所属分组已锁定
+                                            </div>
+                                        );
+                                    }
+                                    return (
+                                        <button
+                                            onClick={() => {
+                                                onSetPerformersLocked(contextMenuState.performerIds, !allDirectlyLocked);
+                                                closeContextMenu();
+                                            }}
+                                            className="w-full px-3 py-2 text-left text-sm text-amber-300 hover:bg-slate-700 flex items-center gap-2"
+                                        >
+                                            {allDirectlyLocked ? <Unlock size={12} /> : <Lock size={12} />}
+                                            {allDirectlyLocked ? '解除所有队形锁定' : '在所有队形中锁定'}
+                                        </button>
+                                    );
+                                })()}
+                                <div className="h-px bg-slate-700 my-1"></div>
+                                {!contextMenuHasEffectiveLock && (
+                                    <>
                                 <div className="px-3 py-1 text-xs text-slate-500 uppercase tracking-wider">
                                     移动 {contextMenuState.performerIds.length} 个{contextMenuState.performerType === 'prop' ? '道具' : '演员'}到分组
                                 </div>
@@ -1454,10 +1545,33 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                     }
                                     return null;
                                 })()}
+                                    </>
+                                )}
                             </>
                         )}
                         {contextMenuState.groupId && (
                             <>
+                                {(() => {
+                                    const group = performerGroups.find((candidate) => candidate.id === contextMenuState.groupId);
+                                    if (!group) return null;
+                                    return (
+                                        <>
+                                            <button
+                                                onClick={() => {
+                                                    onSetGroupLocked(group.id, !group.locked);
+                                                    closeContextMenu();
+                                                }}
+                                                className="w-full px-3 py-2 text-left text-sm text-amber-300 hover:bg-slate-700 flex items-center gap-2"
+                                            >
+                                                {group.locked ? <Unlock size={12} /> : <Lock size={12} />}
+                                                {group.locked ? '解除所有队形锁定' : '在所有队形中锁定'}
+                                            </button>
+                                            <div className="h-px bg-slate-700 my-1"></div>
+                                        </>
+                                    );
+                                })()}
+                                {!contextMenuGroup?.locked && (
+                                    <>
                                 <button
                                     onClick={() => {
                                         if (contextMenuState.groupId) {
@@ -1508,6 +1622,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 >
                                     删除分组
                                 </button>
+                                    </>
+                                )}
                             </>
                         )}
                     </div>,

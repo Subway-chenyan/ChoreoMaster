@@ -22,6 +22,7 @@ import { getLedStageYPercent, resolveStageBackgroundUrl } from '../utils/stage-c
 interface StageProps {
   performers: Performer[];
   performerGroups?: PerformerGroup[];
+  lockedPerformerIds?: string[];
   hiddenGroupIds?: string[]; // IDs of groups hidden in current frame
   positions: Record<string, Position>;
   rotations?: Record<string, number>;
@@ -135,6 +136,7 @@ function getPolygonClipPath(points: { x: number; y: number }[] | undefined): str
 export const Stage: React.FC<StageProps> = ({
   performers,
   performerGroups = [],
+  lockedPerformerIds = [],
   hiddenGroupIds = [],
   positions,
   rotations = {},
@@ -171,6 +173,7 @@ export const Stage: React.FC<StageProps> = ({
   const [viewportScale, setViewportScale] = useState(1);
   const [viewportOffset, setViewportOffset] = useState({ x: 0, y: 0 });
   const stageXBounds = useMemo(() => getStageXBounds(stageConfig), [stageConfig]);
+  const lockedPerformerIdSet = useMemo(() => new Set(lockedPerformerIds), [lockedPerformerIds]);
   const wingWidth = getWingWidth(stageConfig);
   const totalStageWidth = getTotalStageWidth(stageConfig);
   const gridMarks = useMemo(
@@ -373,6 +376,7 @@ export const Stage: React.FC<StageProps> = ({
   }, [onRotationChange, onRotationEnd, readonly, rotationDragId]);
 
   const handleResizeStart = (e: React.PointerEvent, id: string, handle: 'nw' | 'ne' | 'sw' | 'se', currentWidth: number, currentHeight: number) => {
+    if (lockedPerformerIdSet.has(id)) return;
     e.stopPropagation();
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -592,6 +596,7 @@ export const Stage: React.FC<StageProps> = ({
     // Initialize Drag State for ALL selected items (including the one just clicked if it was added)
     const initialPositions: Record<string, Position> = {};
     newSelection.forEach(pid => {
+      if (lockedPerformerIdSet.has(pid)) return;
       // Use current positions passed in props
       if (positions[pid]) {
         initialPositions[pid] = { ...positions[pid] };
@@ -956,7 +961,7 @@ export const Stage: React.FC<StageProps> = ({
                 {showDirectionArrows && <DirectionArrow />}
 
                 {/* Resize Handles */}
-                {isSelected && !readonly && (
+                {isSelected && !readonly && !lockedPerformerIdSet.has(performer.id) && (
                   <>
                     {!isPlatform && (
                       <button
@@ -996,7 +1001,7 @@ export const Stage: React.FC<StageProps> = ({
               }}
             >
               <div className="relative" style={{ transform: `rotate(${rotation}deg)` }}>
-                {isSelected && !readonly && (
+                {isSelected && !readonly && !lockedPerformerIdSet.has(performer.id) && (
                   <button
                     type="button"
                     className="absolute left-1/2 top-[-34px] z-30 h-5 w-5 -translate-x-1/2 rounded-full border-2 border-white bg-amber-500 shadow-lg cursor-grab active:cursor-grabbing"

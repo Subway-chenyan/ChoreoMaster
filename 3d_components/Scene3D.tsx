@@ -20,6 +20,7 @@ interface Scene3DProps {
   currentTime?: number;
   isPlaying?: boolean;
   hiddenGroupIds?: string[];
+  lockedPerformerIds?: string[];
   gridScale?: number;
   snapToGrid?: boolean;
   showDirectionArrows?: boolean;
@@ -41,6 +42,7 @@ const Scene3D: React.FC<Scene3DProps> = ({
   currentTime = 0,
   isPlaying = false,
   hiddenGroupIds = [],
+  lockedPerformerIds = [],
   gridScale = 1,
   snapToGrid = false,
   showDirectionArrows = true,
@@ -56,6 +58,7 @@ const Scene3D: React.FC<Scene3DProps> = ({
     readonly,
     isDragging,
   });
+  const lockedPerformerIdSet = new Set(lockedPerformerIds);
 
   const handleDragStart = (id: string) => {
     if (!interactionPolicy.canDragObjects) return;
@@ -113,6 +116,7 @@ const Scene3D: React.FC<Scene3DProps> = ({
       <StageFloor stageConfig={stageConfig} mediaCache={mediaCache} gridScale={gridScale} />
       {visiblePerformers.map(p => {
         const pos = positions[p.id]; if (!pos) return null;
+        const isLocked = lockedPerformerIdSet.has(p.id);
         const commonProps = {
           key: p.id,
           performer: p,
@@ -122,10 +126,10 @@ const Scene3D: React.FC<Scene3DProps> = ({
           onSelect,
           stageConfig,
           showDirectionArrows,
-          dragEnabled: interactionPolicy.canDragObjects,
+          dragEnabled: interactionPolicy.canDragObjects && !isLocked,
           onDragStart: () => handleDragStart(p.id),
           onDragEnd: (position?: Position) => handleDragEnd(p.id, position),
-          onPositionChange: interactionPolicy.canDragObjects
+          onPositionChange: interactionPolicy.canDragObjects && !isLocked
             ? (newPos: Position) => handlePositionChange(p.id, newPos)
             : undefined
         };

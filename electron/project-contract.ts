@@ -165,6 +165,7 @@ export interface Performer {
   propCategory?: PropCategory;
   rotationPivot?: PropRotationPivot;
   boundToId?: string;
+  locked?: boolean;
 }
 
 export interface NoteItem {
@@ -191,6 +192,7 @@ export interface PerformerGroup {
   color: string;
   collapsed: boolean;
   type?: 'performer' | 'prop';
+  locked?: boolean;
 }
 
 export interface Frame {

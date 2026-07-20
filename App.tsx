@@ -60,6 +60,7 @@ import {
   getSortedFrames,
 } from './utils/transitions';
 import { getPropCenterFromAnchor, migratePropAnchor } from './utils/prop-pivot';
+import { filterUnlockedPerformerIds, getEffectivelyLockedPerformerIds } from './utils/performer-locking';
 import { useProjectTransfers } from './hooks/useProjectTransfers';
 import { createPersistedDesktopProject } from './services/desktopProjectService';
 import {
@@ -397,6 +398,10 @@ const App: React.FC = () => {
   });
   const [transitionPerformerSubgroupExpanded, setTransitionPerformerSubgroupExpanded] = useState<Record<string, boolean>>({});
   const [selectedPerformerIds, setSelectedPerformerIds] = useState<string[]>([]);
+  const effectivelyLockedPerformerIds = useMemo(
+    () => getEffectivelyLockedPerformerIds(performers, performerGroups),
+    [performerGroups, performers],
+  );
   const [musicUrl, setMusicUrl] = useState<string | null>(null);
   const [audioBuffer, setAudioBuffer] = useState<AudioBuffer | null>(null);
   const [musicName, setMusicName] = useState<string | null>(null);
@@ -890,7 +895,10 @@ const App: React.FC = () => {
   };
 
   const deletePerformers = (performerIds: string[]) => {
-    const targetIds = new Set(performerIds.filter((id) => performers.some((performer) => performer.id === id)));
+    const targetIds = new Set(
+      filterUnlockedPerformerIds(performerIds, effectivelyLockedPerformerIds)
+        .filter((id) => performers.some((performer) => performer.id === id)),
+    );
     if (targetIds.size === 0) return;
     const nextFrames = frames.map((frame) => {
       const positions = { ...frame.positions };
@@ -920,7 +928,8 @@ const App: React.FC = () => {
   };
 
   const requestDeletePerformers = (performerIds: string[]) => {
-    const ids = Array.from(new Set(performerIds)).filter((id) => performers.some((performer) => performer.id === id));
+    const ids = filterUnlockedPerformerIds(Array.from(new Set(performerIds)), effectivelyLockedPerformerIds)
+      .filter((id) => performers.some((performer) => performer.id === id));
     if (ids.length > 0) setPendingDeleteRequest({ type: 'performers', ids });
   };
 
@@ -930,7 +939,7 @@ const App: React.FC = () => {
 
   const handleUpdatePerformer = (id: string, updates: Partial<Performer>) => {
     const performer = performers.find((item) => item.id === id);
-    if (!performer) return;
+    if (!performer || effectivelyLockedPerformerIds.has(id)) return;
     const oldPivot = performer.rotationPivot ?? 'center';
     const requestedPivot = updates.rotationPivot ?? oldPivot;
     const newPivot: PropRotationPivot = performer.propCategory === 'platform' || updates.propCategory === 'platform'
@@ -974,6 +983,13 @@ const App: React.FC = () => {
       }));
     }
     setPerformers(prev => prev.map(p => p.id === id ? { ...p, ...updates, rotationPivot: newPivot } : p));
+  };
+
+  const handleSetPerformersLocked = (performerIds: string[], locked: boolean) => {
+    const targetIds = new Set(performerIds);
+    setPerformers((previous) => previous.map((performer) => (
+      targetIds.has(performer.id) ? { ...performer, locked } : performer
+    )));
   };
 
   // --- Performer Notes ---
@@ -1048,7 +1064,7 @@ const App: React.FC = () => {
   };
 
   const deleteGroup = (groupId: string) => {
-    if (!performerGroups.some((group) => group.id === groupId)) return;
+    if (!performerGroups.some((group) => group.id === groupId && !group.locked)) return;
     const after = createDeletionState({
       performers: performers.map((performer) => (
         performer.groupId === groupId ? { ...performer, groupId: undefined } : performer
@@ -1063,30 +1079,40 @@ const App: React.FC = () => {
   };
 
   const requestDeleteGroup = (groupId: string) => {
-    if (performerGroups.some((group) => group.id === groupId)) {
+    if (performerGroups.some((group) => group.id === groupId && !group.locked)) {
       setPendingDeleteRequest({ type: 'group', id: groupId });
     }
   };
 
   const handleUpdateGroup = (groupId: string, updates: Partial<PerformerGroup>) => {
-    setPerformerGroups(prev => prev.map(g => g.id === groupId ? { ...g, ...updates } : g));
+    setPerformerGroups(prev => prev.map(g => g.id === groupId && !g.locked ? { ...g, ...updates } : g));
+  };
+
+  const handleSetGroupLocked = (groupId: string, locked: boolean) => {
+    setPerformerGroups((previous) => previous.map((group) => (
+      group.id === groupId ? { ...group, locked } : group
+    )));
   };
 
   const handleAddPerformersToGroup = (performerIds: string[], groupId: string) => {
-    setPerformers(prev => prev.map(p => performerIds.includes(p.id) ? { ...p, groupId } : p));
+    if (performerGroups.some((group) => group.id === groupId && group.locked)) return;
+    const editableIds = new Set(filterUnlockedPerformerIds(performerIds, effectivelyLockedPerformerIds));
+    setPerformers(prev => prev.map(p => editableIds.has(p.id) ? { ...p, groupId } : p));
   };
 
   const handleRemovePerformersFromGroup = (performerIds: string[]) => {
-    const performerIdSet = new Set(performerIds);
+    const performerIdSet = new Set(filterUnlockedPerformerIds(performerIds, effectivelyLockedPerformerIds));
     setPerformers(prev => prev.map(p => performerIdSet.has(p.id) ? { ...p, groupId: undefined } : p));
   };
 
   const handleUpdateGroupPerformers = (groupId: string, updates: Partial<Performer>) => {
+    if (performerGroups.some((group) => group.id === groupId && group.locked)) return;
     // Update all performers in a group (for batch color/name change)
-    setPerformers(prev => prev.map(p => p.groupId === groupId ? { ...p, ...updates } : p));
+    setPerformers(prev => prev.map(p => p.groupId === groupId && !p.locked ? { ...p, ...updates } : p));
   };
 
   const handleToggleGroupVisibilityInFrame = (groupId: string) => {
+    if (performerGroups.some((group) => group.id === groupId && group.locked)) return;
     setFrames(prev => prev.map(f => {
       if (f.id !== currentFrameId) return f;
 
@@ -1114,10 +1140,12 @@ const App: React.FC = () => {
   };
 
   const handleShowPerformersInAllFrames = (performerIds: string[]) => {
-    setFrames((previousFrames) => showPerformersInAllFrames(previousFrames, performers, performerIds));
+    const editableIds = filterUnlockedPerformerIds(performerIds, effectivelyLockedPerformerIds);
+    setFrames((previousFrames) => showPerformersInAllFrames(previousFrames, performers, editableIds));
   };
 
   const handleShowGroupInAllFrames = (groupId: string) => {
+    if (performerGroups.some((group) => group.id === groupId && group.locked)) return;
     const performerIds = performers
       .filter((performer) => performer.groupId === groupId)
       .map((performer) => performer.id);
@@ -1686,7 +1714,8 @@ const App: React.FC = () => {
   const handleDeleteSelectedPerformers = () => {
     if (selectedPerformerIds.length === 0) return;
     if (isPlaying) handlePlayPause();
-    const ids = new Set(selectedPerformerIds);
+    const ids = new Set(filterUnlockedPerformerIds(selectedPerformerIds, effectivelyLockedPerformerIds));
+    if (ids.size === 0) return;
     const currentFrame = frames.find(fr => fr.id === currentFrameId);
     if (!currentFrame) return;
     const nextFrames = frames.map(f => {
@@ -1702,6 +1731,7 @@ const App: React.FC = () => {
 
   // Toggle presence in the CURRENT frame
   const handleTogglePerformerInFrame = (performerId: string) => {
+    if (effectivelyLockedPerformerIds.has(performerId)) return;
     setFrames(prevFrames => {
       return prevFrames.map(f => {
         if (f.id === currentFrameId) {
@@ -1729,12 +1759,14 @@ const App: React.FC = () => {
   };
 
   const handlePositionChange = (updates: { id: string; pos: Position }[]) => {
+    const editableUpdates = updates.filter((update) => !effectivelyLockedPerformerIds.has(update.id));
+    if (editableUpdates.length === 0) return;
     if (isPlaying) handlePlayPause();
 
     setFrames(prev => prev.map(f => {
       if (f.id === currentFrameId) {
         const updatedPositions = { ...f.positions };
-        updates.forEach(update => {
+        editableUpdates.forEach(update => {
           updatedPositions[update.id] = update.pos;
         });
         return {
@@ -1956,6 +1988,7 @@ const App: React.FC = () => {
 
   const handleTransitionControlPointChange = useCallback((controlPointIndex: number, nextPosition: Position) => {
     if (!selectedTransition || !selectedTransitionPerformerId || !selectedTransitionFrames) return;
+    if (effectivelyLockedPerformerIds.has(selectedTransitionPerformerId)) return;
     const start = selectedTransitionFrames.fromFrame.positions[selectedTransitionPerformerId];
     const end = selectedTransitionFrames.toFrame.positions[selectedTransitionPerformerId];
     if (!start || !end) return;
@@ -1981,6 +2014,7 @@ const App: React.FC = () => {
       },
     });
   }, [
+    effectivelyLockedPerformerIds,
     handleTransitionUpdate,
     selectedTransition,
     selectedTransitionFrames,
@@ -1989,6 +2023,7 @@ const App: React.FC = () => {
 
   const handleTransitionStartPointChange = useCallback((nextPosition: Position) => {
     if (!selectedTransitionPerformerId || !selectedTransitionFrames) return;
+    if (effectivelyLockedPerformerIds.has(selectedTransitionPerformerId)) return;
     setFrames((previousFrames) => previousFrames.map((frame) => {
       if (frame.id !== selectedTransitionFrames.fromFrame.id) return frame;
       const previousPosition = frame.positions[selectedTransitionPerformerId];
@@ -2008,7 +2043,7 @@ const App: React.FC = () => {
         },
       };
     }));
-  }, [selectedTransitionFrames, selectedTransitionPerformerId]);
+  }, [effectivelyLockedPerformerIds, selectedTransitionFrames, selectedTransitionPerformerId]);
 
   const selectedTransitionPerformer = useMemo(() => (
     selectedTransitionPerformerId
@@ -2025,6 +2060,7 @@ const App: React.FC = () => {
 
   const updateSelectedTransitionMotion = useCallback((updates: Partial<ObjectMotion>) => {
     if (!selectedTransition || !selectedTransitionPerformerId) return;
+    if (effectivelyLockedPerformerIds.has(selectedTransitionPerformerId)) return;
     const nextMotion: ObjectMotion = {
       ...selectedTransitionMotion,
       ...updates,
@@ -2037,6 +2073,7 @@ const App: React.FC = () => {
       },
     });
   }, [
+    effectivelyLockedPerformerIds,
     handleTransitionUpdate,
     selectedTransition,
     selectedTransitionMotion,
@@ -2045,6 +2082,7 @@ const App: React.FC = () => {
 
   const resetSelectedTransitionMotion = useCallback(() => {
     if (!selectedTransition || !selectedTransitionPerformerId) return;
+    if (effectivelyLockedPerformerIds.has(selectedTransitionPerformerId)) return;
     const nextObjectMotions = { ...selectedTransition.objectMotions };
     delete nextObjectMotions[selectedTransitionPerformerId];
     if (Object.keys(nextObjectMotions).length === 0) {
@@ -2056,6 +2094,7 @@ const App: React.FC = () => {
       objectMotions: nextObjectMotions,
     });
   }, [
+    effectivelyLockedPerformerIds,
     handleTransitionDelete,
     handleTransitionUpdate,
     selectedTransition,
@@ -2087,6 +2126,7 @@ const App: React.FC = () => {
   ), [currentFrameId, selectedTransitionFrames]);
 
   const handleRotationStart = useCallback((performerId: string) => {
+    if (effectivelyLockedPerformerIds.has(performerId)) return;
     const frameId = getRotationTargetFrameId();
     if (!frameId) return;
     const frame = frames.find((item) => item.id === frameId);
@@ -2097,9 +2137,10 @@ const App: React.FC = () => {
       performerId,
       before: frame.rotations?.[performerId] ?? performer.rotation ?? 0,
     };
-  }, [frames, getRotationTargetFrameId, performers]);
+  }, [effectivelyLockedPerformerIds, frames, getRotationTargetFrameId, performers]);
 
   const handleRotationChange = useCallback((performerId: string, rotation: number) => {
+    if (effectivelyLockedPerformerIds.has(performerId)) return;
     const frameId = getRotationTargetFrameId();
     if (!frameId || !Number.isFinite(rotation)) return;
     setFrames((previousFrames) => previousFrames.map((frame) => (
@@ -2107,9 +2148,10 @@ const App: React.FC = () => {
         ? { ...frame, rotations: { ...(frame.rotations ?? {}), [performerId]: rotation } }
         : frame
     )));
-  }, [getRotationTargetFrameId]);
+  }, [effectivelyLockedPerformerIds, getRotationTargetFrameId]);
 
   const handleFrameRotationChange = useCallback((frameId: string, performerId: string, rotation: number) => {
+    if (effectivelyLockedPerformerIds.has(performerId)) return;
     if (!Number.isFinite(rotation)) return;
     const frame = frames.find((item) => item.id === frameId);
     const performer = performers.find((item) => item.id === performerId);
@@ -2128,7 +2170,7 @@ const App: React.FC = () => {
       before,
       after: rotation,
     });
-  }, [frames, performers, pushUndoAction]);
+  }, [effectivelyLockedPerformerIds, frames, performers, pushUndoAction]);
 
   const handleRotationEnd = useCallback((performerId: string, rotation: number) => {
     handleRotationChange(performerId, rotation);
@@ -2145,7 +2187,8 @@ const App: React.FC = () => {
   }, [handleRotationChange, pushUndoAction]);
 
   const handleStageDragStart = useCallback((performerIds: string[]) => {
-    if (!currentFrameId || performerIds.length === 0) {
+    const editableIds = filterUnlockedPerformerIds(performerIds, effectivelyLockedPerformerIds);
+    if (!currentFrameId || editableIds.length === 0) {
       pendingMoveUndoRef.current = null;
       return;
     }
@@ -2156,7 +2199,7 @@ const App: React.FC = () => {
     }
     const before = clonePositionMap(
       Object.fromEntries(
-        performerIds
+        editableIds
           .map((id) => [id, currentFrame.positions[id]] as const)
           .filter((entry): entry is [string, Position] => entry[1] !== undefined)
       )
@@ -2164,7 +2207,7 @@ const App: React.FC = () => {
     pendingMoveUndoRef.current = Object.keys(before).length > 0
       ? { frameId: currentFrameId, performerIds: Object.keys(before), before }
       : null;
-  }, [currentFrameId, frames]);
+  }, [currentFrameId, effectivelyLockedPerformerIds, frames]);
 
   const handleStageDragEnd = useCallback((performerIds: string[], finalUpdates?: { id: string; pos: Position }[]) => {
     const snapshot = pendingMoveUndoRef.current;
@@ -2193,9 +2236,10 @@ const App: React.FC = () => {
   }, [currentFrameId, frames, pushUndoAction]);
 
   const handleApplyPreset = (coords: Position[]) => {
-    const targets = selectedPerformerIds.length > 0
+    const candidateTargets = selectedPerformerIds.length > 0
       ? selectedPerformerIds
       : performers.map(p => p.id);
+    const targets = filterUnlockedPerformerIds(candidateTargets, effectivelyLockedPerformerIds);
 
     const frame = frames.find(f => f.id === currentFrameId);
     if (!frame) return;
@@ -2203,7 +2247,9 @@ const App: React.FC = () => {
     // Use visible targets
     let effectiveTargets = targets;
     if (selectedPerformerIds.length === 0) {
-      effectiveTargets = performers.filter(p => frame.positions[p.id] !== undefined).map(p => p.id);
+      effectiveTargets = performers
+        .filter(p => frame.positions[p.id] !== undefined && !effectivelyLockedPerformerIds.has(p.id))
+        .map(p => p.id);
     }
 
     if (effectiveTargets.length === 0) return;
@@ -4808,6 +4854,7 @@ const App: React.FC = () => {
             onRemovePerformer={requestDeletePerformer}
             onRemovePerformers={requestDeletePerformers}
             onShowPerformersInAllFrames={handleShowPerformersInAllFrames}
+            onSetPerformersLocked={handleSetPerformersLocked}
             onUpdatePerformer={handleUpdatePerformer}
             onTogglePerformerInFrame={handleTogglePerformerInFrame}
             onDuplicateSelected={handleDuplicateSelected}
@@ -4837,6 +4884,7 @@ const App: React.FC = () => {
             onAddGroup={handleAddGroup}
             onRemoveGroup={requestDeleteGroup}
             onShowGroupInAllFrames={handleShowGroupInAllFrames}
+            onSetGroupLocked={handleSetGroupLocked}
             onUpdateGroup={handleUpdateGroup}
             onAddPerformersToGroup={handleAddPerformersToGroup}
             onRemovePerformersFromGroup={handleRemovePerformersFromGroup}
@@ -4941,6 +4989,7 @@ const App: React.FC = () => {
             <Stage
               performers={performers}
               performerGroups={performerGroups}
+              lockedPerformerIds={[...effectivelyLockedPerformerIds]}
               hiddenGroupIds={activeHiddenGroupIds}
               positions={displayedPositions}
               rotations={displayedRotations}
@@ -4975,6 +5024,7 @@ const App: React.FC = () => {
               selectedIds={selectedPerformerIds}
               onSelect={setSelectedPerformerIds}
               hiddenGroupIds={activeHiddenGroupIds}
+              lockedPerformerIds={[...effectivelyLockedPerformerIds]}
               onPositionChange={handlePositionChange}
               onDragStart={handleStageDragStart}
               onDragEnd={handleStageDragEnd}

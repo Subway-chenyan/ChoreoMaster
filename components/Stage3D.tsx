@@ -10,6 +10,7 @@ interface Stage3DProps {
   rotations?: Record<string, number>;
   selectedIds: string[];
   hiddenGroupIds?: string[];
+  lockedPerformerIds?: string[];
   onSelect: (ids: string[]) => void;
   onPositionChange: (updates: { id: string; pos: Position }[]) => void;
   onUpdatePerformer: (id: string, updates: Partial<Performer>) => void;
@@ -33,6 +34,7 @@ const Stage3D: React.FC<Stage3DProps> = ({
   rotations = {},
   selectedIds,
   hiddenGroupIds,
+  lockedPerformerIds = [],
   onSelect,
   onPositionChange,
   onUpdatePerformer,
@@ -72,6 +74,7 @@ const Stage3D: React.FC<Stage3DProps> = ({
           currentTime={currentTime}
           isPlaying={isPlaying}
           hiddenGroupIds={hiddenGroupIds}
+          lockedPerformerIds={lockedPerformerIds}
           gridScale={gridScale}
           snapToGrid={snapToGrid}
           showDirectionArrows={showDirectionArrows}
