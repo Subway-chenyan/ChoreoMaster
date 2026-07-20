@@ -317,6 +317,57 @@ Pure utility tests must cover selected, unselected, missing, and mixed-type
 initiators; a renderer regression must assert that both context-menu and drop
 paths call the batch callbacks.
 
+## Scenario: Sidebar Visibility and Reversible Deletion
+
+### 1. Scope / Trigger
+
+- Trigger: adding or changing performer, prop, group, or formation visibility/deletion actions in the editor sidebar or 3D editor.
+
+### 2. Signatures
+
+- `showPerformersInAllFrames(frames, performers, performerIds, additionalGroupIds?): Frame[]`
+- Delete requests: `{ type: 'performers'; ids: string[] } | { type: 'group'; id: string } | { type: 'frame'; id: string }`
+- Undo entry: `{ type: 'delete-editor-state'; before: EditorDeletionState; after: EditorDeletionState }`
+
+### 3. Contracts
+
+- The context menu must expose `在所有队形中显示` for performers, props, and groups.
+- Showing entities everywhere fills missing positions and rotations without overwriting existing formation coordinates, and removes relevant group IDs from every frame's `hiddenGroupIds`.
+- Clicking any sidebar/3D delete control must open the shared custom confirmation dialog; never use browser `confirm()`.
+- If the clicked entity belongs to the current multi-selection, deletion acts on the complete selection once. An unselected initiator deletes only itself.
+- Confirmed performer/prop deletion removes entity definitions, every frame position/rotation, transition motion, note, and stale selection reference.
+- Confirmed deletion must push one undo entry before applying state. Ctrl/Cmd+Z restores `before`; redo restores `after`.
+
+### 4. Validation & Error Matrix
+
+- Empty or unknown performer IDs -> do not open a dialog and do not push history.
+- Missing group/frame ID -> do not open a dialog.
+- Entity never placed in any frame -> use stage center `{ x: 50, y: 50 }` and its default rotation.
+- Deleting the final formation -> create a replacement `Opening` formation; undo restores the original state.
+
+### 5. Good / Base / Bad Cases
+
+- Good: three selected actors are confirmed and deleted as one action; one Ctrl/Cmd+Z restores all data.
+- Base: showing one prop everywhere preserves frames where it already has coordinates.
+- Bad: looping over selected IDs and calling a single-delete callback creates several dialogs or several undo entries.
+
+### 6. Tests Required
+
+- Unit-test position/rotation fallback and group visibility-mask removal.
+- Renderer regression asserts one batch delete callback, a custom confirmation dialog, no browser dialogs, and both undo/redo snapshot branches.
+- Run type-check, desktop tests, and the production renderer build.
+
+### 7. Wrong vs Correct
+
+```tsx
+// Wrong: multiple independent destructive actions and no confirmation.
+selectedIds.forEach((id) => onRemovePerformer(id));
+
+// Correct: one confirmed batch and one reversible history entry.
+onRemovePerformers(selectedIds);
+pushUndoAction({ type: 'delete-editor-state', before, after });
+```
+
 ---
 
 When implementing drag-and-drop for tree structures, use a library like `@dnd-kit`.

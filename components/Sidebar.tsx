@@ -20,6 +20,8 @@ interface SidebarProps {
     currentFrameId: string;
     onAddPerformer: (name: string, color: string, shape: PerformerShape, extra?: Partial<Performer>) => void;
     onRemovePerformer: (id: string) => void;
+    onRemovePerformers: (ids: string[]) => void;
+    onShowPerformersInAllFrames: (ids: string[]) => void;
     onUpdatePerformer: (id: string, updates: Partial<Performer>) => void;
     onTogglePerformerInFrame: (id: string) => void;
     onDuplicateSelected: () => void;
@@ -49,6 +51,7 @@ interface SidebarProps {
     // Group Management Props
     onAddGroup: (name: string, color: string, type?: 'performer' | 'prop') => string;
     onRemoveGroup: (groupId: string) => void;
+    onShowGroupInAllFrames: (groupId: string) => void;
     onUpdateGroup: (groupId: string, updates: Partial<PerformerGroup>) => void;
     onAddPerformersToGroup: (performerIds: string[], groupId: string) => void;
     onRemovePerformersFromGroup: (performerIds: string[]) => void;
@@ -172,6 +175,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     currentFrameId,
     onAddPerformer,
     onRemovePerformer,
+    onRemovePerformers,
+    onShowPerformersInAllFrames,
     onUpdatePerformer,
     onTogglePerformerInFrame,
     onDuplicateSelected,
@@ -201,6 +206,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     // Group Management Props
     onAddGroup,
     onRemoveGroup,
+    onShowGroupInAllFrames,
     onUpdateGroup,
     onAddPerformersToGroup,
     onRemovePerformersFromGroup,
@@ -261,7 +267,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const [newGroupColor, setNewGroupColor] = useState(DEFAULT_COLORS[0]);
     const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
     const [editingGroupName, setEditingGroupName] = useState<string>('');
-    const [pendingDeleteGroupId, setPendingDeleteGroupId] = useState<string | null>(null);
     const [contextMenuState, setContextMenuState] = useState<{
         show: boolean;
         x: number;
@@ -1242,7 +1247,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 <button onClick={onDuplicateSelected} className="flex-1 bg-blue-600/20 hover:bg-blue-600/40 border border-blue-500/50 text-blue-200 text-xs py-1.5 rounded flex items-center justify-center gap-2 transition-colors">
                                     <Copy size={12} /> 复制 ({selectedPerformerIds.length})
                                 </button>
-                                <button onClick={() => selectedPerformerIds.forEach(id => onRemovePerformer(id))} className="px-3 bg-red-900/20 hover:bg-red-900/40 border border-red-500/50 text-red-300 text-xs py-1.5 rounded transition-colors" title="删除选中">
+                                <button onClick={() => onRemovePerformers(selectedPerformerIds)} className="px-3 bg-red-900/20 hover:bg-red-900/40 border border-red-500/50 text-red-300 text-xs py-1.5 rounded transition-colors" title="删除选中">
                                     <Trash2 size={12} />
                                 </button>
                             </div>
@@ -1404,6 +1409,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 >
                                     移出分组
                                 </button>
+                                <div className="h-px bg-slate-700 my-1"></div>
+                                <button
+                                    onClick={() => {
+                                        onShowPerformersInAllFrames(contextMenuState.performerIds);
+                                        closeContextMenu();
+                                    }}
+                                    className="w-full px-3 py-2 text-left text-sm text-blue-300 hover:bg-slate-700 flex items-center gap-2"
+                                >
+                                    <Eye size={12} /> 在所有队形中显示
+                                </button>
                                 {onOpenNoteDrawer && contextMenuState.performerIds.length === 1 && (
                                     <>
                                         <div className="h-px bg-slate-700 my-1"></div>
@@ -1474,10 +1489,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 >
                                     <Palette size={12} /> 更改颜色
                                 </button>
+                                <button
+                                    onClick={() => {
+                                        if (contextMenuState.groupId) onShowGroupInAllFrames(contextMenuState.groupId);
+                                        closeContextMenu();
+                                    }}
+                                    className="w-full px-3 py-2 text-left text-sm text-blue-300 hover:bg-slate-700 flex items-center gap-2"
+                                >
+                                    <Eye size={12} /> 在所有队形中显示
+                                </button>
                                 <div className="h-px bg-slate-700 my-1"></div>
                                 <button
                                     onClick={() => {
-                                        setPendingDeleteGroupId(contextMenuState.groupId);
+                                        if (contextMenuState.groupId) onRemoveGroup(contextMenuState.groupId);
                                         closeContextMenu();
                                     }}
                                     className="w-full px-3 py-2 text-left text-sm text-red-400 hover:bg-slate-700"
@@ -1486,46 +1510,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 </button>
                             </>
                         )}
-                    </div>,
-                    document.body
-                )}
-
-                {pendingDeleteGroupId && createPortal(
-                    <div className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-                        <div
-                            role="dialog"
-                            aria-modal="true"
-                            aria-labelledby="delete-group-dialog-title"
-                            onKeyDown={(event) => {
-                                if (event.key === 'Escape') setPendingDeleteGroupId(null);
-                            }}
-                            className="w-full max-w-md rounded-2xl border border-red-500/30 bg-slate-900 p-5 text-white shadow-2xl"
-                        >
-                            <h2 id="delete-group-dialog-title" className="text-lg font-bold">删除分组？</h2>
-                            <p className="mt-3 text-sm leading-6 text-slate-300">
-                                删除“{performerGroups.find((group) => group.id === pendingDeleteGroupId)?.name ?? '未命名分组'}”后，组内演员或道具将移至未分组。
-                            </p>
-                            <div className="mt-5 flex justify-end gap-3">
-                                <button
-                                    type="button"
-                                    onClick={() => setPendingDeleteGroupId(null)}
-                                    autoFocus
-                                    className="rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-200 hover:bg-slate-800"
-                                >
-                                    取消
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        onRemoveGroup(pendingDeleteGroupId);
-                                        setPendingDeleteGroupId(null);
-                                    }}
-                                    className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500"
-                                >
-                                    确认删除
-                                </button>
-                            </div>
-                        </div>
                     </div>,
                     document.body
                 )}

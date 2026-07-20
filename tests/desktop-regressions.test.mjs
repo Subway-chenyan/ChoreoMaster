@@ -115,7 +115,7 @@ test('desktop project lifecycle is durable, non-destructive, and uses custom dia
   assert.match(transfers, /window\.electronAPI\.project\.importChoreography\(\)/);
   assert.match(contract, /export interface ProjectMeta/);
   assert.match(browser, /aria-labelledby="delete-project-dialog-title"/);
-  assert.match(sidebar, /aria-labelledby="delete-group-dialog-title"/);
+  assert.match(app, /aria-labelledby="delete-confirmation-title"/);
   assert.doesNotMatch(`${app}\n${browser}\n${sidebar}`, /window\.(?:alert|confirm|prompt)\(/);
 });
 
@@ -784,4 +784,32 @@ test('desktop release preserves builder identity and commits stable pointers in 
 
   assert.match(rollback, /group: desktop-release-stable/);
   assert.match(rollback, /cos:\/\/production\/downloads\/metadata\/\$VERSION\/latest\.yml/);
+});
+
+test('sidebar deletion is confirmed centrally and selected entities delete as one action', async () => {
+  const [app, sidebar] = await Promise.all([
+    read('App.tsx'),
+    read('components/Sidebar.tsx'),
+  ]);
+
+  assert.match(app, /type PendingDeleteRequest[\s\S]*type: 'performers'[\s\S]*type: 'group'[\s\S]*type: 'frame'/);
+  assert.match(app, /pendingDeleteRequest && pendingDeleteCopy/);
+  assert.match(app, /删除后可使用 Ctrl\/Cmd \+ Z 撤销/);
+  assert.doesNotMatch(app, /window\.(?:alert|confirm|prompt)\(/);
+  assert.match(sidebar, /onRemovePerformers\(selectedPerformerIds\)/);
+  assert.doesNotMatch(sidebar, /selectedPerformerIds\.forEach\([^\n]*onRemovePerformer/);
+});
+
+test('performer group visibility and deletion undo contracts remain wired', async () => {
+  const [app, sidebar] = await Promise.all([
+    read('App.tsx'),
+    read('components/Sidebar.tsx'),
+  ]);
+
+  assert.match(sidebar, /在所有队形中显示/);
+  assert.match(sidebar, /onShowPerformersInAllFrames\(contextMenuState\.performerIds\)/);
+  assert.match(sidebar, /onShowGroupInAllFrames\(contextMenuState\.groupId\)/);
+  assert.match(app, /type: 'delete-editor-state'/);
+  assert.match(app, /applyDeletionState\(last\.before\)/);
+  assert.match(app, /applyDeletionState\(last\.after\)/);
 });

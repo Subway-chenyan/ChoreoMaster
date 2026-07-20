@@ -81,6 +81,7 @@ import {
 } from './utils/cross-project-clipboard';
 import { createDesktopBinaryExportStream, type DesktopBinaryExportStream } from './utils/desktop-binary-export';
 import { createThrottledProgressReporter } from './utils/export-progress';
+import { showPerformersInAllFrames } from './utils/performer-visibility';
 
 const DEFAULT_FRAME: Frame = {
   id: 'start-frame',
@@ -227,11 +228,35 @@ type RotatePerformerUndoAction = {
   after: number;
 };
 
+type EditorDeletionState = {
+  performers: Performer[];
+  performerGroups: PerformerGroup[];
+  frames: Frame[];
+  transitions: TransitionSegment[];
+  performerNotes: PerformerNote[];
+  selectedPerformerIds: string[];
+  currentFrameId: string;
+  selectedTransitionId: string | null;
+  selectedTransitionPerformerId: string | null;
+};
+
+type DeleteEditorStateUndoAction = {
+  type: 'delete-editor-state';
+  before: EditorDeletionState;
+  after: EditorDeletionState;
+};
+
+type PendingDeleteRequest =
+  | { type: 'performers'; ids: string[] }
+  | { type: 'group'; id: string }
+  | { type: 'frame'; id: string };
+
 type UndoAction = MovePerformersUndoAction
   | PastePerformersUndoAction
   | PasteFrameUndoAction
   | PasteFormationUndoAction
-  | RotatePerformerUndoAction;
+  | RotatePerformerUndoAction
+  | DeleteEditorStateUndoAction;
 
 const getSupportedVideoEncoderConfig = async (
   width: number,
@@ -408,6 +433,7 @@ const App: React.FC = () => {
   const [isCompactLayout, setIsCompactLayout] = useState(() => window.matchMedia('(max-width: 1100px)').matches);
   const [undoStack, setUndoStack] = useState<UndoAction[]>([]);
   const [redoStack, setRedoStack] = useState<UndoAction[]>([]);
+  const [pendingDeleteRequest, setPendingDeleteRequest] = useState<PendingDeleteRequest | null>(null);
   const [stageViewportHeight, setStageViewportHeight] = useState(0);
   const pendingMoveUndoRef = useRef<{
     frameId: string;
@@ -609,6 +635,49 @@ const App: React.FC = () => {
     setUndoStack((prev) => [...prev, action]);
     setRedoStack([]);
   }, []);
+
+  const createDeletionState = useCallback((overrides: Partial<EditorDeletionState> = {}): EditorDeletionState => (
+    structuredClone({
+      performers,
+      performerGroups,
+      frames,
+      transitions,
+      performerNotes,
+      selectedPerformerIds,
+      currentFrameId,
+      selectedTransitionId,
+      selectedTransitionPerformerId,
+      ...overrides,
+    })
+  ), [
+    currentFrameId,
+    frames,
+    performerGroups,
+    performerNotes,
+    performers,
+    selectedPerformerIds,
+    selectedTransitionId,
+    selectedTransitionPerformerId,
+    transitions,
+  ]);
+
+  const applyDeletionState = useCallback((state: EditorDeletionState): void => {
+    setPerformers(structuredClone(state.performers));
+    setPerformerGroups(structuredClone(state.performerGroups));
+    setFrames(structuredClone(state.frames));
+    setTransitions(structuredClone(state.transitions));
+    setPerformerNotes(structuredClone(state.performerNotes));
+    setSelectedPerformerIds([...state.selectedPerformerIds]);
+    setCurrentFrameId(state.currentFrameId);
+    setSelectedTransitionId(state.selectedTransitionId);
+    setSelectedTransitionPerformerId(state.selectedTransitionPerformerId);
+  }, []);
+
+  const commitDeletion = useCallback((after: EditorDeletionState): void => {
+    const before = createDeletionState();
+    pushUndoAction({ type: 'delete-editor-state', before, after });
+    applyDeletionState(after);
+  }, [applyDeletionState, createDeletionState, pushUndoAction]);
 
   const removePerformerIdsFromFrames = useCallback((targetIds: string[]) => {
     const idSet = new Set(targetIds);
@@ -820,16 +889,43 @@ const App: React.FC = () => {
     }));
   };
 
-  const handleRemovePerformer = (id: string) => {
-    setPerformers(performers.filter(p => p.id !== id));
-    setSelectedPerformerIds(selectedPerformerIds.filter(pid => pid !== id));
-    setTransitions((prev) => prev.map((transition) => {
-      if (!transition.objectMotions[id]) return transition;
-      const nextObjectMotions = { ...transition.objectMotions };
-      delete nextObjectMotions[id];
-      return { ...transition, objectMotions: nextObjectMotions };
-    }));
-    setPerformerNotes(prev => prev.filter(n => n.performerId !== id));
+  const deletePerformers = (performerIds: string[]) => {
+    const targetIds = new Set(performerIds.filter((id) => performers.some((performer) => performer.id === id)));
+    if (targetIds.size === 0) return;
+    const nextFrames = frames.map((frame) => {
+      const positions = { ...frame.positions };
+      const rotations = { ...(frame.rotations ?? {}) };
+      targetIds.forEach((id) => {
+        delete positions[id];
+        delete rotations[id];
+      });
+      return { ...frame, positions, rotations };
+    });
+    const nextTransitions = transitions.map((transition) => {
+      const objectMotions = { ...transition.objectMotions };
+      targetIds.forEach((id) => delete objectMotions[id]);
+      return { ...transition, objectMotions };
+    });
+    const after = createDeletionState({
+      performers: performers.filter((performer) => !targetIds.has(performer.id)),
+      frames: nextFrames,
+      transitions: nextTransitions,
+      performerNotes: performerNotes.filter((note) => !targetIds.has(note.performerId)),
+      selectedPerformerIds: selectedPerformerIds.filter((id) => !targetIds.has(id)),
+      selectedTransitionPerformerId: selectedTransitionPerformerId && targetIds.has(selectedTransitionPerformerId)
+        ? null
+        : selectedTransitionPerformerId,
+    });
+    commitDeletion(after);
+  };
+
+  const requestDeletePerformers = (performerIds: string[]) => {
+    const ids = Array.from(new Set(performerIds)).filter((id) => performers.some((performer) => performer.id === id));
+    if (ids.length > 0) setPendingDeleteRequest({ type: 'performers', ids });
+  };
+
+  const requestDeletePerformer = (performerId: string) => {
+    requestDeletePerformers(selectedPerformerIds.includes(performerId) ? selectedPerformerIds : [performerId]);
   };
 
   const handleUpdatePerformer = (id: string, updates: Partial<Performer>) => {
@@ -951,15 +1047,25 @@ const App: React.FC = () => {
     return newGroup.id;
   };
 
-  const handleRemoveGroup = (groupId: string) => {
-    // Remove group and unassign all performers from this group
-    setPerformers(prev => prev.map(p => p.groupId === groupId ? { ...p, groupId: undefined } : p));
-    setPerformerGroups(prev => prev.filter(g => g.id !== groupId));
-    // Also remove from all frames' hiddenGroupIds
-    setFrames(prev => prev.map(f => ({
-      ...f,
-      hiddenGroupIds: f.hiddenGroupIds?.filter(id => id !== groupId)
-    })));
+  const deleteGroup = (groupId: string) => {
+    if (!performerGroups.some((group) => group.id === groupId)) return;
+    const after = createDeletionState({
+      performers: performers.map((performer) => (
+        performer.groupId === groupId ? { ...performer, groupId: undefined } : performer
+      )),
+      performerGroups: performerGroups.filter((group) => group.id !== groupId),
+      frames: frames.map((frame) => ({
+        ...frame,
+        hiddenGroupIds: (frame.hiddenGroupIds ?? []).filter((id) => id !== groupId),
+      })),
+    });
+    commitDeletion(after);
+  };
+
+  const requestDeleteGroup = (groupId: string) => {
+    if (performerGroups.some((group) => group.id === groupId)) {
+      setPendingDeleteRequest({ type: 'group', id: groupId });
+    }
   };
 
   const handleUpdateGroup = (groupId: string, updates: Partial<PerformerGroup>) => {
@@ -1005,6 +1111,19 @@ const App: React.FC = () => {
   const handleSelectGroupPerformers = (groupId: string) => {
     const groupPerformerIds = performers.filter(p => p.groupId === groupId).map(p => p.id);
     setSelectedPerformerIds(groupPerformerIds);
+  };
+
+  const handleShowPerformersInAllFrames = (performerIds: string[]) => {
+    setFrames((previousFrames) => showPerformersInAllFrames(previousFrames, performers, performerIds));
+  };
+
+  const handleShowGroupInAllFrames = (groupId: string) => {
+    const performerIds = performers
+      .filter((performer) => performer.groupId === groupId)
+      .map((performer) => performer.id);
+    setFrames((previousFrames) => (
+      showPerformersInAllFrames(previousFrames, performers, performerIds, [groupId])
+    ));
   };
 
   // LED 内容上传处理
@@ -1570,15 +1689,15 @@ const App: React.FC = () => {
     const ids = new Set(selectedPerformerIds);
     const currentFrame = frames.find(fr => fr.id === currentFrameId);
     if (!currentFrame) return;
-    setFrames(prev => prev.map(f => {
+    const nextFrames = frames.map(f => {
       if (f.id !== currentFrameId) return f;
-      const newPositions = { ...f.positions } as Record<string, Position>;
+      const newPositions = { ...f.positions };
       const newRotations = { ...(f.rotations ?? {}) };
-      Object.keys(newPositions).forEach(pid => { if (ids.has(pid)) delete (newPositions as any)[pid]; });
+      Object.keys(newPositions).forEach(pid => { if (ids.has(pid)) delete newPositions[pid]; });
       ids.forEach((id) => delete newRotations[id]);
       return { ...f, positions: newPositions, rotations: newRotations };
-    }));
-    setSelectedPerformerIds([]);
+    });
+    commitDeletion(createDeletionState({ frames: nextFrames, selectedPerformerIds: [] }));
   };
 
   // Toggle presence in the CURRENT frame
@@ -2278,33 +2397,82 @@ const App: React.FC = () => {
     setSelectedTransitionPerformerId(null);
   };
 
-  const handleDeleteFrame = (id: string) => {
+  const deleteFrame = (id: string) => {
     if (frames.length <= 0) return;
     if (isPlaying) handlePlayPause();
-    const filtered = frames.filter(f => f.id !== id);
-    setPerformerNotes(prev => prev.filter(n => n.frameId !== id));
-    setTransitions((prev) => prev.filter((transition) => (
+    let nextFrames = frames.filter(f => f.id !== id);
+    const nextNotes = performerNotes.filter((note) => note.frameId !== id);
+    const nextTransitions = transitions.filter((transition) => (
       transition.fromFrameId !== id && transition.toFrameId !== id
-    )));
-    if (selectedTransitionId && transitions.some((transition) => (
+    ));
+    const deletedSelectedTransition = selectedTransitionId && transitions.some((transition) => (
       transition.id === selectedTransitionId
       && (transition.fromFrameId === id || transition.toFrameId === id)
-    ))) {
-      setSelectedTransitionId(null);
-      setSelectedTransitionPerformerId(null);
-    }
-    if (filtered.length === 0) {
+    ));
+    let nextCurrentFrameId = currentFrameId;
+    if (nextFrames.length === 0) {
       const nf: Frame = { id: generateId(), name: 'Opening', startTime: 0, duration: 2000, positions: {}, rotations: {} };
-      setFrames([nf]);
-      setTransitions([]);
-      setCurrentFrameId(nf.id);
-      return;
+      nextFrames = [nf];
+      nextCurrentFrameId = nf.id;
+    } else if (currentFrameId === id) {
+      nextCurrentFrameId = nextFrames[nextFrames.length - 1].id;
     }
-    setFrames(filtered);
-    if (currentFrameId === id) {
-      setCurrentFrameId(filtered[filtered.length - 1].id);
+    const after = createDeletionState({
+      frames: nextFrames,
+      transitions: nextTransitions,
+      performerNotes: nextNotes,
+      currentFrameId: nextCurrentFrameId,
+      selectedTransitionId: deletedSelectedTransition ? null : selectedTransitionId,
+      selectedTransitionPerformerId: deletedSelectedTransition ? null : selectedTransitionPerformerId,
+    });
+    commitDeletion(after);
+  };
+
+  const requestDeleteFrame = (id: string) => {
+    if (frames.some((frame) => frame.id === id)) {
+      setPendingDeleteRequest({ type: 'frame', id });
     }
   };
+
+  const confirmPendingDeletion = () => {
+    const request = pendingDeleteRequest;
+    if (!request) return;
+    setPendingDeleteRequest(null);
+    if (request.type === 'performers') {
+      deletePerformers(request.ids);
+    } else if (request.type === 'group') {
+      deleteGroup(request.id);
+    } else {
+      deleteFrame(request.id);
+    }
+  };
+
+  const pendingDeleteCopy = useMemo(() => {
+    if (!pendingDeleteRequest) return null;
+    if (pendingDeleteRequest.type === 'performers') {
+      const targets = performers.filter((performer) => pendingDeleteRequest.ids.includes(performer.id));
+      const kindLabel = targets.every((performer) => performer.type === 'prop')
+        ? '道具'
+        : targets.every((performer) => performer.type !== 'prop') ? '演员' : '演员/道具';
+      const names = targets.slice(0, 3).map((performer) => performer.name).join('、');
+      return {
+        title: `删除${targets.length > 1 ? `${targets.length}个` : ''}${kindLabel}？`,
+        message: `将从所有队形中永久删除${names ? `“${names}${targets.length > 3 ? '…' : ''}”` : '所选内容'}及其动作和笔记。`,
+      };
+    }
+    if (pendingDeleteRequest.type === 'group') {
+      const group = performerGroups.find((candidate) => candidate.id === pendingDeleteRequest.id);
+      return {
+        title: '删除分组？',
+        message: `删除“${group?.name ?? '未命名分组'}”后，组内演员或道具将移至未分组。`,
+      };
+    }
+    const frame = frames.find((candidate) => candidate.id === pendingDeleteRequest.id);
+    return {
+      title: '删除队形？',
+      message: `将删除“${frame?.name ?? '未命名队形'}”及其关联过渡和队形笔记。`,
+    };
+  }, [frames, pendingDeleteRequest, performerGroups, performers]);
 
   const handleUndo = () => {
     const last = undoStack[undoStack.length - 1];
@@ -2345,6 +2513,8 @@ const App: React.FC = () => {
       setFrames((prev) => prev.filter((frame) => frame.id !== last.frame.id));
       setSelectedPerformerIds(last.previousSelectedIds);
       if (last.previousCurrentFrameId) setCurrentFrameId(last.previousCurrentFrameId);
+    } else if (last.type === 'delete-editor-state') {
+      applyDeletionState(last.before);
     }
     setRedoStack(prev => [...prev, last]);
   };
@@ -2390,6 +2560,8 @@ const App: React.FC = () => {
       });
       setCurrentFrameId(last.frame.id);
       setSelectedPerformerIds(last.performers.map((performer) => performer.id));
+    } else if (last.type === 'delete-editor-state') {
+      applyDeletionState(last.after);
     }
     setUndoStack(prev => [...prev, last]);
   };
@@ -2897,7 +3069,7 @@ const App: React.FC = () => {
         if (selectedPerformerIds.length > 0) {
           handleDeleteSelectedPerformers();
         } else if (currentFrameId) {
-          handleDeleteFrame(currentFrameId);
+          requestDeleteFrame(currentFrameId);
         }
         return;
       }
@@ -2958,6 +3130,10 @@ const App: React.FC = () => {
     pastePerformers,
     pasteFormation,
     handlePlayPause,
+    handleDeleteSelectedPerformers,
+    handleUndo,
+    handleRedo,
+    requestDeleteFrame,
     currentFrameId,
   ]);
 
@@ -4629,7 +4805,9 @@ const App: React.FC = () => {
             frames={frames}
             currentFrameId={currentFrameId}
             onAddPerformer={handleAddPerformer}
-            onRemovePerformer={handleRemovePerformer}
+            onRemovePerformer={requestDeletePerformer}
+            onRemovePerformers={requestDeletePerformers}
+            onShowPerformersInAllFrames={handleShowPerformersInAllFrames}
             onUpdatePerformer={handleUpdatePerformer}
             onTogglePerformerInFrame={handleTogglePerformerInFrame}
             onDuplicateSelected={handleDuplicateSelected}
@@ -4648,7 +4826,7 @@ const App: React.FC = () => {
             musicName={musicName}
             onSelectFrame={handleSelectFrame}
             onAddFrame={handleAddFrame}
-            onDeleteFrame={handleDeleteFrame}
+            onDeleteFrame={requestDeleteFrame}
             onDuplicateFrame={handleDuplicateFrame}
             onReorderFrame={() => { }} // Disabled
             onResetProject={handleResetProject}
@@ -4657,7 +4835,8 @@ const App: React.FC = () => {
             widthPx={sidebarWidth}
             // Group Management Props
             onAddGroup={handleAddGroup}
-            onRemoveGroup={handleRemoveGroup}
+            onRemoveGroup={requestDeleteGroup}
+            onShowGroupInAllFrames={handleShowGroupInAllFrames}
             onUpdateGroup={handleUpdateGroup}
             onAddPerformersToGroup={handleAddPerformersToGroup}
             onRemovePerformersFromGroup={handleRemovePerformersFromGroup}
@@ -4800,7 +4979,7 @@ const App: React.FC = () => {
               onDragStart={handleStageDragStart}
               onDragEnd={handleStageDragEnd}
               onUpdatePerformer={handleUpdatePerformer}
-              onRemovePerformer={handleRemovePerformer}
+              onRemovePerformer={requestDeletePerformer}
               stageConfig={stageConfig}
               mediaCache={mediaCache}
               currentTime={currentTime}
@@ -5246,6 +5425,43 @@ const App: React.FC = () => {
       {saveSuccessVisible && (
         <div role="status" aria-live="polite" className="fixed right-4 top-4 z-[60001] rounded-lg border border-emerald-400/40 bg-emerald-950/95 px-4 py-3 text-sm font-medium text-emerald-100 shadow-2xl">
           保存成功
+        </div>
+      )}
+
+      {pendingDeleteRequest && pendingDeleteCopy && (
+        <div
+          className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') setPendingDeleteRequest(null);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-confirmation-title"
+            className="w-full max-w-md rounded-2xl border border-red-500/30 bg-slate-900 p-5 text-white shadow-2xl"
+          >
+            <h2 id="delete-confirmation-title" className="text-lg font-bold">{pendingDeleteCopy.title}</h2>
+            <p className="mt-3 text-sm leading-6 text-slate-300">{pendingDeleteCopy.message}</p>
+            <p className="mt-2 text-xs text-slate-500">删除后可使用 Ctrl/Cmd + Z 撤销。</p>
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setPendingDeleteRequest(null)}
+                autoFocus
+                className="rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-200 hover:bg-slate-800"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={confirmPendingDeletion}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500"
+              >
+                确认删除
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
