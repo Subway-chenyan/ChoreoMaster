@@ -33,7 +33,7 @@ const result: AuthResponse = await window.api.auth.login(data);
 
 ### File Export Boundary
 
-The renderer must never receive a reusable filesystem write capability. Export IPC combines the native save dialog and write in one main-process handler.
+The renderer must never receive a reusable path-based filesystem write capability. Small exports combine the native save dialog and write in one main-process handler. Large generated files use a scoped, opaque export session created by the native save dialog.
 
 ```typescript
 saveTextFile(defaultName, content, filters): Promise<string | null>;
@@ -41,6 +41,72 @@ saveBinaryFile(defaultName, bytes, filters): Promise<string | null>;
 ```
 
 Do not expose `readFile(path)`, `writeFile(path, content)`, or `writeBinaryFile(path, bytes)` through preload. Main-process project operations must validate project IDs and resolve all paths beneath managed storage.
+
+## Scenario: Streaming Large Desktop Exports
+
+### 1. Scope / Trigger
+
+- Trigger: encoded video or another generated desktop export can grow with project duration and may exceed comfortable renderer memory limits.
+
+### 2. Signatures
+
+- `beginBinaryFile(defaultName, filters): Promise<string | null>`
+- `writeBinaryFileChunk(sessionId, content, position): Promise<void>`
+- `closeBinaryFile(sessionId): Promise<void>`
+- `abortBinaryFile(sessionId): Promise<void>`
+- Renderer wrapper: `createDesktopBinaryExportStream(defaultName, extension): Promise<DesktopBinaryExportStream | null>`
+
+### 3. Contracts
+
+- `beginBinaryFile` must show the native save dialog, open only the chosen file, and return an opaque session ID rather than a filesystem path.
+- The renderer must copy muxer-owned bytes before queuing an asynchronous IPC write because chunk buffers may be reused after the callback returns.
+- Writes must stay ordered and support explicit byte positions so MP4 finalization can rewrite earlier headers.
+- Renderer encoding must periodically await the write chain so slow storage cannot create an unbounded in-memory IPC backlog.
+- `closeBinaryFile` preserves the completed file. `abortBinaryFile` closes the handle and removes the partial file.
+- Window destruction and every export error path must abort remaining sessions.
+- Desktop video export must not select `ArrayBufferTarget`; that target remains browser-only when no streaming file handle is available.
+
+### 4. Validation & Error Matrix
+
+- Native save dialog cancelled -> return `null`; do not start encoding or create a file.
+- Unknown or completed session ID -> reject with a session-ended error.
+- Negative, fractional, or unsafe write position -> reject before touching the file.
+- Short filesystem write -> continue until the complete chunk is written; zero-byte write -> reject.
+- Encode, mux, IPC, or disk failure -> abort the session and delete the partial file.
+- Normal finalization -> flush queued writes, close the file, and invalidate the session.
+
+### 5. Good/Base/Bad Cases
+
+- Good: a 30-minute MP4 is encoded in bounded chunks and written directly to disk while MP4 header rewrites use their supplied positions.
+- Base: cancelling the save dialog leaves export state idle and creates no file.
+- Bad: a long desktop export uses `ArrayBufferTarget`, holds the entire MP4 in renderer memory, fails, and reports the failure as unsupported hardware.
+
+### 6. Tests Required
+
+- Unit test asserts queued bytes are copied, preserve call order, and retain exact byte positions.
+- Unit test asserts a rejected chunk write can be aborted and invokes partial-file cleanup.
+- Desktop regression asserts preload and main handlers expose begin/write/close/abort together.
+- Desktop regression asserts 2D and 3D export use `StreamTarget`, periodically flush, and reserve `ArrayBufferTarget` for non-desktop fallback.
+- Run Electron type-check, desktop tests, and the renderer production build.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```typescript
+const target = new ArrayBufferTarget();
+// A long encoded video remains in renderer memory until finalization.
+```
+
+#### Correct
+
+```typescript
+const stream = await createDesktopBinaryExportStream('export.mp4', 'mp4');
+const target = new StreamTarget({
+  onData: (data, position) => stream?.enqueue(data, position),
+  chunked: true,
+});
+```
 
 ### Preload API Structure
 

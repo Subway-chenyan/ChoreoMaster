@@ -158,22 +158,30 @@ test('3D labels stay below application overlays', async () => {
   assert.match(prop, /zIndexRange=\{\[40, 0\]\}/);
 });
 
-test('desktop export uses native binary save dialog and bounded recording waits', async () => {
-  const [app, preload, ipc, offline] = await Promise.all([
+test('desktop export streams encoded chunks to disk and bounds recording waits', async () => {
+  const [app, preload, ipc, offline, desktopStream] = await Promise.all([
     read('App.tsx'),
     read('electron/preload.cts'),
     read('electron/ipc-handlers.ts'),
     read('utils/OfflineRenderer3D.ts'),
+    read('utils/desktop-binary-export.ts'),
   ]);
 
-  assert.match(preload, /saveBinaryFile: \(defaultName: string, content: Uint8Array/);
-  assert.match(ipc, /ipcMain\.handle\(\s*'dialog:saveBinaryFile'/);
+  assert.match(preload, /beginBinaryFile: \(defaultName: string, filters\?: Electron\.FileFilter\[\]\)/);
+  assert.match(preload, /writeBinaryFileChunk: \(sessionId: string, content: Uint8Array, position: number\)/);
+  assert.match(ipc, /ipcMain\.handle\(\s*'dialog:beginBinaryFile'/);
+  assert.match(ipc, /ipcMain\.handle\(\s*'dialog:writeBinaryFileChunk'/);
+  assert.match(ipc, /ipcMain\.handle\('dialog:closeBinaryFile'/);
+  assert.match(ipc, /ipcMain\.handle\('dialog:abortBinaryFile'/);
   assert.match(app, /const isDesktopElectron = Boolean\(window\.electronAPI\?\.isElectron\)/);
   assert.match(app, /const hasWebCodecs = typeof VideoEncoder !== 'undefined'/);
-  assert.match(app, /saveBlobToElectron\(downloadBaseName, activeRealtimeFormat\.extension, blob\)/);
-  assert.match(app, /const \{ Muxer, ArrayBufferTarget, FileSystemWritableFileStreamTarget \} = await import\('mp4-muxer'\)/);
-  assert.match(app, /const arrayBufferTarget = !mp4Writable \? new ArrayBufferTarget\(\) : null/);
+  assert.match(app, /createDesktopBinaryExportStream\(/g);
+  assert.match(app, /const \{ Muxer, ArrayBufferTarget, FileSystemWritableFileStreamTarget, StreamTarget \} = await import\('mp4-muxer'\)/g);
+  assert.match(app, /const arrayBufferTarget = !mp4Writable && !desktopTarget \? new ArrayBufferTarget\(\) : null/g);
   assert.match(app, /const bytes = new Uint8Array\(arrayBufferTarget\.buffer\)/);
+  assert.match(app, /await activeDesktopExport\?\.flush\(\)/g);
+  assert.match(desktopStream, /const ownedData = data\.slice\(\)/);
+  assert.match(desktopStream, /writeBinaryFileChunk\(sessionId, ownedData, position\)/);
   assert.match(app, /Math\.max\(totalMs \+ 15000, 30000\), '3D 实时录制'/);
   assert.match(app, /const ledRenderer = isDesktopElectron \? null : await create2DExportLedRenderer\(\)/);
   assert.match(app, /setExportProgress\(0\.02\)/);
@@ -193,8 +201,9 @@ test('video export probes mobile-safe codecs and stops feeding a closed encoder'
   assert.match(app, /const canFastExport = videoEncoderConfig != null/g);
   assert.match(app, /if \(videoEncoderError\) throw videoEncoderError/g);
   assert.match(app, /if \(videoEncoder\?\.state === 'closed'\)/g);
-  assert.match(app, /stream\.getTracks\(\)\.forEach\(\(track\) => track\.stop\(\)\);\s+ledRenderer\?\.dispose\(\)/);
-  assert.match(app, /stream\.getTracks\(\)\.forEach\(\(track\) => track\.stop\(\)\);\s+offline\.dispose\(\)/);
+  assert.match(app, /stream\.getTracks\(\)\.forEach\(\(track\) => track\.stop\(\)\)/g);
+  assert.match(app, /ledRenderer\?\.dispose\(\)/g);
+  assert.match(app, /offline\.dispose\(\)/g);
   assert.doesNotMatch(app, /alert\('高速导出失败/);
 });
 

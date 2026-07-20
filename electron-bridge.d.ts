@@ -17,6 +17,10 @@ declare global {
       // Dialog operations
       saveTextFile: (defaultName: string, content: string, filters?: Electron.FileFilter[]) => Promise<string | null>;
       saveBinaryFile: (defaultName: string, content: Uint8Array, filters?: Electron.FileFilter[]) => Promise<string | null>;
+      beginBinaryFile: (defaultName: string, filters?: Electron.FileFilter[]) => Promise<string | null>;
+      writeBinaryFileChunk: (sessionId: string, content: Uint8Array, position: number) => Promise<void>;
+      closeBinaryFile: (sessionId: string) => Promise<void>;
+      abortBinaryFile: (sessionId: string) => Promise<void>;
       openFile: (filters: Electron.FileFilter[]) => Promise<string | null>;
       openMultipleFiles: (filters: Electron.FileFilter[]) => Promise<string[]>;
       selectDirectory: () => Promise<string | null>;

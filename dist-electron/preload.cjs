@@ -6,6 +6,10 @@ const electronAPI = {
     // Dialog operations
     saveTextFile: (defaultName, content, filters) => electron_1.ipcRenderer.invoke('dialog:saveTextFile', defaultName, content, filters),
     saveBinaryFile: (defaultName, content, filters) => electron_1.ipcRenderer.invoke('dialog:saveBinaryFile', defaultName, content, filters),
+    beginBinaryFile: (defaultName, filters) => electron_1.ipcRenderer.invoke('dialog:beginBinaryFile', defaultName, filters),
+    writeBinaryFileChunk: (sessionId, content, position) => electron_1.ipcRenderer.invoke('dialog:writeBinaryFileChunk', sessionId, content, position),
+    closeBinaryFile: (sessionId) => electron_1.ipcRenderer.invoke('dialog:closeBinaryFile', sessionId),
+    abortBinaryFile: (sessionId) => electron_1.ipcRenderer.invoke('dialog:abortBinaryFile', sessionId),
     openFile: (filters) => electron_1.ipcRenderer.invoke('dialog:openFile', filters),
     openMultipleFiles: (filters) => electron_1.ipcRenderer.invoke('dialog:openMultipleFiles', filters),
     selectDirectory: () => electron_1.ipcRenderer.invoke('dialog:selectDirectory'),

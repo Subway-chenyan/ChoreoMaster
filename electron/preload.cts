@@ -17,6 +17,10 @@ export interface ElectronAPI {
   // Dialog operations
   saveTextFile: (defaultName: string, content: string, filters?: Electron.FileFilter[]) => Promise<string | null>;
   saveBinaryFile: (defaultName: string, content: Uint8Array, filters?: Electron.FileFilter[]) => Promise<string | null>;
+  beginBinaryFile: (defaultName: string, filters?: Electron.FileFilter[]) => Promise<string | null>;
+  writeBinaryFileChunk: (sessionId: string, content: Uint8Array, position: number) => Promise<void>;
+  closeBinaryFile: (sessionId: string) => Promise<void>;
+  abortBinaryFile: (sessionId: string) => Promise<void>;
   openFile: (filters: Electron.FileFilter[]) => Promise<string | null>;
   openMultipleFiles: (filters: Electron.FileFilter[]) => Promise<string[]>;
   selectDirectory: () => Promise<string | null>;
@@ -67,6 +71,14 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.invoke('dialog:saveTextFile', defaultName, content, filters),
   saveBinaryFile: (defaultName: string, content: Uint8Array, filters?: Electron.FileFilter[]) =>
     ipcRenderer.invoke('dialog:saveBinaryFile', defaultName, content, filters),
+  beginBinaryFile: (defaultName: string, filters?: Electron.FileFilter[]) =>
+    ipcRenderer.invoke('dialog:beginBinaryFile', defaultName, filters),
+  writeBinaryFileChunk: (sessionId: string, content: Uint8Array, position: number) =>
+    ipcRenderer.invoke('dialog:writeBinaryFileChunk', sessionId, content, position),
+  closeBinaryFile: (sessionId: string) =>
+    ipcRenderer.invoke('dialog:closeBinaryFile', sessionId),
+  abortBinaryFile: (sessionId: string) =>
+    ipcRenderer.invoke('dialog:abortBinaryFile', sessionId),
   openFile: (filters: Electron.FileFilter[]) =>
     ipcRenderer.invoke('dialog:openFile', filters),
   openMultipleFiles: (filters: Electron.FileFilter[]) =>

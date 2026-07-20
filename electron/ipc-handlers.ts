@@ -2,6 +2,7 @@ import { ipcMain, dialog, BrowserWindow, app, net, shell } from 'electron';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { randomUUID } from 'crypto';
 import type {
   AppSettings,
   ProjectAssetKind,
@@ -69,6 +70,32 @@ async function saveSettings(settings: AppSettings): Promise<void> {
 }
 
 export function registerIpcHandlers(mainWindow: BrowserWindow): void {
+  type BinaryExportSession = {
+    filePath: string;
+    handle: fs.FileHandle;
+  };
+  const binaryExportSessions = new Map<string, BinaryExportSession>();
+
+  const getBinaryExportSession = (sessionId: string): BinaryExportSession => {
+    const session = binaryExportSessions.get(sessionId);
+    if (!session) throw new Error('导出文件会话不存在或已经结束');
+    return session;
+  };
+
+  const abortBinaryExportSession = async (sessionId: string): Promise<void> => {
+    const session = binaryExportSessions.get(sessionId);
+    if (!session) return;
+    binaryExportSessions.delete(sessionId);
+    await session.handle.close().catch(() => undefined);
+    await fs.unlink(session.filePath).catch(() => undefined);
+  };
+
+  mainWindow.once('closed', () => {
+    for (const sessionId of binaryExportSessions.keys()) {
+      void abortBinaryExportSession(sessionId);
+    }
+  });
+
   // ==================== Dialog Handlers ====================
 
   ipcMain.handle('dialog:saveFile', async (_, defaultName: string, filters?: Electron.FileFilter[]) => {
@@ -129,6 +156,48 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       return filePath;
     },
   );
+
+  ipcMain.handle(
+    'dialog:beginBinaryFile',
+    async (_, defaultName: string, filters?: Electron.FileFilter[]): Promise<string | null> => {
+      const { filePath } = await dialog.showSaveDialog(mainWindow, { defaultPath: defaultName, filters });
+      if (!filePath) return null;
+      const sessionId = randomUUID();
+      const handle = await fs.open(filePath, 'w');
+      binaryExportSessions.set(sessionId, { filePath, handle });
+      return sessionId;
+    },
+  );
+
+  ipcMain.handle(
+    'dialog:writeBinaryFileChunk',
+    async (_, sessionId: string, content: Uint8Array, position: number): Promise<void> => {
+      if (!Number.isSafeInteger(position) || position < 0) throw new Error('导出文件写入位置无效');
+      const session = getBinaryExportSession(sessionId);
+      const buffer = Buffer.from(content);
+      let offset = 0;
+      while (offset < buffer.length) {
+        const { bytesWritten } = await session.handle.write(
+          buffer,
+          offset,
+          buffer.length - offset,
+          position + offset,
+        );
+        if (bytesWritten <= 0) throw new Error('导出文件写入失败');
+        offset += bytesWritten;
+      }
+    },
+  );
+
+  ipcMain.handle('dialog:closeBinaryFile', async (_, sessionId: string): Promise<void> => {
+    const session = getBinaryExportSession(sessionId);
+    await session.handle.close();
+    binaryExportSessions.delete(sessionId);
+  });
+
+  ipcMain.handle('dialog:abortBinaryFile', async (_, sessionId: string): Promise<void> => {
+    await abortBinaryExportSession(sessionId);
+  });
 
   // ==================== Utility Handlers ====================
 

@@ -79,6 +79,7 @@ import {
   type FrameClipboardUpdate,
   type PerformerClipboardPayload,
 } from './utils/cross-project-clipboard';
+import { createDesktopBinaryExportStream, type DesktopBinaryExportStream } from './utils/desktop-binary-export';
 
 const DEFAULT_FRAME: Frame = {
   id: 'start-frame',
@@ -646,14 +647,6 @@ const App: React.FC = () => {
     positions: JSON.parse(JSON.stringify(overrides?.positions ?? source.positions)),
     rotations: { ...(overrides?.rotations ?? source.rotations ?? {}) },
   }), []);
-
-  const saveBlobToElectron = useCallback(async (baseName: string, extension: 'mp4' | 'webm', blob: Blob) => {
-    const bytes = new Uint8Array(await blob.arrayBuffer());
-    return window.electronAPI.saveBinaryFile(`${baseName}.${extension}`, bytes, [
-      { name: extension === 'mp4' ? 'MP4 Video' : 'WebM Video', extensions: [extension] },
-      { name: 'All Files', extensions: ['*'] },
-    ]);
-  }, []);
 
   const downloadBlob = useCallback((blob: Blob, fileName: string) => {
     const url = URL.createObjectURL(blob);
@@ -3353,6 +3346,7 @@ const App: React.FC = () => {
       | undefined;
     let mp4Writable: any = null;
     let realtimeWritable: any = null;
+    let desktopExport: DesktopBinaryExportStream | null = null;
     if (!isDesktopElectron && showSaveFilePicker) {
       try {
         const handle = await showSaveFilePicker({
@@ -3373,6 +3367,13 @@ const App: React.FC = () => {
         if (err instanceof DOMException && err.name === 'AbortError') return;
         console.warn('Streaming file picker unavailable, falling back to in-memory download:', err);
       }
+    }
+    if (isDesktopElectron) {
+      desktopExport = await createDesktopBinaryExportStream(
+        `${downloadBaseName}.${initialExtension}`,
+        initialExtension,
+      );
+      if (!desktopExport) return;
     }
 
     setIsExporting(true);
@@ -3427,15 +3428,24 @@ const App: React.FC = () => {
       // --- WebCodecs + mp4-muxer (fast, offline) ---
       let videoEncoder: VideoEncoder | null = null;
       try {
-        const { Muxer, ArrayBufferTarget, FileSystemWritableFileStreamTarget } = await import('mp4-muxer');
+        const { Muxer, ArrayBufferTarget, FileSystemWritableFileStreamTarget, StreamTarget } = await import('mp4-muxer');
 
         const hasAudio = audioBuffer != null && typeof AudioEncoder !== 'undefined';
         const sampleRate = audioBuffer?.sampleRate ?? 44100;
         const numChannels = audioBuffer?.numberOfChannels ?? 1;
-        const arrayBufferTarget = !mp4Writable ? new ArrayBufferTarget() : null;
+        const activeDesktopExport = desktopExport;
+        const desktopTarget = activeDesktopExport
+          ? new StreamTarget({
+              onData: (data, position) => activeDesktopExport.enqueue(data, position),
+              chunked: true,
+              chunkSize: 16 * 1024 * 1024,
+            })
+          : null;
+        const arrayBufferTarget = !mp4Writable && !desktopTarget ? new ArrayBufferTarget() : null;
         const target = mp4Writable
           ? new FileSystemWritableFileStreamTarget(mp4Writable, { chunkSize: 16 * 1024 * 1024 })
-          : arrayBufferTarget;
+          : desktopTarget ?? arrayBufferTarget;
+        if (!target) throw new Error('MP4 export target was not initialized.');
         const muxer = new Muxer({
           target,
           video: { codec: 'avc', width, height },
@@ -3485,7 +3495,10 @@ const App: React.FC = () => {
           await waitForEncoderQueueBelow(videoEncoder, 8);
           ensureVideoEncoderOpen();
           setExportProgress((i / (totalFrames + 1)) * 0.7);
-          if (i % 30 === 0) await new Promise(r => setTimeout(r, 0));
+          if (i % 30 === 0) {
+            await activeDesktopExport?.flush();
+            await new Promise(r => setTimeout(r, 0));
+          }
         }
 
         await withTimeout(videoEncoder.flush(), 15000, '2D 视频编码');
@@ -3553,15 +3566,12 @@ const App: React.FC = () => {
         muxer.finalize();
         if (mp4Writable) {
           await mp4Writable.close();
+        } else if (activeDesktopExport) {
+          await activeDesktopExport.close();
+          desktopExport = null;
         } else if (arrayBufferTarget) {
           const bytes = new Uint8Array(arrayBufferTarget.buffer);
-          if (isDesktopElectron) {
-            await window.electronAPI.saveBinaryFile(`${downloadBaseName}.mp4`, bytes, [
-              { name: 'MP4 Video', extensions: ['mp4'] },
-            ]);
-          } else {
-            downloadBlob(new Blob([bytes], { type: 'video/mp4' }), `${downloadBaseName}.mp4`);
-          }
+          downloadBlob(new Blob([bytes], { type: 'video/mp4' }), `${downloadBaseName}.mp4`);
         } else {
           throw new Error('MP4 export target was not initialized.');
         }
@@ -3578,8 +3588,12 @@ const App: React.FC = () => {
           try { await mp4Writable.abort?.(); } catch { }
           mp4Writable = null;
         }
+        if (desktopExport) {
+          try { await desktopExport.abort(); } catch { }
+          desktopExport = null;
+        }
         console.error('WebCodecs export failed, falling back to MediaRecorder:', err);
-        setProjectMessages(['当前设备不支持稳定的高速导出，已自动切换到实时录制模式']);
+        setProjectMessages([`高速导出失败，正在尝试实时录制：${err instanceof Error ? err.message : String(err)}`]);
       }
     }
 
@@ -3602,11 +3616,26 @@ const App: React.FC = () => {
         }
       }
     }
+    if (isDesktopElectron && !desktopExport) {
+      desktopExport = await createDesktopBinaryExportStream(
+        `${downloadBaseName}.${realtimeFormat.extension}`,
+        realtimeFormat.extension,
+      );
+      if (!desktopExport) {
+        ledRenderer?.dispose();
+        setIsExporting(false);
+        return;
+      }
+    }
 
     const streamV = (tmpCanvas as any).captureStream ? (tmpCanvas as any).captureStream(fps) : null;
     if (!streamV) {
       if (realtimeWritable) {
         try { await realtimeWritable.abort?.(); } catch { }
+      }
+      if (desktopExport) {
+        try { await desktopExport.abort(); } catch { }
+        desktopExport = null;
       }
       setIsExporting(false);
       return;
@@ -3630,7 +3659,7 @@ const App: React.FC = () => {
     let activeRealtimeFormat = realtimeFormat;
     let recorder: MediaRecorder;
     try {
-      const recorderFormats = realtimeWritable
+      const recorderFormats = realtimeWritable || desktopExport
         ? getMediaRecorderExportFormats().filter((format) => format.extension === realtimeFormat.extension)
         : getMediaRecorderExportFormats();
       const startedRecorder = startMediaRecorderWithFallback(stream, recorderFormats, 100);
@@ -3641,6 +3670,10 @@ const App: React.FC = () => {
       if (realtimeWritable) {
         try { await realtimeWritable.abort?.(); } catch { }
       }
+      if (desktopExport) {
+        try { await desktopExport.abort(); } catch { }
+        desktopExport = null;
+      }
       ledRenderer?.dispose();
       setIsExporting(false);
       setProjectMessages([`实时录制导出失败：${err instanceof Error ? err.message : String(err)}`]);
@@ -3650,10 +3683,20 @@ const App: React.FC = () => {
     const mime = activeRealtimeFormat.mimeType;
     const chunks: Blob[] = [];
     let realtimeWriteChain = Promise.resolve();
+    let realtimeWritePosition = 0;
+    const realtimeDesktopExport = desktopExport;
     recorder.ondataavailable = (e: any) => {
       if (!e.data || e.data.size <= 0) return;
       if (realtimeWritable) {
         realtimeWriteChain = realtimeWriteChain.then(() => realtimeWritable.write(e.data));
+      } else if (realtimeDesktopExport) {
+        const dataBlob = e.data as Blob;
+        realtimeWriteChain = realtimeWriteChain.then(async () => {
+          const data = new Uint8Array(await dataBlob.arrayBuffer());
+          realtimeDesktopExport.enqueue(data, realtimeWritePosition);
+          realtimeWritePosition += data.byteLength;
+          await realtimeDesktopExport.flush();
+        });
       } else {
         chunks.push(e.data);
       }
@@ -3693,6 +3736,10 @@ const App: React.FC = () => {
               if (realtimeWritable) {
                 await realtimeWritable.close();
                 resolve(new Blob([], { type: mime }));
+              } else if (realtimeDesktopExport) {
+                await realtimeDesktopExport.close();
+                desktopExport = null;
+                resolve(new Blob([], { type: mime }));
               } else {
                 resolve(new Blob(chunks, { type: mime }));
               }
@@ -3701,12 +3748,20 @@ const App: React.FC = () => {
               if (realtimeWritable) {
                 try { await realtimeWritable.abort?.(); } catch { }
               }
+              if (desktopExport) {
+                try { await desktopExport.abort(); } catch { }
+                desktopExport = null;
+              }
               reject(err);
             });
         };
       }), Math.max(totalMs + 15000, 30000), '2D 实时录制');
     } catch (err) {
       stream.getTracks().forEach((track) => track.stop());
+      if (desktopExport) {
+        try { await desktopExport.abort(); } catch { }
+        desktopExport = null;
+      }
       ledRenderer?.dispose();
       setIsExporting(false);
       setProjectMessages([`实时录制导出失败：${err instanceof Error ? err.message : String(err)}`]);
@@ -3718,12 +3773,8 @@ const App: React.FC = () => {
     setExportProgress(1);
     ledRenderer?.dispose();
 
-    if (!realtimeWritable) {
-      if (isDesktopElectron) {
-        await saveBlobToElectron(downloadBaseName, activeRealtimeFormat.extension, blob);
-      } else {
-        downloadBlob(blob, `${downloadBaseName}.${activeRealtimeFormat.extension}`);
-      }
+    if (!realtimeWritable && !realtimeDesktopExport) {
+      downloadBlob(blob, `${downloadBaseName}.${activeRealtimeFormat.extension}`);
     }
   };
 
@@ -3751,6 +3802,7 @@ const App: React.FC = () => {
       | undefined;
     let mp4Writable: any = null;
     let realtimeWritable: any = null;
+    let desktopExport: DesktopBinaryExportStream | null = null;
     if (!isDesktopElectron && showSaveFilePicker) {
       try {
         const handle = await showSaveFilePicker({
@@ -3771,6 +3823,13 @@ const App: React.FC = () => {
         if (err instanceof DOMException && err.name === 'AbortError') return;
         console.warn('Streaming file picker unavailable, falling back to in-memory download:', err);
       }
+    }
+    if (isDesktopElectron) {
+      desktopExport = await createDesktopBinaryExportStream(
+        `${downloadBaseName}.${initialExtension}`,
+        initialExtension,
+      );
+      if (!desktopExport) return;
     }
 
     setIsExporting(true);
@@ -3840,15 +3899,24 @@ const App: React.FC = () => {
       // --- WebCodecs + mp4-muxer (fast, offline) ---
       let videoEncoder: VideoEncoder | null = null;
       try {
-        const { Muxer, ArrayBufferTarget, FileSystemWritableFileStreamTarget } = await import('mp4-muxer');
+        const { Muxer, ArrayBufferTarget, FileSystemWritableFileStreamTarget, StreamTarget } = await import('mp4-muxer');
 
         const hasAudio = audioBuffer != null && typeof AudioEncoder !== 'undefined';
         const sampleRate = audioBuffer?.sampleRate ?? 44100;
         const numChannels = audioBuffer?.numberOfChannels ?? 1;
-        const arrayBufferTarget = !mp4Writable ? new ArrayBufferTarget() : null;
+        const activeDesktopExport = desktopExport;
+        const desktopTarget = activeDesktopExport
+          ? new StreamTarget({
+              onData: (data, position) => activeDesktopExport.enqueue(data, position),
+              chunked: true,
+              chunkSize: 16 * 1024 * 1024,
+            })
+          : null;
+        const arrayBufferTarget = !mp4Writable && !desktopTarget ? new ArrayBufferTarget() : null;
         const target = mp4Writable
           ? new FileSystemWritableFileStreamTarget(mp4Writable, { chunkSize: 16 * 1024 * 1024 })
-          : arrayBufferTarget;
+          : desktopTarget ?? arrayBufferTarget;
+        if (!target) throw new Error('MP4 export target was not initialized.');
         const muxer = new Muxer({
           target,
           video: { codec: 'avc', width, height },
@@ -3904,7 +3972,10 @@ const App: React.FC = () => {
           await waitForEncoderQueueBelow(videoEncoder, 8);
           ensureVideoEncoderOpen();
           setExportProgress((i / (totalFrames + 1)) * 0.7);
-          if (i % 30 === 0) await new Promise(r => setTimeout(r, 0));
+          if (i % 30 === 0) {
+            await activeDesktopExport?.flush();
+            await new Promise(r => setTimeout(r, 0));
+          }
         }
 
         await withTimeout(videoEncoder.flush(), 15000, '3D 视频编码');
@@ -3972,15 +4043,12 @@ const App: React.FC = () => {
         muxer.finalize();
         if (mp4Writable) {
           await mp4Writable.close();
+        } else if (activeDesktopExport) {
+          await activeDesktopExport.close();
+          desktopExport = null;
         } else if (arrayBufferTarget) {
           const bytes = new Uint8Array(arrayBufferTarget.buffer);
-          if (isDesktopElectron) {
-            await window.electronAPI.saveBinaryFile(`${downloadBaseName}.mp4`, bytes, [
-              { name: 'MP4 Video', extensions: ['mp4'] },
-            ]);
-          } else {
-            downloadBlob(new Blob([bytes], { type: 'video/mp4' }), `${downloadBaseName}.mp4`);
-          }
+          downloadBlob(new Blob([bytes], { type: 'video/mp4' }), `${downloadBaseName}.mp4`);
         } else {
           throw new Error('MP4 export target was not initialized.');
         }
@@ -3997,8 +4065,12 @@ const App: React.FC = () => {
           try { await mp4Writable.abort?.(); } catch { }
           mp4Writable = null;
         }
+        if (desktopExport) {
+          try { await desktopExport.abort(); } catch { }
+          desktopExport = null;
+        }
         console.error('WebCodecs 3D export failed, falling back to MediaRecorder:', err);
-        setProjectMessages(['当前设备不支持稳定的高速导出，已自动切换到实时录制模式']);
+        setProjectMessages([`高速导出失败，正在尝试实时录制：${err instanceof Error ? err.message : String(err)}`]);
       }
     }
 
@@ -4024,6 +4096,17 @@ const App: React.FC = () => {
         }
       }
     }
+    if (isDesktopElectron && !desktopExport) {
+      desktopExport = await createDesktopBinaryExportStream(
+        `${downloadBaseName}.${realtimeFormat.extension}`,
+        realtimeFormat.extension,
+      );
+      if (!desktopExport) {
+        offline.dispose();
+        setIsExporting(false);
+        return;
+      }
+    }
 
     const streamV = (offline.renderer.domElement as any).captureStream
       ? (offline.renderer.domElement as any).captureStream(fps)
@@ -4031,6 +4114,10 @@ const App: React.FC = () => {
     if (!streamV) {
       if (realtimeWritable) {
         try { await realtimeWritable.abort?.(); } catch { }
+      }
+      if (desktopExport) {
+        try { await desktopExport.abort(); } catch { }
+        desktopExport = null;
       }
       offline.dispose();
       setIsExporting(false);
@@ -4055,7 +4142,7 @@ const App: React.FC = () => {
     let activeRealtimeFormat = realtimeFormat;
     let recorder: MediaRecorder;
     try {
-      const recorderFormats = realtimeWritable
+      const recorderFormats = realtimeWritable || desktopExport
         ? getMediaRecorderExportFormats().filter((format) => format.extension === realtimeFormat.extension)
         : getMediaRecorderExportFormats();
       const startedRecorder = startMediaRecorderWithFallback(stream, recorderFormats, 100);
@@ -4066,6 +4153,10 @@ const App: React.FC = () => {
       if (realtimeWritable) {
         try { await realtimeWritable.abort?.(); } catch { }
       }
+      if (desktopExport) {
+        try { await desktopExport.abort(); } catch { }
+        desktopExport = null;
+      }
       offline.dispose();
       setIsExporting(false);
       setProjectMessages([`实时录制导出失败：${err instanceof Error ? err.message : String(err)}`]);
@@ -4075,10 +4166,20 @@ const App: React.FC = () => {
     const mime = activeRealtimeFormat.mimeType;
     const chunks: Blob[] = [];
     let realtimeWriteChain = Promise.resolve();
+    let realtimeWritePosition = 0;
+    const realtimeDesktopExport = desktopExport;
     recorder.ondataavailable = (e: any) => {
       if (!e.data || e.data.size <= 0) return;
       if (realtimeWritable) {
         realtimeWriteChain = realtimeWriteChain.then(() => realtimeWritable.write(e.data));
+      } else if (realtimeDesktopExport) {
+        const dataBlob = e.data as Blob;
+        realtimeWriteChain = realtimeWriteChain.then(async () => {
+          const data = new Uint8Array(await dataBlob.arrayBuffer());
+          realtimeDesktopExport.enqueue(data, realtimeWritePosition);
+          realtimeWritePosition += data.byteLength;
+          await realtimeDesktopExport.flush();
+        });
       } else {
         chunks.push(e.data);
       }
@@ -4118,6 +4219,10 @@ const App: React.FC = () => {
               if (realtimeWritable) {
                 await realtimeWritable.close();
                 resolve(new Blob([], { type: mime }));
+              } else if (realtimeDesktopExport) {
+                await realtimeDesktopExport.close();
+                desktopExport = null;
+                resolve(new Blob([], { type: mime }));
               } else {
                 resolve(new Blob(chunks, { type: mime }));
               }
@@ -4126,12 +4231,20 @@ const App: React.FC = () => {
               if (realtimeWritable) {
                 try { await realtimeWritable.abort?.(); } catch { }
               }
+              if (desktopExport) {
+                try { await desktopExport.abort(); } catch { }
+                desktopExport = null;
+              }
               reject(err);
             });
         };
       }), Math.max(totalMs + 15000, 30000), '3D 实时录制');
     } catch (err) {
       stream.getTracks().forEach((track) => track.stop());
+      if (desktopExport) {
+        try { await desktopExport.abort(); } catch { }
+        desktopExport = null;
+      }
       offline.dispose();
       setIsExporting(false);
       setProjectMessages([`实时录制导出失败：${err instanceof Error ? err.message : String(err)}`]);
@@ -4142,12 +4255,8 @@ const App: React.FC = () => {
     setIsExporting(false);
     setExportProgress(1);
 
-    if (!realtimeWritable) {
-      if (isDesktopElectron) {
-        await saveBlobToElectron(downloadBaseName, activeRealtimeFormat.extension, blob);
-      } else {
-        downloadBlob(blob, `${downloadBaseName}.${activeRealtimeFormat.extension}`);
-      }
+    if (!realtimeWritable && !realtimeDesktopExport) {
+      downloadBlob(blob, `${downloadBaseName}.${activeRealtimeFormat.extension}`);
     }
   };
 

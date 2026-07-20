@@ -2,6 +2,7 @@ import { ipcMain, dialog, app, net, shell } from 'electron';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { randomUUID } from 'crypto';
 import { createManagedProject, deleteManagedProject, duplicateManagedProject, exportChoreographyDocument, exportProjectPackage, importChoreographyDocument, importProjectPackage, ingestProjectAsset, listManagedProjects, listProjectRecoverySnapshots, loadManagedProject, resolveManagedProjectPath, renameManagedProject, restoreProjectRecoverySnapshot, saveManagedProject, } from './project-service.js';
 import { createProjectFromTemplate, listProjectTemplates } from './project-template-service.js';
 import { updaterManager } from './updater.js';
@@ -38,6 +39,26 @@ async function saveSettings(settings) {
     await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
 }
 export function registerIpcHandlers(mainWindow) {
+    const binaryExportSessions = new Map();
+    const getBinaryExportSession = (sessionId) => {
+        const session = binaryExportSessions.get(sessionId);
+        if (!session)
+            throw new Error('导出文件会话不存在或已经结束');
+        return session;
+    };
+    const abortBinaryExportSession = async (sessionId) => {
+        const session = binaryExportSessions.get(sessionId);
+        if (!session)
+            return;
+        binaryExportSessions.delete(sessionId);
+        await session.handle.close().catch(() => undefined);
+        await fs.unlink(session.filePath).catch(() => undefined);
+    };
+    mainWindow.once('closed', () => {
+        for (const sessionId of binaryExportSessions.keys()) {
+            void abortBinaryExportSession(sessionId);
+        }
+    });
     // ==================== Dialog Handlers ====================
     ipcMain.handle('dialog:saveFile', async (_, defaultName, filters) => {
         const { filePath } = await dialog.showSaveDialog(mainWindow, {
@@ -87,6 +108,36 @@ export function registerIpcHandlers(mainWindow) {
             return null;
         await fs.writeFile(filePath, Buffer.from(content));
         return filePath;
+    });
+    ipcMain.handle('dialog:beginBinaryFile', async (_, defaultName, filters) => {
+        const { filePath } = await dialog.showSaveDialog(mainWindow, { defaultPath: defaultName, filters });
+        if (!filePath)
+            return null;
+        const sessionId = randomUUID();
+        const handle = await fs.open(filePath, 'w');
+        binaryExportSessions.set(sessionId, { filePath, handle });
+        return sessionId;
+    });
+    ipcMain.handle('dialog:writeBinaryFileChunk', async (_, sessionId, content, position) => {
+        if (!Number.isSafeInteger(position) || position < 0)
+            throw new Error('导出文件写入位置无效');
+        const session = getBinaryExportSession(sessionId);
+        const buffer = Buffer.from(content);
+        let offset = 0;
+        while (offset < buffer.length) {
+            const { bytesWritten } = await session.handle.write(buffer, offset, buffer.length - offset, position + offset);
+            if (bytesWritten <= 0)
+                throw new Error('导出文件写入失败');
+            offset += bytesWritten;
+        }
+    });
+    ipcMain.handle('dialog:closeBinaryFile', async (_, sessionId) => {
+        const session = getBinaryExportSession(sessionId);
+        await session.handle.close();
+        binaryExportSessions.delete(sessionId);
+    });
+    ipcMain.handle('dialog:abortBinaryFile', async (_, sessionId) => {
+        await abortBinaryExportSession(sessionId);
     });
     // ==================== Utility Handlers ====================
     ipcMain.handle('app:getVersion', async () => {
