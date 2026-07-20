@@ -80,6 +80,7 @@ import {
   type PerformerClipboardPayload,
 } from './utils/cross-project-clipboard';
 import { createDesktopBinaryExportStream, type DesktopBinaryExportStream } from './utils/desktop-binary-export';
+import { createThrottledProgressReporter } from './utils/export-progress';
 
 const DEFAULT_FRAME: Frame = {
   id: 'start-frame',
@@ -3331,6 +3332,7 @@ const App: React.FC = () => {
     const totalMs = outPointMs - inPointMs;
     const totalFrames = Math.ceil(totalMs / 1000 * fps);
     const stepMs = 1000 / fps;
+    const reportExportProgress = createThrottledProgressReporter(setExportProgress);
     const downloadBaseName = `CosStage-export-${Math.round(inPointMs)}-${Math.round(outPointMs)}`;
     const isDesktopElectron = Boolean(window.electronAPI?.isElectron);
     const hasWebCodecs = typeof VideoEncoder !== 'undefined';
@@ -3494,7 +3496,7 @@ const App: React.FC = () => {
           }
           await waitForEncoderQueueBelow(videoEncoder, 8);
           ensureVideoEncoderOpen();
-          setExportProgress((i / (totalFrames + 1)) * 0.7);
+          reportExportProgress((i / (totalFrames + 1)) * 0.7);
           if (i % 30 === 0) {
             await activeDesktopExport?.flush();
             await new Promise(r => setTimeout(r, 0));
@@ -3553,7 +3555,7 @@ const App: React.FC = () => {
             await waitForEncoderQueueBelow(audioEncoder, 32);
 
             if (base % 100 === 0) {
-              setExportProgress(0.85 + (base / totalAudioChunks) * 0.1);
+              reportExportProgress(0.85 + (base / totalAudioChunks) * 0.1);
               await new Promise(r => setTimeout(r, 0));
             }
           }
@@ -3715,7 +3717,7 @@ const App: React.FC = () => {
         stageBackgroundImage,
         ledRenderer,
       });
-      setExportProgress(0.7 + Math.min(0.3, (currentFrameIdx / totalFrames) * 0.3));
+      reportExportProgress(0.7 + Math.min(0.3, (currentFrameIdx / totalFrames) * 0.3));
 
       if (elapsed < totalMs + stepMs) {
         requestAnimationFrame(() => { void drawFrame(); });
@@ -3787,6 +3789,7 @@ const App: React.FC = () => {
     const totalMs = outPointMs - inPointMs;
     const totalFrames = Math.ceil(totalMs / 1000 * fps);
     const stepMs = 1000 / fps;
+    const reportExportProgress = createThrottledProgressReporter(setExportProgress);
     const downloadBaseName = `CosStage-3d-${exportCameraAngle}-${Math.round(inPointMs)}-${Math.round(outPointMs)}`;
     const hasWebCodecs = typeof VideoEncoder !== 'undefined';
     const videoBitrate = exportResolution === '4k' ? 20_000_000 : exportResolution === '2k' ? 10_000_000 : 5_000_000;
@@ -3971,7 +3974,7 @@ const App: React.FC = () => {
           }
           await waitForEncoderQueueBelow(videoEncoder, 8);
           ensureVideoEncoderOpen();
-          setExportProgress((i / (totalFrames + 1)) * 0.7);
+          reportExportProgress((i / (totalFrames + 1)) * 0.7);
           if (i % 30 === 0) {
             await activeDesktopExport?.flush();
             await new Promise(r => setTimeout(r, 0));
@@ -4030,7 +4033,7 @@ const App: React.FC = () => {
             await waitForEncoderQueueBelow(audioEncoder, 32);
 
             if (base % 100 === 0) {
-              setExportProgress(0.85 + (base / totalAudioChunks) * 0.1);
+              reportExportProgress(0.85 + (base / totalAudioChunks) * 0.1);
               await new Promise(r => setTimeout(r, 0));
             }
           }
@@ -4197,7 +4200,7 @@ const App: React.FC = () => {
       offline.updateAtTime(t, sceneState.positions, sceneState.rotations, sceneState.hiddenGroupIds);
       offline.renderer.render(offline.scene, offline.camera);
 
-      setExportProgress(0.7 + Math.min(0.3, (currentFrameIdx / totalFrames) * 0.3));
+      reportExportProgress(0.7 + Math.min(0.3, (currentFrameIdx / totalFrames) * 0.3));
 
       if (elapsed < totalMs + stepMs) {
         requestAnimationFrame(drawFrame);

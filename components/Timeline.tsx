@@ -491,7 +491,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                                 <div className="h-2 bg-amber-500" style={{ width: `${Math.round((exportProgress || 0) * 100)}%` }} />
                             </div>
                             <span className="text-[11px] text-slate-300">
-                                录制中 {typeof inPointMs === 'number' && typeof outPointMs === 'number'
+                                处理中 {typeof inPointMs === 'number' && typeof outPointMs === 'number'
                                     ? `${formatTime(Math.floor((exportProgress || 0) * (outPointMs - inPointMs)))} / ${formatTime(outPointMs - inPointMs)}`
                                     : ''}
                             </span>

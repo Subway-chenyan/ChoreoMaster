@@ -211,6 +211,12 @@ const activeItems = useMemo(() => items.filter((item) => item.active), [items]);
 <List items={activeItems} />;
 ```
 
+### Throttle Long-Running Export Progress
+
+Offline video export loops may run once per encoded frame. They must not call a React state setter on every frame because the editor root and timeline are expensive to render. Report progress to React at a human-visible cadence (currently no more than four times per second), while keeping phase boundaries and final completion updates immediate.
+
+Progress text shared by fast WebCodecs export and real-time MediaRecorder fallback must use a neutral label such as `处理中`; it must not imply that every export is real-time recording.
+
 ### Lazy Loading
 
 ```tsx
