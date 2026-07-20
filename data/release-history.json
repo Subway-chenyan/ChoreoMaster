@@ -1,7 +1,22 @@
 {
   "schemaVersion": 1,
-  "currentVersion": "1.1.2",
+  "currentVersion": "1.2.0",
   "releases": [
+    {
+      "version": "1.2.0",
+      "date": "2026-07-20",
+      "kind": "minor",
+      "title": "CosStage 1.2.0",
+      "summary": "提升长视频导出的稳定性与进度反馈，并为演员、道具和分组新增全队形显示、批量可撤销删除及跨队形持久锁定能力。",
+      "changes": [
+        {
+          "kind": "minor",
+          "text": "提升长视频导出的稳定性与进度反馈，并为演员、道具和分组新增全队形显示、批量可撤销删除及跨队形持久锁定能力。"
+        }
+      ],
+      "breakingChanges": [],
+      "migrationSteps": []
+    },
     {
       "version": "1.1.2",
       "date": "2026-07-17",
