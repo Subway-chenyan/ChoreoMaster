@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 4
+- **Total Sessions**: 5
 - **Last Active**: 2026-07-21
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~140 | Active |
+| `journal-1.md` | ~173 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 5 | 2026-07-21 | 演员与道具批量删除和全队形显示 | `3d1868a` | `main` |
 | 4 | 2026-07-21 | 修复长视频导出稳定性与性能 | `b3b9867`, `13e2dcb` | `main` |
 | 3 | 2026-07-17 | 项目模板与导入导出整合 | `c138239` | `main` |
 | 2 | 2026-07-06 | 跨项目复制演员与队形 | `30ec30f` | `codex/project-save-reliability` |

@@ -138,3 +138,36 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 5: 演员与道具批量删除和全队形显示
+
+**Date**: 2026-07-21
+**Task**: 演员与道具批量删除和全队形显示
+**Branch**: `main`
+
+### Summary
+
+为演员、道具和分组增加全队形显示；统一删除确认并支持多选批量删除；删除操作接入 Ctrl/Cmd+Z 撤销和重做；补充单元测试、桌面回归测试和前端规范。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3d1868a` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
