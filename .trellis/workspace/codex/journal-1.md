@@ -104,3 +104,37 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 4: 修复长视频导出稳定性与性能
+
+**Date**: 2026-07-21
+**Task**: 修复长视频导出稳定性与性能
+**Branch**: `main`
+
+### Summary
+
+桌面长视频改为流式写盘，导出进度更新节流至每秒约四次，并用 28 分钟项目验证 WebCodecs 吞吐。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b3b9867` | (see git log) |
+| `13e2dcb` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

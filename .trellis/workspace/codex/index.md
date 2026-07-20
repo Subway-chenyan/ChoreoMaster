@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 3
-- **Last Active**: 2026-07-17
+- **Total Sessions**: 4
+- **Last Active**: 2026-07-21
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~106 | Active |
+| `journal-1.md` | ~140 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 4 | 2026-07-21 | 修复长视频导出稳定性与性能 | `b3b9867`, `13e2dcb` | `main` |
 | 3 | 2026-07-17 | 项目模板与导入导出整合 | `c138239` | `main` |
 | 2 | 2026-07-06 | 跨项目复制演员与队形 | `30ec30f` | `codex/project-save-reliability` |
 | 1 | 2026-06-25 | 完善过渡路径与道具旋转 | `a81c614` | `codex/fix-transition-review` |
