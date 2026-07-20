@@ -171,3 +171,36 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 6: 演员道具与分组全局锁定
+
+**Date**: 2026-07-21
+**Task**: 演员道具与分组全局锁定
+**Branch**: `main`
+
+### Summary
+
+为演员、道具和分组增加跨队形持久锁定；侧栏提供锁定、右键解除和双击锁图标解除；统一保护 2D、3D、过渡路径、队形显隐、分组和删除等编辑入口，并补充单元测试、桌面回归测试和前端规范。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f6dd029` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
