@@ -448,6 +448,32 @@ test('exports and imports choreography-only JSON as a new project without binary
   });
 });
 
+test('imports web-exported project JSON as choreography-only desktop project', async () => {
+  await withTempDir(async (storagePath) => {
+    const jsonPath = path.join(storagePath, 'web-project-export.json');
+    await writeFile(jsonPath, JSON.stringify({
+      ...projectDocument('Web Export'),
+      musicName: 'web-song.mp3',
+      musicAsset: 'assets/audio/web-song.mp3',
+      stageConfig: {
+        width: 20,
+        depth: 11.25,
+        ledContent: { type: 'image', value: 'assets/backgrounds/led.png' },
+      },
+    }));
+
+    const imported = await importChoreographyDocument(storagePath, jsonPath);
+
+    assert.equal(imported.data.name, 'Web Export');
+    assert.equal(imported.data.frames.length, 1);
+    assert.equal(imported.data.musicName, null);
+    assert.equal(imported.data.musicAsset, null);
+    assert.equal(imported.data.stageConfig.ledContent?.type, 'none');
+    assert.equal(imported.data.performers[0].boxTextures, undefined);
+    assert.equal((await listManagedProjects(storagePath)).length, 1);
+  });
+});
+
 test('keeps five recovery snapshots and restores one as a new project', async () => {
   await withTempDir(async (storagePath) => {
     const created = await createManagedProject(storagePath, 'Recovery Source');

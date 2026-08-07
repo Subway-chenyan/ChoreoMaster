@@ -884,9 +884,12 @@ function createChoreographyDocument(document: ProjectDocument): ChoreographyDocu
 }
 
 function parseChoreographyDocument(value: unknown, fallbackName: string): ChoreographyDocument {
-  if (!isRecord(value)
-    || value.format !== 'cosstage-choreography'
-    || value.schemaVersion !== 1) {
+  if (!isRecord(value)) {
+    throw new Error('Unsupported choreography JSON format');
+  }
+  const hasChoreographyEnvelope = 'format' in value || 'schemaVersion' in value;
+  if (hasChoreographyEnvelope
+    && (value.format !== 'cosstage-choreography' || value.schemaVersion !== 1)) {
     throw new Error('Unsupported choreography JSON format');
   }
   const document = parseProjectDocument({

@@ -39,7 +39,7 @@ All filesystem and archive operations belong in the main process. IPC handlers m
 
 Binary assets must not be embedded in IPC payloads or portable JSON as base64 after migration. The renderer receives `choreo-asset://` URLs for playback/rendering.
 
-Desktop exposes one import button and one export button. Each opens a choice between a complete project package and choreography-only JSON. Loose legacy project JSON import is not supported.
+Desktop exposes one import button and one export button. Each opens a choice between a complete project package and choreography-only JSON. The package path only accepts archives; the choreography JSON path accepts both the explicit choreography envelope and Web-exported plain project JSON.
 
 Import always creates a new managed project ID and automatically opens that project. It never overwrites the active project.
 
@@ -203,8 +203,9 @@ project.importChoreography(): Promise<ProjectImportResult | null>;
 
 | Condition | Behavior |
 | --- | --- |
-| `format` is not `cosstage-choreography` | Reject without creating a project |
-| `schemaVersion` is not `1` | Reject without creating a project |
+| Explicit choreography envelope has `format` other than `cosstage-choreography` | Reject without creating a project |
+| Explicit choreography envelope has `schemaVersion` other than `1` | Reject without creating a project |
+| Plain Web-exported project JSON has no `format` / `schemaVersion` envelope | Normalize as choreography-only JSON and create a new managed project |
 | Missing performers or frames array | Reject without creating a project |
 | Asset references appear in input | Strip them during normalization |
 | Dirty active project cannot save | Cancel import and keep the active project |
@@ -215,12 +216,13 @@ project.importChoreography(): Promise<ProjectImportResult | null>;
 
 - Good: exported choreography round-trips into a new ID with equivalent formations and no binary references.
 - Base: a document without optional transitions, markers, or notes normalizes those collections to empty arrays.
-- Bad: a legacy loose project JSON is passed to the choreography importer and is rejected instead of guessed.
+- Base: Web-exported plain project JSON imports through the choreography path, creates a new managed project, and strips non-portable asset references.
 
 ### 6. Tests Required
 
 - Export a project containing audio and performer textures; assert the JSON contains the explicit format/version and no asset fields.
 - Import the exported JSON; assert a distinct project ID and `musicAsset === null`.
+- Import Web-exported plain project JSON; assert it creates a managed project and strips audio, LED media, and texture references.
 - Import invalid/missing-frame JSON; assert the managed project list remains unchanged.
 - Desktop regression asserts the transfer hook saves before import and routes through the choreography IPC methods.
 
@@ -400,4 +402,3 @@ const created = await createPersistedDesktopProject(name, initialDocument);
 setCurrentProjectId(created.id);
 setProjectHasChanges(false);
 ```
-

@@ -1,0 +1,3 @@
+{"file":".trellis/spec/backend/project-files.md","reason":"Verify JSON import behavior and no partial project installs"}
+{"file":".trellis/spec/frontend/ipc-electron.md","reason":"Verify renderer/preload/main API boundary remains scoped"}
+{"file":".trellis/spec/shared/typescript.md","reason":"Verify type-safe parsing changes"}

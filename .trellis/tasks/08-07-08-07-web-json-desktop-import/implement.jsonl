@@ -1,0 +1,3 @@
+{"file":".trellis/spec/backend/project-files.md","reason":"Project import/export contracts and safety requirements"}
+{"file":".trellis/spec/frontend/ipc-electron.md","reason":"IPC boundaries for desktop file import/export"}
+{"file":".trellis/spec/shared/typescript.md","reason":"TypeScript type-safety conventions"}
