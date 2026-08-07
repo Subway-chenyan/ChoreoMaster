@@ -1,7 +1,22 @@
 {
   "schemaVersion": 1,
-  "currentVersion": "1.2.0",
+  "currentVersion": "1.2.1",
   "releases": [
+    {
+      "version": "1.2.1",
+      "date": "2026-08-07",
+      "kind": "patch",
+      "title": "CosStage 1.2.1",
+      "summary": "修复 Web 端导出的项目 JSON 无法在 Windows 桌面端导入的问题，支持 Web 和 Windows 桌面项目 JSON 互通。",
+      "changes": [
+        {
+          "kind": "patch",
+          "text": "修复 Web 端导出的项目 JSON 无法在 Windows 桌面端导入的问题，支持 Web 和 Windows 桌面项目 JSON 互通。"
+        }
+      ],
+      "breakingChanges": [],
+      "migrationSteps": []
+    },
     {
       "version": "1.2.0",
       "date": "2026-07-20",
