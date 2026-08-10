@@ -1,0 +1,2 @@
+{"file":".trellis/spec/frontend/components.md","reason":"Timeline scroll handling must stay isolated from seeking and dragging interactions."}
+{"file":".trellis/spec/frontend/quality.md","reason":"Center-lock scroll math should remain covered by focused regression tests."}

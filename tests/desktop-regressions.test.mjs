@@ -364,8 +364,22 @@ test('2D export direction arrows default toward the stage front', async () => {
   assert.match(app, /ctx\.lineTo\(0, arrowSize \* 0\.38\)/);
   assert.match(app, /ctx\.moveTo\(0, arrowSize \* 0\.55\)/);
   assert.match(app, /if \(showDirectionArrows\) \{\s*drawDirectionArrow/);
-  assert.match(app, /ctx\.rotate\(rot\)/);
+  assert.match(app, /ctx\.rotate\(isRehearsalView \? -rot : rot\)/);
   assert.doesNotMatch(app, /ctx\.rotate\(-rot\)/);
+});
+
+test('export modal offers rehearsal-oriented 2D output with stage front on top', async () => {
+  const app = await read('App.tsx');
+
+  assert.match(app, /type Export2DView = 'audience' \| 'rehearsal'/);
+  assert.match(app, /const \[export2DView, setExport2DView\] = useState<Export2DView>\('audience'\)/);
+  assert.match(app, /<span className="mb-2 block">2D 视角<\/span>/);
+  assert.match(app, /<option value="rehearsal">演员排练视角<\/option>/);
+  assert.match(app, /const mapStageYRatio = \(ratio: number\) => renderY \+ \(isRehearsalView \? 1 - ratio : ratio\) \* renderH/);
+  assert.match(app, /const rulerY = isRehearsalView \? renderY : renderY \+ renderH - rulerHeight/);
+  assert.match(app, /ctx\.fillText\('舞台前沿', Math\.floor\(renderX \+ renderW \/ 2\), isRehearsalView \? rulerY \+ rulerHeight - 2 \* scale : renderY \+ renderH - 2 \* scale\)/);
+  assert.match(app, /`CosStage-export-\$\{export2DView\}-\$\{Math\.round\(inPointMs\)\}-\$\{Math\.round\(outPointMs\)\}`/);
+  assert.match(app, /view: export2DView/);
 });
 
 test('live 3D stage uses the background, LED depth, and direction arrows', async () => {
@@ -602,6 +616,19 @@ test('offline 3D renderer includes stage background, LED depth, and arrows', asy
   assert.match(offline, /showStageLines/);
 });
 
+test('3D export includes rear elevated camera angle', async () => {
+  const [app, offline] = await Promise.all([
+    read('App.tsx'),
+    read('utils/OfflineRenderer3D.ts'),
+  ]);
+
+  assert.match(offline, /export type CameraAngle = 'judge' \| 'overhead' \| 'rear-overhead'/);
+  assert.match(offline, /angle === 'overhead'/);
+  assert.match(offline, /cam\.position\.set\(0, dist, -dist\)/);
+  assert.match(app, /<option value="rear-overhead">后方45°俯视<\/option>/);
+  assert.match(app, /`CosStage-3d-\$\{exportCameraAngle\}-\$\{Math\.round\(inPointMs\)\}-\$\{Math\.round\(outPointMs\)\}`/);
+});
+
 test('stage selection box converts client pixels into transformed local coordinates', async () => {
   const stage = await read('components/Stage.tsx');
 
@@ -627,6 +654,15 @@ test('timeline native scrollbar is isolated from seeking and wheel input scrolls
   assert.match(source, /onWheel=\{handleTimelineWheel\}/);
   assert.match(source, /data-timeline-content/);
   assert.doesNotMatch(source, /ref=\{containerRef\}[\s\S]{0,160}onPointerDown=\{handlePointerDown\}/);
+});
+
+test('timeline keeps the playhead centered during playback without affecting idle scrolling', async () => {
+  const source = await read('components/Timeline.tsx');
+
+  assert.match(source, /getTimelineFollowPlayheadScrollLeft/);
+  assert.match(source, /if \(!isPlaying \|\| isScrubbing \|\| draggingState \|\| !container\) return/);
+  assert.match(source, /playheadX: \(currentTime \/ 1000\) \* zoom/);
+  assert.match(source, /container\.scrollTo\(\{ left: nextScrollLeft, behavior: 'auto' \}\)/);
 });
 
 test('short formation frames render as keyframes in timeline and sidebar', async () => {

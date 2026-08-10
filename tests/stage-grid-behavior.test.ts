@@ -6,7 +6,7 @@ import {
   shouldShowStageGridLabels,
   snapStagePosition,
 } from '../utils/stage-grid.ts';
-import { getTimelineHorizontalWheelDelta } from '../utils/timeline-scroll.ts';
+import { getTimelineFollowPlayheadScrollLeft, getTimelineHorizontalWheelDelta } from '../utils/timeline-scroll.ts';
 import {
   KEYFRAME_DURATION_THRESHOLD_MS,
   MIN_FRAME_DURATION_MS,
@@ -53,6 +53,48 @@ test('timeline wheel converts vertical input and preserves dominant horizontal i
   assert.equal(
     getTimelineHorizontalWheelDelta({ deltaX: 0, deltaY: 1, deltaMode: 2 }, 500),
     500,
+  );
+});
+
+test('timeline playback keeps the playhead centered after it reaches the viewport midpoint', () => {
+  assert.equal(
+    getTimelineFollowPlayheadScrollLeft({
+      playheadX: 240,
+      scrollLeft: 0,
+      clientWidth: 500,
+      scrollWidth: 2000,
+    }),
+    null,
+  );
+
+  assert.equal(
+    getTimelineFollowPlayheadScrollLeft({
+      playheadX: 710,
+      scrollLeft: 450,
+      clientWidth: 500,
+      scrollWidth: 2000,
+    }),
+    460,
+  );
+
+  assert.equal(
+    getTimelineFollowPlayheadScrollLeft({
+      playheadX: 40,
+      scrollLeft: 0,
+      clientWidth: 500,
+      scrollWidth: 2000,
+    }),
+    null,
+  );
+
+  assert.equal(
+    getTimelineFollowPlayheadScrollLeft({
+      playheadX: 1950,
+      scrollLeft: 1300,
+      clientWidth: 500,
+      scrollWidth: 2000,
+    }),
+    1500,
   );
 });
 

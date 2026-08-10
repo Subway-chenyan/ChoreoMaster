@@ -1,0 +1,4 @@
+{"file":".trellis/spec/frontend/quality.md","reason":"Final type-check and regression verification"}
+{"file":".trellis/spec/frontend/three-interaction.md","reason":"Confirm offline 3D camera change does not alter live interaction policy"}
+{"file":".trellis/spec/frontend/components.md","reason":"Verify export modal controls remain semantic and usable"}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"Verify typed option values and imports"}

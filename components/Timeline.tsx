@@ -4,7 +4,7 @@ import { AudioMarker, Frame, MotionControlPoint, ObjectMotion, Performer, Transi
 import { Flag, Pause, Play, PlusCircle, SkipBack, Trash2, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { EditableNumberInput } from './FormControls';
 import { createTransitionId, getDefaultBezierControlPoints, getGapSelectionId } from '../utils/transitions';
-import { getTimelineHorizontalWheelDelta } from '../utils/timeline-scroll';
+import { getTimelineFollowPlayheadScrollLeft, getTimelineHorizontalWheelDelta } from '../utils/timeline-scroll';
 import { formatFrameDuration, isKeyframeFrame, normalizeFrameDuration } from '../utils/frame-keyframes';
 
 const KEYFRAME_MIN_VISUAL_WIDTH_PX = 24;
@@ -117,6 +117,21 @@ export const Timeline: React.FC<TimelineProps> = ({
         observer.observe(container);
         return () => observer.disconnect();
     }, [duration]);
+
+    useEffect(() => {
+        const container = containerRef.current;
+        if (!isPlaying || isScrubbing || draggingState || !container) return;
+
+        const nextScrollLeft = getTimelineFollowPlayheadScrollLeft({
+            playheadX: (currentTime / 1000) * zoom,
+            scrollLeft: container.scrollLeft,
+            clientWidth: container.clientWidth,
+            scrollWidth: container.scrollWidth,
+        });
+
+        if (nextScrollLeft === null) return;
+        container.scrollTo({ left: nextScrollLeft, behavior: 'auto' });
+    }, [currentTime, draggingState, isPlaying, isScrubbing, zoom]);
 
     // Draw waveform
     useEffect(() => {
