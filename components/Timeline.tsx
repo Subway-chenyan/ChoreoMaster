@@ -130,7 +130,7 @@ export const Timeline: React.FC<TimelineProps> = ({
         });
 
         if (nextScrollLeft === null) return;
-        container.scrollTo({ left: nextScrollLeft, behavior: 'smooth' });
+        container.scrollTo({ left: nextScrollLeft, behavior: 'auto' });
     }, [currentTime, draggingState, isPlaying, isScrubbing, zoom]);
 
     // Draw waveform

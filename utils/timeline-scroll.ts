@@ -11,7 +11,6 @@ interface FollowPlayheadInput {
   scrollLeft: number;
   clientWidth: number;
   scrollWidth: number;
-  edgeRatio?: number;
 }
 
 export function getTimelineHorizontalWheelDelta(input: WheelDeltaInput, pageWidth: number): number {
@@ -32,7 +31,6 @@ export function getTimelineFollowPlayheadScrollLeft(input: FollowPlayheadInput):
     scrollLeft,
     clientWidth,
     scrollWidth,
-    edgeRatio = 0.2,
   } = input;
 
   if (
@@ -43,16 +41,6 @@ export function getTimelineFollowPlayheadScrollLeft(input: FollowPlayheadInput):
     || clientWidth <= 0
     || scrollWidth <= clientWidth
   ) {
-    return null;
-  }
-
-  const safeEdgeRatio = Math.max(0, Math.min(0.45, edgeRatio));
-  const visibleStart = scrollLeft;
-  const visibleEnd = scrollLeft + clientWidth;
-  const safeStart = visibleStart + clientWidth * safeEdgeRatio;
-  const safeEnd = visibleEnd - clientWidth * safeEdgeRatio;
-
-  if (playheadX >= safeStart && playheadX <= safeEnd) {
     return null;
   }
 

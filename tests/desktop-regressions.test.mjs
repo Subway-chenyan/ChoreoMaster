@@ -656,13 +656,13 @@ test('timeline native scrollbar is isolated from seeking and wheel input scrolls
   assert.doesNotMatch(source, /ref=\{containerRef\}[\s\S]{0,160}onPointerDown=\{handlePointerDown\}/);
 });
 
-test('timeline recenters the playhead during playback without affecting idle scrolling', async () => {
+test('timeline keeps the playhead centered during playback without affecting idle scrolling', async () => {
   const source = await read('components/Timeline.tsx');
 
   assert.match(source, /getTimelineFollowPlayheadScrollLeft/);
   assert.match(source, /if \(!isPlaying \|\| isScrubbing \|\| draggingState \|\| !container\) return/);
   assert.match(source, /playheadX: \(currentTime \/ 1000\) \* zoom/);
-  assert.match(source, /container\.scrollTo\(\{ left: nextScrollLeft, behavior: 'smooth' \}\)/);
+  assert.match(source, /container\.scrollTo\(\{ left: nextScrollLeft, behavior: 'auto' \}\)/);
 });
 
 test('short formation frames render as keyframes in timeline and sidebar', async () => {

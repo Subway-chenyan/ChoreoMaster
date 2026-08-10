@@ -56,11 +56,11 @@ test('timeline wheel converts vertical input and preserves dominant horizontal i
   );
 });
 
-test('timeline playback follows the playhead only near viewport edges', () => {
+test('timeline playback keeps the playhead centered after it reaches the viewport midpoint', () => {
   assert.equal(
     getTimelineFollowPlayheadScrollLeft({
-      playheadX: 430,
-      scrollLeft: 200,
+      playheadX: 240,
+      scrollLeft: 0,
       clientWidth: 500,
       scrollWidth: 2000,
     }),
@@ -70,7 +70,7 @@ test('timeline playback follows the playhead only near viewport edges', () => {
   assert.equal(
     getTimelineFollowPlayheadScrollLeft({
       playheadX: 710,
-      scrollLeft: 200,
+      scrollLeft: 450,
       clientWidth: 500,
       scrollWidth: 2000,
     }),
@@ -80,11 +80,11 @@ test('timeline playback follows the playhead only near viewport edges', () => {
   assert.equal(
     getTimelineFollowPlayheadScrollLeft({
       playheadX: 40,
-      scrollLeft: 200,
+      scrollLeft: 0,
       clientWidth: 500,
       scrollWidth: 2000,
     }),
-    0,
+    null,
   );
 
   assert.equal(
