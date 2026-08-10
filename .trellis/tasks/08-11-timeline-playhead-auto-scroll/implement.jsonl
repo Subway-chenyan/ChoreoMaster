@@ -1,0 +1,2 @@
+{"file":".trellis/spec/frontend/components.md","reason":"Timeline scrollbar behavior must keep scroll handling isolated from seeking interactions."}
+{"file":".trellis/spec/frontend/quality.md","reason":"Frontend interactions should have focused pure-helper regression coverage for boundary behavior."}
