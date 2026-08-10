@@ -119,6 +119,7 @@ interface PendingStageBackground {
 }
 
 type ResetProjectDialogMode = 'backup-choice' | 'backup-failed';
+type Export2DView = 'audience' | 'rehearsal';
 
 interface ProjectSaveSnapshot {
   projectId: string | null;
@@ -414,6 +415,7 @@ const App: React.FC = () => {
   const [exportIncludeLabels, setExportIncludeLabels] = useState<boolean>(true);
   const [exportIncludeGrid, setExportIncludeGrid] = useState<boolean>(true);
   const [exportResolution, setExportResolution] = useState<'1080p' | '2k' | '4k'>('1080p');
+  const [export2DView, setExport2DView] = useState<Export2DView>('audience');
   const [exportCameraAngle, setExportCameraAngle] = useState<CameraAngle>('judge');
   const [showExportModal, setShowExportModal] = useState(false);
   const [export2D, setExport2D] = useState(true);
@@ -784,8 +786,14 @@ const App: React.FC = () => {
         image.src = assetUrl;
       });
       return {
-        draw: async (ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number) => {
+        draw: async (ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, _timeMs: number, flipY?: boolean) => {
+          ctx.save();
+          if (flipY) {
+            ctx.translate(0, y * 2 + height);
+            ctx.scale(1, -1);
+          }
           ctx.drawImage(image, x, y, width, height);
+          ctx.restore();
         },
         dispose: () => {},
       };
@@ -813,7 +821,7 @@ const App: React.FC = () => {
       });
 
       return {
-        draw: async (ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, timeMs: number) => {
+        draw: async (ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, timeMs: number, flipY?: boolean) => {
           if (video.readyState < HTMLMediaElement.HAVE_METADATA) return;
           const desired = getExportVideoTime(video, timeMs / 1000, video.loop);
           if (Math.abs(video.currentTime - desired) > 0.03) {
@@ -835,7 +843,13 @@ const App: React.FC = () => {
             });
           }
           if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+            ctx.save();
+            if (flipY) {
+              ctx.translate(0, y * 2 + height);
+              ctx.scale(1, -1);
+            }
             ctx.drawImage(video, x, y, width, height);
+            ctx.restore();
           }
         },
         dispose: () => {
@@ -3268,13 +3282,14 @@ const App: React.FC = () => {
   const renderFrameToCanvas = async (
     canvas: HTMLCanvasElement,
     timeMs: number,
-    opts?: { includeLabels?: boolean; includeGrid?: boolean; bgColor?: string; stageBackgroundImage?: HTMLImageElement | null; ledRenderer?: { draw: (ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, timeMs: number) => Promise<void> | void } | null; }
+    opts?: { includeLabels?: boolean; includeGrid?: boolean; bgColor?: string; stageBackgroundImage?: HTMLImageElement | null; ledRenderer?: { draw: (ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, timeMs: number, flipY?: boolean) => Promise<void> | void } | null; view?: Export2DView; }
   ) => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     const includeLabels = opts?.includeLabels ?? true;
     const includeGrid = opts?.includeGrid ?? true;
     const bgColor = opts?.bgColor ?? '#1f2937';
+    const isRehearsalView = opts?.view === 'rehearsal';
     const w = canvas.width;
     const h = canvas.height;
     const scale = w / 1280; // baseline: 1280px wide
@@ -3292,6 +3307,8 @@ const App: React.FC = () => {
     const renderY = (h - renderH) / 2;
     const leftMainEdge = renderX + stageXToViewPercent(0, stageConfig) / 100 * renderW;
     const rightMainEdge = renderX + stageXToViewPercent(100, stageConfig) / 100 * renderW;
+    const mapStageYRatio = (ratio: number) => renderY + (isRehearsalView ? 1 - ratio : ratio) * renderH;
+    const mapStageYPercent = (percent: number) => mapStageYRatio(percent / 100);
 
     ctx.fillStyle = '#0f172a';
     ctx.fillRect(0, 0, w, h);
@@ -3300,11 +3317,15 @@ const App: React.FC = () => {
     if (opts?.stageBackgroundImage) {
       ctx.save();
       ctx.globalAlpha = stageConfig.background?.opacity ?? 0.5;
+      if (isRehearsalView) {
+        ctx.translate(0, renderY * 2 + renderH);
+        ctx.scale(1, -1);
+      }
       ctx.drawImage(opts.stageBackgroundImage, renderX, renderY, renderW, renderH);
       ctx.restore();
     }
     if (opts?.ledRenderer) {
-      await opts.ledRenderer.draw(ctx, leftMainEdge, renderY, rightMainEdge - leftMainEdge, renderH, timeMs);
+      await opts.ledRenderer.draw(ctx, leftMainEdge, renderY, rightMainEdge - leftMainEdge, renderH, timeMs, isRehearsalView);
     }
     ctx.strokeStyle = '#334155';
     ctx.lineWidth = scale;
@@ -3322,7 +3343,7 @@ const App: React.FC = () => {
         ctx.beginPath(); ctx.moveTo(gx, renderY); ctx.lineTo(gx, renderY + renderH); ctx.stroke();
       });
       depthGridMarks.forEach((mark) => {
-        const gy = renderY + mark.positionRatio * renderH;
+        const gy = mapStageYRatio(mark.positionRatio);
         ctx.globalAlpha = mark.offsetMeters === 0 ? 0.55 : 0.2;
         ctx.lineWidth = (mark.offsetMeters === 0 ? 1.5 : 1) * scale;
         ctx.beginPath(); ctx.moveTo(renderX, gy); ctx.lineTo(renderX + renderW, gy); ctx.stroke();
@@ -3331,7 +3352,7 @@ const App: React.FC = () => {
       ctx.globalAlpha = 0.72;
       ctx.lineWidth = 2.5 * scale;
       if (stageConfig.showStageLines !== false) STAGE_THIRD_POSITIONS.forEach((position) => {
-        const gy = renderY + position * renderH;
+        const gy = mapStageYRatio(position);
         ctx.beginPath(); ctx.moveTo(renderX, gy); ctx.lineTo(renderX + renderW, gy); ctx.stroke();
       });
       ctx.globalAlpha = 1;
@@ -3360,7 +3381,7 @@ const App: React.FC = () => {
     }
 
     const ledWidth = Math.min(renderW, ((stageConfig.ledWidth ?? stageConfig.width) / totalStageW) * renderW);
-    const ledY = renderY + getLedStageYPercent(stageConfig) / 100 * renderH;
+    const ledY = mapStageYPercent(getLedStageYPercent(stageConfig));
     ctx.strokeStyle = 'rgba(232,121,249,0.95)';
     ctx.lineWidth = Math.max(2, 2 * scale);
     ctx.setLineDash([6 * scale, 4 * scale]);
@@ -3382,6 +3403,9 @@ const App: React.FC = () => {
     const drawDirectionArrow = (size: number) => {
       const arrowSize = size * 1.35;
       ctx.save();
+      if (isRehearsalView) {
+        ctx.scale(1, -1);
+      }
       ctx.strokeStyle = '#ffffff';
       ctx.fillStyle = '#ffffff';
       ctx.lineWidth = Math.max(4, 3 * scale);
@@ -3418,7 +3442,7 @@ const App: React.FC = () => {
         ? getPropCenterFromAnchor(pos, rotation, p, stageConfig)
         : pos;
       const cx = renderX + (stageXToViewPercent(renderPosition.x, stageConfig) / 100) * renderW;
-      const cy = renderY + (renderPosition.y / 100) * renderH;
+      const cy = mapStageYPercent(renderPosition.y);
 
       if (p.type === 'prop') {
         const propLift = platformOccupancy.entityLiftById[p.id] ?? 0;
@@ -3428,7 +3452,7 @@ const App: React.FC = () => {
 
         ctx.save();
         ctx.translate(cx, cy);
-        ctx.rotate(rot);
+        ctx.rotate(isRehearsalView ? -rot : rot);
 
         if (p.polygonPoints && p.polygonPoints.length >= 3) {
           ctx.beginPath();
@@ -3470,7 +3494,7 @@ const App: React.FC = () => {
         const rot = rotation * Math.PI / 180;
         ctx.save();
         ctx.translate(cx, cy);
-        ctx.rotate(rot);
+        ctx.rotate(isRehearsalView ? -rot : rot);
         ctx.fillStyle = p.color;
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 2 * scale;
@@ -3509,8 +3533,9 @@ const App: React.FC = () => {
     });
 
     const rulerHeight = 28 * scale;
+    const rulerY = isRehearsalView ? renderY : renderY + renderH - rulerHeight;
     ctx.fillStyle = 'rgba(2,6,23,0.78)';
-    ctx.fillRect(renderX, renderY + renderH - rulerHeight, renderW, rulerHeight);
+    ctx.fillRect(renderX, rulerY, renderW, rulerHeight);
     const gridMarks = createCenteredStageGridMarks(totalStageW, gridScale);
     ctx.strokeStyle = '#e2e8f0';
     ctx.fillStyle = '#f8fafc';
@@ -3521,18 +3546,18 @@ const App: React.FC = () => {
     gridMarks.forEach((mark) => {
       const x = renderX + mark.positionRatio * renderW;
       ctx.beginPath();
-      ctx.moveTo(x, renderY + renderH - rulerHeight);
-      ctx.lineTo(x, renderY + renderH - rulerHeight + 7 * scale);
+      ctx.moveTo(x, rulerY);
+      ctx.lineTo(x, rulerY + 7 * scale);
       ctx.stroke();
       if (shouldShowStageGridLabels(gridScale)) {
-        ctx.fillText(formatStageGridLabel(mark.offsetMeters), x, renderY + renderH - rulerHeight + 8 * scale);
+        ctx.fillText(formatStageGridLabel(mark.offsetMeters), x, rulerY + 8 * scale);
       }
     });
     ctx.fillStyle = '#ffffff';
     ctx.font = `${Math.max(7, Math.round(8 * scale))}px sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'alphabetic';
-    ctx.fillText('舞台前沿', Math.floor(renderX + renderW / 2), renderY + renderH - 2 * scale);
+    ctx.fillText('舞台前沿', Math.floor(renderX + renderW / 2), isRehearsalView ? rulerY + rulerHeight - 2 * scale : renderY + renderH - 2 * scale);
   };
 
   const handleExportVideo2D = async () => {
@@ -3555,7 +3580,7 @@ const App: React.FC = () => {
     const totalFrames = Math.ceil(totalMs / 1000 * fps);
     const stepMs = 1000 / fps;
     const reportExportProgress = createThrottledProgressReporter(setExportProgress);
-    const downloadBaseName = `CosStage-export-${Math.round(inPointMs)}-${Math.round(outPointMs)}`;
+    const downloadBaseName = `CosStage-export-${export2DView}-${Math.round(inPointMs)}-${Math.round(outPointMs)}`;
     const isDesktopElectron = Boolean(window.electronAPI?.isElectron);
     const hasWebCodecs = typeof VideoEncoder !== 'undefined';
     const videoBitrate = exportResolution === '4k' ? 20_000_000 : exportResolution === '2k' ? 10_000_000 : 5_000_000;
@@ -3708,6 +3733,7 @@ const App: React.FC = () => {
             includeGrid: exportIncludeGrid,
             stageBackgroundImage,
             ledRenderer,
+            view: export2DView,
           });
           const frame = await createFrameFromCanvas((i * 1_000_000) / fps, 1_000_000 / fps);
           try {
@@ -3938,6 +3964,7 @@ const App: React.FC = () => {
         includeGrid: exportIncludeGrid,
         stageBackgroundImage,
         ledRenderer,
+        view: export2DView,
       });
       reportExportProgress(0.7 + Math.min(0.3, (currentFrameIdx / totalFrames) * 0.3));
 
@@ -5604,11 +5631,22 @@ const App: React.FC = () => {
                     <option value="4k">4K（3840×2160）</option>
                   </select>
                 </label>
+                <label className={`text-xs text-slate-400 ${export2D ? '' : 'opacity-50'}`}>
+                  <span className="mb-2 block">2D 视角</span>
+                  <select disabled={!export2D} value={export2DView} onChange={(e) => setExport2DView(e.target.value as Export2DView)} className="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white disabled:cursor-not-allowed">
+                    <option value="audience">评委视角</option>
+                    <option value="rehearsal">演员排练视角</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
                 <label className={`text-xs text-slate-400 ${export3D ? '' : 'opacity-50'}`}>
                   <span className="mb-2 block">3D 机位</span>
                   <select disabled={!export3D} value={exportCameraAngle} onChange={(e) => setExportCameraAngle(e.target.value as CameraAngle)} className="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white disabled:cursor-not-allowed">
                     <option value="judge">评委视角</option>
-                    <option value="overhead">45°俯视</option>
+                    <option value="overhead">前方45°俯视</option>
+                    <option value="rear-overhead">后方45°俯视</option>
                   </select>
                 </label>
               </div>

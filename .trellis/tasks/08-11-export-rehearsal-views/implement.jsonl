@@ -1,0 +1,7 @@
+{"file":".trellis/spec/frontend/index.md","reason":"Frontend guideline index for React/Electron changes"}
+{"file":".trellis/spec/frontend/quality.md","reason":"Type-check and export performance expectations"}
+{"file":".trellis/spec/frontend/three-interaction.md","reason":"3D camera/export changes must not affect live interaction contracts"}
+{"file":".trellis/spec/frontend/react-pitfalls.md","reason":"React state and dependency safety"}
+{"file":".trellis/spec/frontend/components.md","reason":"Semantic controls and compact export modal UI"}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"Typed export view and camera option values"}
+{"file":".trellis/spec/guides/pre-implementation-checklist.md","reason":"Pre-code checklist for constants, logic, and types"}

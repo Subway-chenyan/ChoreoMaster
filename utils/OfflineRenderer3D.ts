@@ -7,7 +7,7 @@ import { getPropCenterFromAnchor } from './prop-pivot';
 import { createCenteredStageGridMarks, STAGE_THIRD_POSITIONS } from './stage-grid';
 import { getLedBottomHeight, getLedZPosition, resolveStageBackgroundUrl } from './stage-config';
 
-export type CameraAngle = 'judge' | 'overhead';
+export type CameraAngle = 'judge' | 'overhead' | 'rear-overhead';
 
 interface OfflineSceneResult {
   renderer: THREE.WebGLRenderer;
@@ -41,10 +41,15 @@ function createCamera(angle: CameraAngle, stageConfig: StageConfig, aspect: numb
     // 评委视角：舞台前方正中，眼高1.7m，距前缘14m
     cam.position.set(0, 1.7, depth / 2 + Math.max(14, fitDistance));
     cam.lookAt(0, 1.0, 0);
-  } else {
-    // 45°俯视：舞台侧前方上方
+  } else if (angle === 'overhead') {
+    // 前方45°俯视：舞台前方上空
     const dist = Math.max(depth / 2 + 18, fitDistance * 1.15);
     cam.position.set(0, dist, dist);
+    cam.lookAt(0, 0, 0);
+  } else {
+    // 后方45°俯视：舞台后方上空，便于检查背场到前场的移动关系
+    const dist = Math.max(depth / 2 + 18, fitDistance * 1.15);
+    cam.position.set(0, dist, -dist);
     cam.lookAt(0, 0, 0);
   }
   cam.updateProjectionMatrix();
