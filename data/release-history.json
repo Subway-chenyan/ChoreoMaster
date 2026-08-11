@@ -1,7 +1,22 @@
 {
   "schemaVersion": 1,
-  "currentVersion": "1.2.1",
+  "currentVersion": "1.2.2",
   "releases": [
+    {
+      "version": "1.2.2",
+      "date": "2026-08-11",
+      "kind": "patch",
+      "title": "CosStage 1.2.2",
+      "summary": "时间轴播放时播放头自动居中锁定并支持手动滚动区域播放时不会被重置；导出排练视角提升使用稳定性与错误修正。",
+      "changes": [
+        {
+          "kind": "patch",
+          "text": "时间轴播放时播放头自动居中锁定并支持手动滚动区域播放时不会被重置；导出排练视角提升使用稳定性与错误修正。"
+        }
+      ],
+      "breakingChanges": [],
+      "migrationSteps": []
+    },
     {
       "version": "1.2.1",
       "date": "2026-08-07",
