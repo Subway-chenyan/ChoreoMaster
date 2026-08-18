@@ -1,11 +1,12 @@
 
 import React, { useEffect, useRef, useMemo, useState } from 'react';
 import { AudioMarker, Frame, MotionControlPoint, ObjectMotion, Performer, TransitionSegment } from '../types';
-import { Flag, Pause, Play, PlusCircle, SkipBack, Trash2, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { ChevronDown, ChevronUp, Flag, Pause, Play, PlusCircle, SkipBack, Trash2, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { EditableNumberInput } from './FormControls';
 import { createTransitionId, getDefaultBezierControlPoints, getGapSelectionId } from '../utils/transitions';
 import { getTimelineFollowPlayheadScrollLeft, getTimelineHorizontalWheelDelta } from '../utils/timeline-scroll';
 import { formatFrameDuration, isKeyframeFrame, normalizeFrameDuration } from '../utils/frame-keyframes';
+import { resolveCompactPhoneTimelineGeometry } from '../utils/adaptive-layout';
 
 const KEYFRAME_MIN_VISUAL_WIDTH_PX = 24;
 
@@ -42,6 +43,8 @@ interface TimelineProps {
     showTransitionEditor?: boolean;
     performerNotes?: import('../types').PerformerNote[];
     onOpenNoteDrawer?: (performerId: string) => void;
+    density?: 'standard' | 'phone-compact' | 'phone-expanded';
+    onToggleExpanded?: () => void;
 }
 
 export const Timeline: React.FC<TimelineProps> = ({
@@ -77,6 +80,8 @@ export const Timeline: React.FC<TimelineProps> = ({
     showTransitionEditor = false,
     performerNotes = [],
     onOpenNoteDrawer,
+    density = 'standard',
+    onToggleExpanded,
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -85,9 +90,25 @@ export const Timeline: React.FC<TimelineProps> = ({
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState<string>('');
     const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null);
-    const toolbarHeight = 48;
-    const trackHeight = Math.max(84, heightPx - toolbarHeight);
-    const clipHeight = Math.min(80, Math.max(52, trackHeight - 28));
+    const compactGeometry = density === 'phone-compact'
+        ? resolveCompactPhoneTimelineGeometry(heightPx)
+        : null;
+    const toolbarHeight = compactGeometry
+        ? compactGeometry.toolbarVisual.bottom - compactGeometry.toolbarVisual.top
+        : 48;
+    const trackHeight = compactGeometry
+        ? compactGeometry.trackVisual.bottom - compactGeometry.trackVisual.top
+        : Math.max(84, heightPx - toolbarHeight);
+    const clipHeight = compactGeometry
+        ? compactGeometry.clipVisual.bottom - compactGeometry.clipVisual.top
+        : Math.min(80, Math.max(52, trackHeight - 28));
+    const clipTop = compactGeometry
+        ? compactGeometry.clipVisual.top - compactGeometry.trackVisual.top
+        : 0;
+    const timelineStyle: React.CSSProperties & { '--phone-timeline-content-height': string } = {
+        height: heightPx,
+        '--phone-timeline-content-height': `${heightPx}px`,
+    };
 
     // Dragging State
     const [draggingState, setDraggingState] = useState<{
@@ -449,8 +470,9 @@ export const Timeline: React.FC<TimelineProps> = ({
 
     return (
         <div
-            className="relative flex-none bg-slate-950 border-t border-slate-800 flex flex-col select-none overflow-hidden"
-            style={{ height: heightPx }}
+            className={`relative flex-none bg-slate-950 border-t border-slate-800 flex flex-col select-none overflow-hidden ${density === 'phone-compact' ? 'phone-timeline--compact' : density === 'phone-expanded' ? 'phone-timeline--expanded' : ''}`}
+            data-density={density}
+            style={timelineStyle}
             onPointerUp={onPointerUp}
             onPointerMove={onPointerMove}
             onPointerCancel={onPointerUp}
@@ -458,9 +480,9 @@ export const Timeline: React.FC<TimelineProps> = ({
             {/* Toolbar */}
             <div className="timeline-toolbar min-h-12 flex items-center gap-3 px-2 sm:px-4 bg-slate-900 border-b border-slate-800 justify-between z-20 relative overflow-hidden">
                 <div className="flex items-center gap-2 min-w-max">
-                    <button className="coarse-touch-target p-1.5 hover:bg-slate-800 rounded text-slate-400 flex items-center justify-center" onClick={() => onSeek(0)}><SkipBack size={16} /></button>
+                    <button className="timeline-touch-target coarse-touch-target p-1.5 hover:bg-slate-800 rounded text-slate-400 flex items-center justify-center" onClick={() => onSeek(0)}><SkipBack size={16} /></button>
                     <button
-                        className={`coarse-touch-target p-1.5 rounded text-white shadow-lg flex items-center gap-1 px-3 transition-colors ${isPlaying ? 'bg-amber-600 hover:bg-amber-500' : 'bg-blue-600 hover:bg-blue-500'}`}
+                        className={`timeline-touch-target coarse-touch-target p-1.5 rounded text-white shadow-lg flex items-center gap-1 px-3 transition-colors ${isPlaying ? 'bg-amber-600 hover:bg-amber-500' : 'bg-blue-600 hover:bg-blue-500'}`}
                         onClick={onPlayPause}
                     >
                         {isPlaying ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}
@@ -468,11 +490,23 @@ export const Timeline: React.FC<TimelineProps> = ({
                     </button>
                     <span className="timeline-toolbar-time font-mono text-slate-300 ml-4 text-sm">{formatTime(currentTime)}</span>
                     <span className="desktop-only text-[10px] text-slate-500 ml-2">(空格键)</span>
+                    {density !== 'standard' && onToggleExpanded && (
+                        <button
+                            type="button"
+                            onClick={onToggleExpanded}
+                            className="timeline-touch-target coarse-touch-target flex items-center justify-center rounded text-slate-300 hover:bg-slate-800"
+                            aria-label={density === 'phone-expanded' ? '收起时间轴' : '展开时间轴'}
+                            title={density === 'phone-expanded' ? '收起时间轴' : '展开时间轴'}
+                        >
+                            {density === 'phone-expanded' ? <ChevronDown size={17} /> : <ChevronUp size={17} />}
+                        </button>
+                    )}
                 </div>
-                <div className="flex items-center gap-2 sm:gap-4 min-w-max">
+                {density !== 'phone-compact' && (
+                <div className="timeline-secondary-actions flex items-center gap-2 sm:gap-4 min-w-max">
                     <button
                         onClick={onAddFrame}
-                        className="coarse-touch-target flex items-center gap-1 text-xs bg-slate-800 hover:bg-slate-700 px-2 py-1 rounded border border-slate-700 text-slate-300"
+                        className="timeline-touch-target coarse-touch-target flex items-center gap-1 text-xs bg-slate-800 hover:bg-slate-700 px-2 py-1 rounded border border-slate-700 text-slate-300"
                         title="在当前时间添加队形"
                     >
                         <PlusCircle size={12} /> 添加
@@ -480,21 +514,21 @@ export const Timeline: React.FC<TimelineProps> = ({
                     <button
                         type="button"
                         onClick={addMarker}
-                        className="coarse-touch-target flex items-center gap-1 rounded border border-blue-500/40 bg-blue-500/10 px-2 py-1 text-xs text-blue-300 hover:bg-blue-500/20"
+                        className="timeline-touch-target coarse-touch-target flex items-center gap-1 rounded border border-blue-500/40 bg-blue-500/10 px-2 py-1 text-xs text-blue-300 hover:bg-blue-500/20"
                         title="在当前播放头添加音频标记"
                     >
                         <Flag size={12} /> 标记
                     </button>
                     <div className="flex items-center gap-1">
-                        <button className="coarse-touch-target p-1 hover:bg-slate-800 rounded text-slate-400 flex items-center justify-center" onClick={() => setZoom(Math.max(20, zoom - 20))}><ZoomOut size={14} /></button>
+                        <button className="timeline-touch-target coarse-touch-target p-1 hover:bg-slate-800 rounded text-slate-400 flex items-center justify-center" onClick={() => setZoom(Math.max(20, zoom - 20))}><ZoomOut size={14} /></button>
                         <div className="desktop-only w-20 h-1 bg-slate-700 rounded-full overflow-hidden">
                             <div className="h-full bg-slate-500" style={{ width: `${(zoom / 200) * 100}%` }}></div>
                         </div>
-                        <button className="coarse-touch-target p-1 hover:bg-slate-800 rounded text-slate-400 flex items-center justify-center" onClick={() => setZoom(Math.min(200, zoom + 20))}><ZoomIn size={14} /></button>
+                        <button className="timeline-touch-target coarse-touch-target p-1 hover:bg-slate-800 rounded text-slate-400 flex items-center justify-center" onClick={() => setZoom(Math.min(200, zoom + 20))}><ZoomIn size={14} /></button>
                     <button
                         onClick={onExportVideo}
                         disabled={isExporting}
-                        className={`text-xs ml-2 px-3 py-1 rounded border ${isExporting
+                        className={`timeline-touch-target timeline-export-target text-xs ml-2 px-3 py-1 rounded border ${isExporting
                             ? 'bg-gray-500 text-white border-gray-500'
                             : 'bg-green-600 hover:bg-green-500 text-white border-green-500'
                             }`}
@@ -514,6 +548,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                     )}
                 </div>
                 </div>
+                )}
             </div>
             {/* Scrollable Timeline Area */}
             <div
@@ -536,7 +571,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                     />
 
                     {/* Ruler */}
-                    <div className="h-6 bg-slate-900/80 border-b border-slate-800 relative text-[10px] text-slate-500 z-10 pointer-events-none">
+                    <div className="timeline-ruler h-6 bg-slate-900/80 border-b border-slate-800 relative text-[10px] text-slate-500 z-10 pointer-events-none">
                         {Array.from({ length: Math.ceil(duration / 1000 / rulerIntervalSeconds) + 1 }).map((_, i) => (
                             <div key={i} className="absolute top-0 bottom-0 border-l border-slate-700 pl-1 select-none whitespace-nowrap" style={{ left: i * rulerIntervalSeconds * zoom }}>
                                 {formatTime(i * rulerIntervalSeconds * 1000)}
@@ -549,7 +584,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                         <button
                             key={marker.id}
                             type="button"
-                            className="absolute top-0 bottom-0 z-40 w-3 -translate-x-1/2 cursor-pointer border-0 bg-transparent p-0"
+                            className="timeline-touch-target timeline-marker-target absolute top-0 bottom-0 z-40 w-3 -translate-x-1/2 cursor-pointer border-0 bg-transparent p-0"
                             style={{
                                 left: (marker.timeMs / 1000) * zoom,
                             }}
@@ -595,7 +630,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                     )}
 
                     {/* Frame Tracks - Vertically Centered */}
-                    <div className="absolute top-6 bottom-0 left-0 right-0 flex items-center">
+                    <div className="timeline-frame-track absolute top-6 bottom-0 left-0 right-0 flex items-center">
 
                         {/* Render Gaps (Transitions) */}
                         {gapSegments.map((gap, i) => (
@@ -609,9 +644,10 @@ export const Timeline: React.FC<TimelineProps> = ({
                                     onSeek(gap.start + (gap.duration / 2));
                                     onSelectTransition(getGapSelectionId(gap));
                                 }}
-                                className={`absolute top-0 flex items-center justify-center overflow-hidden border transition-colors ${gap.prevId ? 'cursor-pointer' : 'cursor-not-allowed'} ${selectedTransitionId === getGapSelectionId(gap) ? 'border-blue-400 bg-blue-500/10' : gap.transition ? 'border-emerald-500/40 bg-emerald-500/5 hover:bg-emerald-500/10' : 'border-slate-700/50 bg-transparent hover:bg-slate-800/30'}`}
+                                className={`timeline-touch-target timeline-transition-target absolute top-0 flex items-center justify-center overflow-hidden border transition-colors ${gap.prevId ? 'cursor-pointer' : 'cursor-not-allowed'} ${selectedTransitionId === getGapSelectionId(gap) ? 'border-blue-400 bg-blue-500/10' : gap.transition ? 'border-emerald-500/40 bg-emerald-500/5 hover:bg-emerald-500/10' : 'border-slate-700/50 bg-transparent hover:bg-slate-800/30'}`}
                                 style={{
                                     left: (gap.start / 1000) * zoom,
+                                    top: clipTop,
                                     width: (gap.duration / 1000) * zoom,
                                     height: clipHeight,
                                 }}
@@ -641,6 +677,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                                 className="absolute top-0 group"
                                 style={{
                                     left: (frame.startTime / 1000) * zoom,
+                                    top: clipTop,
                                     height: clipHeight,
                                 }}
                             >
@@ -650,7 +687,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                                             onSelectTransition(null);
                                             onSelectFrame(frame.id);
                                         }}
-                                        className={`timeline-clip relative h-full rounded-lg flex flex-col items-center justify-center cursor-grab active:cursor-grabbing overflow-hidden transition-all border select-none shadow-lg
+                                        className={`timeline-touch-target timeline-clip-target timeline-clip relative h-full rounded-lg flex flex-col items-center justify-center cursor-grab active:cursor-grabbing overflow-hidden transition-all border select-none shadow-lg
                                 ${selectedFrameId === frame.id
                                             ? isKeyframe
                                                 ? 'bg-fuchsia-500/20 border-fuchsia-300 shadow-fuchsia-900/30 z-20'
@@ -693,7 +730,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                                                         setEditingId(null);
                                                     }
                                                 }}
-                                                className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[10px] text-slate-200"
+                                                className="timeline-form-target bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[10px] text-slate-200"
                                             />
                                         ) : (
                                             frame.name
@@ -716,7 +753,7 @@ export const Timeline: React.FC<TimelineProps> = ({
 
                                         {/* Resize Handle (Right) */}
                                     <div
-                                            className={`absolute right-0 top-0 bottom-0 w-6 md:w-3 cursor-ew-resize z-30 flex items-center justify-center group/handle touch-none ${isKeyframe ? 'hover:bg-fuchsia-400/20' : 'hover:bg-blue-500/30'}`}
+                                            className={`timeline-touch-target timeline-resize-target absolute right-0 top-0 bottom-0 w-6 md:w-3 cursor-ew-resize z-30 flex items-center justify-center group/handle touch-none ${isKeyframe ? 'hover:bg-fuchsia-400/20' : 'hover:bg-blue-500/30'}`}
                                             onPointerDown={(e) => handleFrameDragStart(e, frame, 'resize')}
                                             title="拖动调整时长"
                                         >
@@ -729,7 +766,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                     </div>
                 </div>
             </div>
-            {showTransitionEditor && selectedGap && selectedTransition && selectedGapFrames && (
+            {density !== 'phone-compact' && showTransitionEditor && selectedGap && selectedTransition && selectedGapFrames && (
                 <div
                     className="absolute bottom-3 right-3 z-[70] w-[min(420px,calc(100vw-1.5rem))] rounded-xl border border-slate-700 bg-slate-900/98 p-3 shadow-2xl"
                     onPointerDown={(event) => event.stopPropagation()}
@@ -746,7 +783,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                         <button
                             type="button"
                             onClick={() => onSelectTransition(null)}
-                            className="rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-white"
+                            className="timeline-touch-target rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-white"
                             aria-label="关闭过渡编辑"
                         >
                             <X size={15} />
@@ -776,7 +813,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                                                     event.stopPropagation();
                                                     onSelectedMotionPerformerChange(event.currentTarget.dataset.motionId || performer.id);
                                                 }}
-                                                className={`flex items-center justify-between rounded px-2 py-1.5 text-left text-[11px] ${selected ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'}`}
+                                                className={`timeline-touch-target flex items-center justify-between rounded px-2 py-1.5 text-left text-[11px] ${selected ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'}`}
                                             >
                                                 <span className="truncate">{performer.name}</span>
                                                 <span className="ml-2 shrink-0 text-[9px] opacity-75">
@@ -797,7 +834,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                                             pathType: event.target.value as 'linear' | 'bezier',
                                             controlPoints: event.target.value === 'bezier' ? (selectedMotion.controlPoints || undefined) : undefined,
                                         })}
-                                        className="mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 text-xs text-slate-100 outline-none focus:border-blue-500"
+                                        className="timeline-form-target mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 text-xs text-slate-100 outline-none focus:border-blue-500"
                                     >
                                         <option value="linear">直线</option>
                                         <option value="bezier">Bezier</option>
@@ -808,7 +845,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                                     <select
                                         value={selectedMotion.rotationMode || 'lerp'}
                                         onChange={(event) => updateSelectedMotion({ rotationMode: event.target.value as 'fixed' | 'lerp' })}
-                                        className="mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 text-xs text-slate-100 outline-none focus:border-blue-500"
+                                        className="timeline-form-target mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 text-xs text-slate-100 outline-none focus:border-blue-500"
                                     >
                                         <option value="lerp">旋转插值</option>
                                         <option value="fixed">固定朝向</option>
@@ -819,7 +856,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                                         type="button"
                                         onClick={resetSelectedMotion}
                                         disabled={!selectedGap.transition || !selectedMotionPerformerId || !selectedGap.transition.objectMotions[selectedMotionPerformerId]}
-                                        className="h-9 w-full rounded-md border border-slate-700 text-xs text-slate-300 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+                                        className="timeline-touch-target h-9 w-full rounded-md border border-slate-700 text-xs text-slate-300 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
                                     >
                                         重置当前对象
                                     </button>
@@ -840,7 +877,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                                                 onFrameRotationChange(selectedGapFrames.fromFrame.id, selectedMotionPerformerId, value);
                                             }
                                         }}
-                                        className="mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 font-mono text-xs text-slate-100 outline-none focus:border-blue-500"
+                                        className="timeline-form-target mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 font-mono text-xs text-slate-100 outline-none focus:border-blue-500"
                                     />
                                 </label>
                                 <label className="text-[10px] text-slate-400">
@@ -857,7 +894,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                                                 onFrameRotationChange(selectedGapFrames.toFrame.id, selectedMotionPerformerId, value);
                                             }
                                         }}
-                                        className="mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 font-mono text-xs text-slate-100 outline-none focus:border-blue-500"
+                                        className="timeline-form-target mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 font-mono text-xs text-slate-100 outline-none focus:border-blue-500"
                                     />
                                 </label>
                             </div>
@@ -874,7 +911,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                                                             step={0.1}
                                                             value={selectedMotion.controlPoints?.[index]?.[axis] ?? 0}
                                                             onChange={(value) => updateControlPoint(index, axis, value)}
-                                                            className="mt-1 h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 font-mono text-[11px] text-slate-100 outline-none focus:border-blue-500"
+                                                            className="timeline-form-target mt-1 h-8 w-full rounded border border-slate-700 bg-slate-900 px-2 font-mono text-[11px] text-slate-100 outline-none focus:border-blue-500"
                                                         />
                                                     </label>
                                                 ))}
@@ -887,7 +924,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                     )}
                 </div>
             )}
-            {selectedMarker && (
+            {density !== 'phone-compact' && selectedMarker && (
                 <div
                     className="absolute bottom-3 left-1/2 z-[70] w-[min(360px,calc(100vw-1.5rem))] -translate-x-1/2 rounded-xl border border-slate-700 bg-slate-900/98 p-3 shadow-2xl"
                     onPointerDown={(event) => event.stopPropagation()}
@@ -900,7 +937,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                         <button
                             type="button"
                             onClick={() => setSelectedMarkerId(null)}
-                            className="rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-white"
+                            className="timeline-touch-target rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-white"
                             aria-label="关闭标记编辑"
                         >
                             <X size={15} />
@@ -918,7 +955,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                                         updateMarker(selectedMarker.id, { label: '未命名标记' });
                                     }
                                 }}
-                                className="mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 text-xs text-slate-100 outline-none focus:border-blue-500"
+                                    className="timeline-form-target mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 text-xs text-slate-100 outline-none focus:border-blue-500"
                             />
                         </label>
                         <label className="text-[10px] text-slate-400">
@@ -937,7 +974,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                                         });
                                     }
                                 }}
-                                className="mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 font-mono text-xs text-slate-100 outline-none focus:border-blue-500"
+                                    className="timeline-form-target mt-1 h-9 w-full rounded-md border border-slate-700 bg-slate-950 px-2 font-mono text-xs text-slate-100 outline-none focus:border-blue-500"
                             />
                         </label>
                         <label className="text-[10px] text-slate-400">
@@ -946,7 +983,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                                 type="color"
                                 value={selectedMarker.color}
                                 onChange={(event) => updateMarker(selectedMarker.id, { color: event.target.value })}
-                                className="mt-1 h-9 w-11 cursor-pointer rounded-md border border-slate-700 bg-slate-950 p-1"
+                                className="timeline-form-target mt-1 h-9 w-11 cursor-pointer rounded-md border border-slate-700 bg-slate-950 p-1"
                             />
                         </label>
                     </div>
@@ -954,14 +991,14 @@ export const Timeline: React.FC<TimelineProps> = ({
                         <button
                             type="button"
                             onClick={() => onSeek(selectedMarker.timeMs)}
-                            className="rounded-md border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
+                            className="timeline-touch-target rounded-md border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
                         >
                             跳转到 {formatTime(selectedMarker.timeMs)}
                         </button>
                         <button
                             type="button"
                             onClick={() => deleteMarker(selectedMarker.id)}
-                            className="flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs text-red-300 hover:bg-red-500/10"
+                            className="timeline-touch-target flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs text-red-300 hover:bg-red-500/10"
                         >
                             <Trash2 size={13} /> 删除标记
                         </button>

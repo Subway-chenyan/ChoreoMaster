@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Performer, Frame, PerformerShape, PerformerGroup, PerformerType, PropCategory, AIConfig, AIChoreoPlan, ProjectTemplateData } from '../types';
 import { Plus, Users, Trash2, Download, Grid, Music, Sparkles, Wand2, Film, Copy, Search, Settings, Scaling, Upload, FilePlus, Circle, Square, Triangle, UserCheck, UserX, Eye, EyeOff, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreVertical, Palette, Edit2, Box, Library, Save, StickyNote, Lock, Unlock } from 'lucide-react';
@@ -83,6 +83,7 @@ interface SidebarProps {
     lastSavedAt?: number | null;
     performerNotes?: import('../types').PerformerNote[];
     onOpenNoteDrawer?: (performerId: string) => void;
+    onOverlayChange?: (isOpen: boolean, closeTopOverlay: (() => void) | null) => void;
 }
 
 type Tab = 'library' | 'project' | 'formations' | 'performers' | 'props' | 'presets';
@@ -239,6 +240,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     lastSavedAt = null,
     performerNotes = [],
     onOpenNoteDrawer,
+    onOverlayChange,
 }) => {
     const [activeTab, setActiveTab] = useState<Tab>('library');
     const [editingFrameId, setEditingFrameId] = useState<string | null>(null);
@@ -466,6 +468,30 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const closeContextMenu = () => {
         setContextMenuState({ show: false, x: 0, y: 0, performerIds: [], performerType: null, groupId: null });
     };
+
+    const hasOpenOverlay = propEditorOpen || colorPickerState.show || choreoAgentOpen || contextMenuState.show;
+    const closeTopOverlay = useCallback(() => {
+        if (propEditorOpen) {
+            setPropEditorOpen(false);
+            setPropEditorPerformerId(null);
+            return;
+        }
+        if (colorPickerState.show) {
+            setColorPickerState((previous) => ({ ...previous, show: false }));
+            return;
+        }
+        if (choreoAgentOpen) {
+            setChoreoAgentOpen(false);
+            return;
+        }
+        if (contextMenuState.show) closeContextMenu();
+    }, [choreoAgentOpen, colorPickerState.show, contextMenuState.show, propEditorOpen]);
+
+    useEffect(() => {
+        onOverlayChange?.(hasOpenOverlay, hasOpenOverlay ? closeTopOverlay : null);
+    }, [closeTopOverlay, hasOpenOverlay, onOverlayChange]);
+
+    useEffect(() => () => onOverlayChange?.(false, null), [onOverlayChange]);
 
     // Close context menu when clicking outside
     React.useEffect(() => {
@@ -1643,6 +1669,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             </div>
                             <div className="space-y-3">
                                 <div className="space-y-1">
+                                    <label htmlFor="ai-backend-url" className="text-[10px] text-slate-500 uppercase">AI 后端地址</label>
+                                    <input
+                                        id="ai-backend-url"
+                                        type="url"
+                                        inputMode="url"
+                                        className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                                        placeholder="https://agent.example.com"
+                                        value={aiConfig.backendUrl}
+                                        onChange={(e) => {
+                                            setAgentAccessError(null);
+                                            onAiConfigChange({ ...aiConfig, backendUrl: e.target.value });
+                                        }}
+                                    />
+                                    <p className="text-[10px] leading-4 text-slate-600">
+                                        Android 模拟器访问电脑上的服务请使用 http://10.0.2.2:8000。
+                                    </p>
+                                </div>
+                                <div className="space-y-1">
                                     <label className="text-[10px] text-slate-500 uppercase">Agent 访问 Key</label>
                                     <input
                                         type="password"
@@ -1654,7 +1698,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                             onAiConfigChange({ ...aiConfig, memberToken: e.target.value });
                                         }}
                                     />
-                                    <p className="text-[10px] leading-4 text-slate-600">访问地址由应用统一管理，无需手动配置。</p>
+                                    <p className="text-[10px] leading-4 text-slate-600">配置会保存在当前设备上。</p>
                                 </div>
                             </div>
                         </div>

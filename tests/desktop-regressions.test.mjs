@@ -143,9 +143,225 @@ test('project asset protocol forwards media request headers', async () => {
 
 test('timeline height is the total panel height', async () => {
   const source = await read('components/Timeline.tsx');
-  assert.match(source, /style=\{\{ height: heightPx \}\}/);
-  assert.match(source, /const trackHeight = Math\.max\(84, heightPx - toolbarHeight\)/);
+  assert.match(source, /const timelineStyle:[\s\S]{0,180}height: heightPx/);
+  assert.match(source, /style=\{timelineStyle\}/);
+  assert.match(source, /const compactGeometry = density === 'phone-compact'/);
+  assert.match(source, /compactGeometry\.trackVisual\.bottom - compactGeometry\.trackVisual\.top/);
+  assert.match(source, /Math\.max\(84, heightPx - toolbarHeight\)/);
   assert.match(source, /ctx\.fillRect\(0, 0, (totalWidth|renderWidth), trackHeight\)/);
+});
+
+test('adaptive layout hook coalesces meaningful resize changes without visual scroll churn', async () => {
+  const [source, adaptiveLayout] = await Promise.all([
+    read('hooks/useAdaptiveLayout.ts'),
+    read('utils/adaptive-layout.ts'),
+  ]);
+
+  assert.match(source, /matchMedia\('\(pointer: coarse\)'\)/);
+  assert.match(source, /requestAnimationFrame/);
+  assert.match(source, /window\.addEventListener\('resize'/);
+  assert.match(source, /coarsePointer\.addEventListener\('change'/);
+  assert.match(source, /visualViewport\?\.addEventListener\('resize'/);
+  assert.doesNotMatch(source, /visualViewport\?\.addEventListener\('scroll'/);
+  assert.doesNotMatch(source, /visualViewport\?\.removeEventListener\('scroll'/);
+  assert.match(source, /setLayout\(\(previous\) => retainAdaptiveLayoutState\(previous, readAdaptiveLayout\(\)\)\)/);
+  assert.match(source, /scrollIntoView\(\{ block: 'nearest'/);
+  assert.match(adaptiveLayout, /type AdaptiveLayoutState/);
+  assert.match(source, /isPhoneLayout: boolean/);
+  assert.match(source, /isCompactLayout: boolean/);
+  assert.match(adaptiveLayout, /viewportHeight: number/);
+});
+
+test('mobile history and Sidebar overlays close UI layers without project mutations', async () => {
+  const [historyHook, adaptiveLayout, sidebar] = await Promise.all([
+    read('hooks/useMobileHistoryLayer.ts'),
+    read('utils/adaptive-layout.ts'),
+    read('components/Sidebar.tsx'),
+  ]);
+
+  assert.match(adaptiveLayout, /cosStageMobileEditor/);
+  assert.match(adaptiveLayout, /history\.pushState/);
+  assert.match(adaptiveLayout, /suppressNextPopState/);
+  assert.match(adaptiveLayout, /history\.back\(\)/);
+  assert.match(historyHook, /addEventListener\('popstate'/);
+  assert.match(historyHook, /controller\.release\(\)/);
+  assert.match(historyHook, /resolveMobileBackAction/);
+  assert.match(historyHook, /case 'close-modal'/);
+  assert.match(historyHook, /case 'close-tools'/);
+  assert.match(historyHook, /case 'collapse-timeline'/);
+  assert.doesNotMatch(historyHook, /setPerformers|setFrames|setTransitions|onFrameUpdate/);
+  assert.match(sidebar, /onOverlayChange\?: \(isOpen: boolean, closeTopOverlay: \(\(\) => void\) \| null\) => void/);
+  assert.match(sidebar, /const closeTopOverlay = useCallback/);
+  assert.match(sidebar, /onOverlayChange\?\.\(hasOpenOverlay, hasOpenOverlay \? closeTopOverlay : null\)/);
+});
+
+test('phone chrome exposes essential stage actions with one reusable tools entry point', async () => {
+  const source = await read('components/MobileEditorChrome.tsx');
+
+  assert.match(source, /mobile-editor-chrome/);
+  assert.match(source, /mobile-editor-chrome__touch-target/);
+  assert.match(source, /aria-label="打开完整工具面板"/);
+  assert.match(source, /isPlaying \? '暂停播放' : '开始播放'/);
+  assert.match(source, /viewMode === '2d' \? '切换到 3D 视图' : '切换到 2D 视图'/);
+  assert.match(source, /isStageSettingsOpen \? '关闭舞台设置' : '打开舞台设置'/);
+});
+
+test('phone Back follows modal, tools, transition, timeline visual stacking order', async () => {
+  const [app, chrome, historyHook, adaptiveLayout] = await Promise.all([
+    read('App.tsx'),
+    read('components/MobileEditorChrome.tsx'),
+    read('hooks/useMobileHistoryLayer.ts'),
+    read('utils/adaptive-layout.ts'),
+  ]);
+
+  assert.match(chrome, /mobile-editor-chrome[^"\n]*z-\[60\]/);
+  assert.match(app, /selectedTransition && selectedTransitionFrames[\s\S]{0,180}z-40/);
+  assert.match(app, /hasTransitionEditor:\s*Boolean\(selectedTransition && selectedTransitionFrames\)/);
+  assert.match(app, /onCloseTransition:\s*closeSelectedTransitionEditor/);
+  assert.match(historyHook, /case 'close-transition':[\s\S]{0,100}latest\.onCloseTransition\(\)/);
+  assert.match(adaptiveLayout, /if \(hasModal\) return 'close-modal';[\s\S]{0,100}if \(isToolsOpen\) return 'close-tools';[\s\S]{0,100}if \(hasTransitionEditor\) return 'close-transition'/);
+});
+
+test('App composes a stage-first phone editor without duplicating Sidebar', async () => {
+  const [app, timeline, pkg] = await Promise.all([
+    read('App.tsx'),
+    read('components/Timeline.tsx'),
+    read('package.json'),
+  ]);
+
+  assert.equal((app.match(/<Sidebar\b/g) ?? []).length, 1);
+  assert.match(app, /useAdaptiveLayout\(\)/);
+  assert.match(app, /useMobileHistoryLayer\(/);
+  assert.match(app, /resolvePhoneTimelineHeight\(/);
+  assert.match(app, /setMobileToolsOpen\(true\)[\s\S]{0,100}setPhoneTimelineExpanded\(false\)/);
+  assert.match(app, /setPhoneTimelineExpanded\([\s\S]{0,180}setMobileToolsOpen\(false\)/);
+  assert.match(app, /mobile-tools-backdrop/);
+  assert.match(app, /mobile-tools-drawer/);
+  assert.match(app, /desktop-top-bar/);
+  assert.match(app, /!isPhoneLayout && \([\s\S]{0,120}timeline-resizer/);
+  assert.match(app, /!timelineCollapsed \|\| isPhoneLayout/);
+  assert.match(app, /density=\{isPhoneLayout \? \(phoneTimelineExpanded \? 'phone-expanded' : 'phone-compact'\) : 'standard'\}/);
+  assert.match(timeline, /density\?: 'standard' \| 'phone-compact' \| 'phone-expanded'/);
+  assert.match(timeline, /timeline-secondary-actions/);
+  assert.match(timeline, /density !== 'phone-compact'/);
+  assert.match(timeline, /onToggleExpanded/);
+  assert.match(pkg, /tests\/adaptive-layout\.test\.ts/);
+});
+
+test('expanded phone timeline keeps secondary actions reachable on narrow screens', async () => {
+  const [timeline, css] = await Promise.all([
+    read('components/Timeline.tsx'),
+    read('index.css'),
+  ]);
+
+  assert.match(timeline, /density !== 'phone-compact'[\s\S]{0,120}<div className="timeline-secondary-actions/);
+  assert.match(css, /\.phone-timeline--expanded \.timeline-toolbar\s*\{[\s\S]{0,180}overflow-x: auto/);
+  assert.match(css, /\.phone-timeline--expanded \.timeline-toolbar > div\s*\{[\s\S]{0,140}flex: 0 0 auto;[\s\S]{0,100}min-width: max-content/);
+});
+
+test('coarse-pointer timeline interactions use explicit 48px hit areas without enlarging visuals', async () => {
+  const [timeline, css] = await Promise.all([
+    read('components/Timeline.tsx'),
+    read('index.css'),
+  ]);
+
+  for (const targetClass of [
+    'timeline-export-target',
+    'timeline-marker-target',
+    'timeline-transition-target',
+    'timeline-clip-target',
+    'timeline-resize-target',
+  ]) {
+    assert.match(timeline, new RegExp(`timeline-touch-target[^"}]*${targetClass}|${targetClass}[^"}]*timeline-touch-target`));
+  }
+  assert.match(timeline, /timeline-form-target/);
+  assert.match(css, /@media \(pointer: coarse\)[\s\S]*\.timeline-touch-target::after\s*\{[\s\S]{0,260}width: max\(100%, 48px\);[\s\S]{0,100}height: max\(100%, 48px\)/);
+  assert.match(css, /\.timeline-form-target\s*\{[\s\S]{0,100}min-width: 48px;[\s\S]{0,80}min-height: 48px/);
+});
+
+test('compact phone timeline exposes hit planes through intermediate ancestors to the root boundary', async () => {
+  const [timeline, css] = await Promise.all([
+    read('components/Timeline.tsx'),
+    read('index.css'),
+  ]);
+
+  assert.match(timeline, /resolveCompactPhoneTimelineGeometry\(heightPx\)/);
+  assert.match(timeline, /timeline-frame-track/);
+  assert.match(timeline, /className="timeline-toolbar[^"]*overflow-hidden"/);
+  assert.match(timeline, /className=\{`timeline-scroll[^`]*overflow-y-hidden/);
+  assert.match(css, /\.phone-timeline--compact \.timeline-toolbar\s*\{[\s\S]{0,220}height: 40px;[\s\S]{0,160}overflow: visible;[\s\S]{0,100}z-index: 60/);
+  assert.match(css, /\.phone-timeline--compact \.timeline-scroll\s*\{[\s\S]{0,100}overflow: visible/);
+  assert.match(css, /\.phone-timeline--compact \.timeline-frame-track\s*\{[\s\S]{0,80}top: 0/);
+});
+
+test('phone timeline adds the safe bottom outside its fixed content geometry', async () => {
+  const [timeline, css] = await Promise.all([
+    read('components/Timeline.tsx'),
+    read('index.css'),
+  ]);
+
+  assert.match(timeline, /'--phone-timeline-content-height': `\$\{heightPx\}px`/);
+  assert.match(css, /--app-safe-bottom:\s*env\(safe-area-inset-bottom\)/);
+  assert.match(css, /\.phone-timeline--compact,[\s\S]{0,100}\.phone-timeline--expanded\s*\{[\s\S]{0,260}height:\s*calc\(var\(--phone-timeline-content-height\) \+ var\(--app-safe-bottom\)\)/);
+  assert.match(css, /padding-bottom:\s*var\(--app-safe-bottom\)/);
+});
+
+test('phone tools drawer reserves the bottom gesture inset while Sidebar content remains scrollable', async () => {
+  const [app, sidebar, css] = await Promise.all([
+    read('App.tsx'),
+    read('components/Sidebar.tsx'),
+    read('index.css'),
+  ]);
+
+  assert.match(app, /mobile-tools-drawer fixed inset-y-0/);
+  assert.match(css, /\.mobile-tools-drawer\s*\{[\s\S]{0,260}padding-bottom: env\(safe-area-inset-bottom\);[\s\S]{0,140}overflow: hidden/);
+  assert.match(css, /\.mobile-tools-drawer \.app-sidebar\s*\{[\s\S]{0,220}height: 100%;[\s\S]{0,80}min-height: 0/);
+  assert.match(sidebar, /app-sidebar min-h-0 overflow-hidden/);
+  assert.match(sidebar, /flex-1 min-h-0 overflow-x-hidden[\s\S]{0,160}overflow-y-auto/);
+});
+
+test('phone tools drawer exposes dialog semantics and owns a complete focus lifecycle', async () => {
+  const [app, chrome] = await Promise.all([
+    read('App.tsx'),
+    read('components/MobileEditorChrome.tsx'),
+  ]);
+
+  assert.match(chrome, /export function useMobileToolsDialog/);
+  assert.match(chrome, /aria-expanded=\{isToolsOpen\}/);
+  assert.match(chrome, /aria-controls=\{MOBILE_TOOLS_DRAWER_ID\}/);
+  assert.match(chrome, /resolveFocusTrapTargetIndex/);
+  assert.match(chrome, /isRenderedFocusabilitySnapshot/);
+  assert.match(chrome, /closest\('\[hidden\]'\)/);
+  assert.match(chrome, /closest\('\[inert\]'\)/);
+  assert.match(chrome, /closest\('\[aria-hidden="true"\]'\)/);
+  assert.match(chrome, /window\.getComputedStyle\(element\)/);
+  assert.match(chrome, /element\.getClientRects\(\)\.length > 0/);
+  assert.match(chrome, /event\.key !== 'Tab'/);
+  assert.match(chrome, /backgroundElement\.inert = true/);
+  assert.match(chrome, /backgroundElement\.setAttribute\('aria-hidden', 'true'\)/);
+  assert.match(chrome, /triggerElement\?\.focus\(\)/);
+  assert.match(app, /useMobileToolsDialog\(isPhoneLayout && mobileToolsOpen\)/);
+  assert.match(app, /id=\{isPhoneLayout \? MOBILE_TOOLS_DRAWER_ID : undefined\}/);
+  assert.match(app, /role=\{isPhoneLayout \? 'dialog' : undefined\}/);
+  assert.match(app, /aria-modal=\{isPhoneLayout \? 'true' : undefined\}/);
+  assert.match(app, /aria-labelledby=\{isPhoneLayout \? MOBILE_TOOLS_DRAWER_LABEL_ID : undefined\}/);
+  assert.match(app, /ref=\{mobileToolsDialog\.drawerRef\}/);
+  assert.match(app, /ref=\{mobileToolsDialog\.backgroundRef\}/);
+  assert.match(app, /toolsButtonRef=\{mobileToolsDialog\.triggerRef\}/);
+  assert.match(app, /mobile-tools-backdrop[\s\S]{0,180}tabIndex=\{-1\}[\s\S]{0,80}aria-hidden="true"/);
+});
+
+test('mobile CSS reserves system insets, visual height, timeline densities, and touch targets', async () => {
+  const source = await read('index.css');
+
+  assert.match(source, /overflow-x: hidden/);
+  assert.match(source, /\.phone-editor-shell/);
+  assert.match(source, /\.mobile-tools-drawer[\s\S]{0,220}width: min\(88vw, 360px\)/);
+  assert.match(source, /\.phone-timeline--compact/);
+  assert.match(source, /\.phone-timeline--expanded/);
+  assert.match(source, /env\(safe-area-inset-left\)/);
+  assert.match(source, /env\(safe-area-inset-right\)/);
+  assert.match(source, /@media \(pointer: coarse\)[\s\S]{0,500}min-width: 48px;[\s\S]{0,120}min-height: 48px/);
 });
 
 test('3D labels stay below application overlays', async () => {
