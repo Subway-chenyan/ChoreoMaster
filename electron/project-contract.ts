@@ -277,6 +277,8 @@ export interface StageConfig {
   background?: StageBackground;
   showStageLines?: boolean;
   ledDistanceFromBack?: number;
+  performerLabelFontSize?: number;
+  propLabelFontSize?: number;
 }
 
 export interface AudioMarker {

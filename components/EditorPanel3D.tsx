@@ -66,25 +66,23 @@ const EditorPanel3D: React.FC<EditorPanel3DProps> = ({ performer, position, onUp
             <span className="text-sm text-slate-300 w-12 text-right">{Math.round(performer.rotation || 0)}°</span>
           </div>
         </div>
-        {isProp && (
-          <div className="space-y-3">
-            <div className="flex items-center gap-2 text-xs font-medium text-slate-400"><Box size={14} /> 尺寸</div>
-            <div className="grid grid-cols-3 gap-2">
-              <div>
-                <label className="text-xs text-slate-500 block">宽</label>
-                <EditableNumberInput step={0.1} min={0.1} value={performer.width || 1} onChange={(value) => onUpdatePerformer(performer.id, { width: value })} className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-white" />
-              </div>
-              <div>
-                <label className="text-xs text-slate-500 block">高</label>
-                <EditableNumberInput step={0.1} min={0.1} value={performer.height || 1} onChange={(value) => onUpdatePerformer(performer.id, { height: value })} className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-white" />
-              </div>
-              <div>
-                <label className="text-xs text-slate-500 block">深</label>
-                <EditableNumberInput step={0.1} min={0.1} value={performer.depth || 1} onChange={(value) => onUpdatePerformer(performer.id, { depth: value })} className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-white" />
-              </div>
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 text-xs font-medium text-slate-400"><Box size={14} /> 尺寸</div>
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <label className="text-xs text-slate-500 block">宽</label>
+              <EditableNumberInput step={0.1} min={0.1} value={performer.width || 1} onChange={(value) => onUpdatePerformer(performer.id, { width: value })} className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-white" />
+            </div>
+            <div>
+              <label className="text-xs text-slate-500 block">高</label>
+              <EditableNumberInput step={0.1} min={0.1} value={performer.height || (isProp ? 1 : 1.8)} onChange={(value) => onUpdatePerformer(performer.id, { height: value })} className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-white" />
+            </div>
+            <div>
+              <label className="text-xs text-slate-500 block">深</label>
+              <EditableNumberInput step={0.1} min={0.1} value={performer.depth || 1} onChange={(value) => onUpdatePerformer(performer.id, { depth: value })} className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-white" />
             </div>
           </div>
-        )}
+        </div>
         {isProp && performer.propGeometryType === 'extruded' && (
           <div className="text-xs text-amber-400 bg-amber-400/10 rounded px-2 py-1 mt-2">
             异形道具 ({(performer.polygonPoints?.length || 0)} 顶点)

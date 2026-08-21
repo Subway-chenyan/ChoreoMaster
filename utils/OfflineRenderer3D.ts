@@ -6,6 +6,12 @@ import { buildPlatformOccupancy, isPlatformProp } from './platforms';
 import { getPropCenterFromAnchor } from './prop-pivot';
 import { createCenteredStageGridMarks, STAGE_THIRD_POSITIONS } from './stage-grid';
 import { getLedBottomHeight, getLedZPosition, resolveStageBackgroundUrl } from './stage-config';
+import {
+  DEFAULT_PERFORMER_LABEL_FONT_SIZE,
+  getPerformerDimensions,
+  getStageLabelFontSize,
+  normalizeLabelFontSize,
+} from '../stage-defaults';
 
 export type CameraAngle = 'judge' | 'overhead' | 'rear-overhead';
 
@@ -223,16 +229,18 @@ function createPerformerMesh(color: string, includeDirectionArrow: boolean = tru
   return group;
 }
 
-function createLabelSprite(text: string, height: number): THREE.Sprite {
+function createLabelSprite(text: string, height: number, fontSize: number): THREE.Sprite {
   const canvas = document.createElement('canvas');
   canvas.width = 512;
   canvas.height = 128;
   const ctx = canvas.getContext('2d')!;
+  const normalizedFontSize = normalizeLabelFontSize(fontSize, DEFAULT_PERFORMER_LABEL_FONT_SIZE);
+  const scaleFactor = normalizedFontSize / DEFAULT_PERFORMER_LABEL_FONT_SIZE;
   ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
   ctx.roundRect(8, 8, 496, 112, 20);
   ctx.fill();
   ctx.fillStyle = '#ffffff';
-  ctx.font = '600 48px sans-serif';
+  ctx.font = `600 ${Math.round(normalizedFontSize * 4.8)}px sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(text, 256, 64);
@@ -242,7 +250,7 @@ function createLabelSprite(text: string, height: number): THREE.Sprite {
   const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
   const sprite = new THREE.Sprite(material);
   sprite.position.set(0, height, 0);
-  sprite.scale.set(2.8, 0.7, 1);
+  sprite.scale.set(2.8 * scaleFactor, 0.7 * scaleFactor, 1);
   sprite.renderOrder = 1000;
   return sprite;
 }
@@ -497,8 +505,14 @@ export function createOfflineScene(
       mesh = createPerformerMesh(p.color, includeDirectionArrows);
     }
     if (includeLabels) {
-      const labelHeight = p.type === 'prop' ? (p.height || 1) + 0.6 : 2.5;
-      mesh.add(createLabelSprite(p.name, labelHeight));
+      const dims = getPerformerDimensions(p);
+      const labelHeight = p.type === 'prop' ? dims.height + 0.6 : dims.height + 0.7;
+      const labelFontSize = getStageLabelFontSize(
+        p,
+        stageConfig.performerLabelFontSize,
+        stageConfig.propLabelFontSize,
+      );
+      mesh.add(createLabelSprite(p.name, labelHeight, labelFontSize));
     }
     mesh.visible = false; // Hidden until updateAtTime sets positions
     meshMap.set(p.id, mesh);

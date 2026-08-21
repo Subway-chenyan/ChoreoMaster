@@ -22,6 +22,11 @@ import type {
   StageBackground,
   StageConfig,
 } from './project-contract.js';
+import {
+  DEFAULT_PERFORMER_LABEL_FONT_SIZE,
+  DEFAULT_PROP_LABEL_FONT_SIZE,
+  normalizeLabelFontSize,
+} from '../stage-defaults.js';
 
 const PROJECT_VERSION = '3.0';
 const PROJECT_FILE_NAME = 'project.json';
@@ -275,6 +280,18 @@ function parseProjectDocument(value: unknown, fallbackName: string): ProjectDocu
     background: parseStageBackground(rawStageConfig.background),
     showStageLines: rawStageConfig.showStageLines !== false,
     ledDistanceFromBack,
+    performerLabelFontSize: normalizeLabelFontSize(
+      typeof rawStageConfig.performerLabelFontSize === 'number'
+        ? rawStageConfig.performerLabelFontSize
+        : undefined,
+      DEFAULT_PERFORMER_LABEL_FONT_SIZE,
+    ),
+    propLabelFontSize: normalizeLabelFontSize(
+      typeof rawStageConfig.propLabelFontSize === 'number'
+        ? rawStageConfig.propLabelFontSize
+        : undefined,
+      DEFAULT_PROP_LABEL_FONT_SIZE,
+    ),
   };
   return {
     version: typeof value.version === 'string' ? value.version : '1.0',
@@ -865,6 +882,8 @@ function stripStageAssets(stageConfig: StageConfig): StageConfig {
       : { type: 'none' },
     showStageLines: stageConfig.showStageLines,
     ledDistanceFromBack: stageConfig.ledDistanceFromBack,
+    performerLabelFontSize: stageConfig.performerLabelFontSize,
+    propLabelFontSize: stageConfig.propLabelFontSize,
   };
 }
 

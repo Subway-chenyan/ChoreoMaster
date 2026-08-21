@@ -18,6 +18,7 @@ import {
   STAGE_THIRD_POSITIONS,
 } from '../utils/stage-grid';
 import { getLedStageYPercent, resolveStageBackgroundUrl } from '../utils/stage-config';
+import { getPerformerDimensions, getStageLabelFontSize } from '../stage-defaults';
 
 interface StageProps {
   performers: Performer[];
@@ -49,28 +50,29 @@ interface StageProps {
   stageConfig: StageConfig;
   mediaCache?: Record<string, string>;
   onOpenNoteDrawer?: (performerId: string) => void;
+  onPerformerContextMenu?: (performerId: string) => void;
 }
 
-const ShapeIcon: React.FC<{ shape: string; color: string; size: number; className?: string }> = ({ shape, color, size, className }) => {
+const ShapeIcon: React.FC<{ shape: string; color: string; width: number | string; height: number | string; className?: string }> = ({ shape, color, width, height, className }) => {
   const style = { fill: color, stroke: 'white', strokeWidth: 2 };
 
   if (shape === 'square') {
     return (
-      <svg width={size} height={size} viewBox="0 0 24 24" className={className}>
+      <svg width={width} height={height} viewBox="0 0 24 24" className={className}>
         <rect x="4" y="4" width="16" height="16" style={style} />
       </svg>
     );
   }
   if (shape === 'triangle') {
     return (
-      <svg width={size} height={size} viewBox="0 0 24 24" className={className}>
+      <svg width={width} height={height} viewBox="0 0 24 24" className={className}>
         <polygon points="12,4 20,20 4,20" style={style} />
       </svg>
     );
   }
   // Default Circle
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" className={className}>
+    <svg width={width} height={height} viewBox="0 0 24 24" className={className}>
       <circle cx="12" cy="12" r="9" style={style} />
     </svg>
   );
@@ -163,6 +165,7 @@ export const Stage: React.FC<StageProps> = ({
   stageConfig,
   mediaCache = {},
   onOpenNoteDrawer,
+  onPerformerContextMenu,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -911,21 +914,32 @@ export const Stage: React.FC<StageProps> = ({
 
           // Render Prop
           if (performer.type === 'prop') {
+            const performerDims = getPerformerDimensions(performer);
             const STAGE_DEPTH_METERS = stageConfig.depth;
             const isPlatform = isPlatformProp(performer);
             const isOccupiedPlatform = platformOccupancy.occupiedPlatformIds.has(performer.id);
             const propLift = platformOccupancy.entityLiftById[performer.id] ?? 0;
             const displayPos = getPropCenterFromAnchor(pos, rotation, performer, stageConfig);
+            const labelFontSize = getStageLabelFontSize(
+              performer,
+              stageConfig.performerLabelFontSize,
+              stageConfig.propLabelFontSize,
+            );
 
             // width(长) for 2D x-axis, depth(宽) for 2D y-axis
-            const widthPct = ((performer.width || 1) / totalStageWidth) * 100;
-            const heightPct = ((performer.depth || 1) / STAGE_DEPTH_METERS) * 100;
+            const widthPct = (performerDims.width / totalStageWidth) * 100;
+            const heightPct = (performerDims.depth / STAGE_DEPTH_METERS) * 100;
 
             return (
               <div
                 key={performer.id}
                 data-performer-id={performer.id}
                 onPointerDown={(e) => handlePerformerPointerDown(e, performer.id)}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onSelectionChange([performer.id]);
+                }}
                 onDoubleClick={() => onOpenNoteDrawer?.(performer.id)}
                 className={`absolute cursor-grab active:cursor-grabbing z-10 group flex items-center justify-center`}
                 style={{
@@ -955,7 +969,10 @@ export const Stage: React.FC<StageProps> = ({
                 }}
               >
                 {/* Prop Label (Optional, maybe small text inside or standard label above) */}
-                <div className="opacity-0 group-hover:opacity-100 text-[8px] text-white font-mono bg-black/50 px-1 rounded absolute pointer-events-none">
+                <div
+                  className="opacity-0 group-hover:opacity-100 text-white font-mono bg-black/50 px-1 rounded absolute pointer-events-none"
+                  style={{ fontSize: `${labelFontSize}px` }}
+                >
                   {performer.name}
                 </div>
                 {showDirectionArrows && <DirectionArrow />}
@@ -987,20 +1004,33 @@ export const Stage: React.FC<StageProps> = ({
             );
           }
 
+          const performerDims = getPerformerDimensions(performer);
+          const widthPct = (performerDims.width / totalStageWidth) * 100;
+          const heightPct = (performerDims.depth / stageConfig.depth) * 100;
+
           return (
             <div
               key={performer.id}
               data-performer-id={performer.id}
               onPointerDown={(e) => handlePerformerPointerDown(e, performer.id)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (lockedPerformerIdSet.has(performer.id)) return;
+                onSelectionChange([performer.id]);
+                onPerformerContextMenu?.(performer.id);
+              }}
               onDoubleClick={() => onOpenNoteDrawer?.(performer.id)}
-              className={`absolute min-w-11 min-h-11 flex items-center justify-center transform -translate-x-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing z-10 group touch-none`}
+              className="absolute flex items-center justify-center transform -translate-x-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing z-10 group touch-none"
               style={{
                 left: `${stageXToViewPercent(pos.x, stageConfig)}%`,
                 top: `${pos.y}%`,
+                width: `max(${widthPct}%, 32px)`,
+                height: `max(${heightPct}%, 32px)`,
                 zIndex: (platformOccupancy.entityLiftById[performer.id] ?? 0) > 0 ? 14 : 10,
               }}
             >
-              <div className="relative" style={{ transform: `rotate(${rotation}deg)` }}>
+              <div className="relative h-full w-full" style={{ transform: `rotate(${rotation}deg)` }}>
                 {isSelected && !readonly && !lockedPerformerIdSet.has(performer.id) && (
                   <button
                     type="button"
@@ -1014,11 +1044,12 @@ export const Stage: React.FC<StageProps> = ({
                     }}
                   />
                 )}
-                <div className={`relative transition-transform duration-100 ${isSelected ? 'scale-125' : 'hover:scale-110'}`}>
+                <div className={`relative flex h-full w-full items-center justify-center transition-transform duration-100 ${isSelected ? 'scale-110' : 'hover:scale-105'}`}>
                   <ShapeIcon
                     shape={performer.shape}
                     color={performer.color}
-                    size={32}
+                    width="100%"
+                    height="100%"
                     className={`drop-shadow-lg ${isSelected ? 'filter brightness-125' : ''}`}
                   />
                   {showDirectionArrows && <DirectionArrow />}
@@ -1038,6 +1069,13 @@ export const Stage: React.FC<StageProps> = ({
           const pos = positions[performer.id];
           if (!pos) return null;
           const isSelected = selectedPerformerIds.includes(performer.id);
+          const performerDims = getPerformerDimensions(performer);
+          const labelOffsetPercent = Math.max((performerDims.depth / stageConfig.depth) * 50, 2.2) + (showDirectionArrows ? 2.8 : 1.4);
+          const labelFontSize = getStageLabelFontSize(
+            performer,
+            stageConfig.performerLabelFontSize,
+            stageConfig.propLabelFontSize,
+          );
 
           return (
             <div
@@ -1047,10 +1085,13 @@ export const Stage: React.FC<StageProps> = ({
                     `}
               style={{
                 left: `${stageXToViewPercent(pos.x, stageConfig)}%`,
-                top: `${pos.y}%`,
+                top: `${Math.min(98, pos.y + labelOffsetPercent)}%`,
               }}
             >
-              <div className={`absolute ${showDirectionArrows ? '-bottom-10' : '-bottom-6'} left-1/2 -translate-x-1/2 text-[10px] font-medium text-white bg-slate-900/80 px-2 py-0.5 rounded whitespace-nowrap shadow-sm`}>
+              <div
+                className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 font-medium text-white bg-slate-900/80 px-2 py-0.5 rounded whitespace-nowrap shadow-sm"
+                style={{ fontSize: `${labelFontSize}px` }}
+              >
                 {performer.name}
               </div>
             </div>

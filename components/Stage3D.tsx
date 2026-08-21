@@ -26,6 +26,7 @@ interface Stage3DProps {
   dragEnabled?: boolean;
   onDragStart?: (ids: string[]) => void;
   onDragEnd?: (ids: string[], finalUpdates?: { id: string; pos: Position }[]) => void;
+  onOpenPerformerEditor?: (id: string) => void;
 }
 
 const Stage3D: React.FC<Stage3DProps> = ({
@@ -49,14 +50,18 @@ const Stage3D: React.FC<Stage3DProps> = ({
   readonly = false,
   dragEnabled = false,
   onDragStart,
-  onDragEnd
+  onDragEnd,
+  onOpenPerformerEditor,
 }) => {
   const handleSelect = (id: string) => { onSelect(id === '' ? [] : [id]); };
   const totalWidth = getTotalStageWidth(stageConfig);
   const cameraDistance = Math.max(20, totalWidth * 0.85, stageConfig.depth * 1.35);
 
   return (
-    <div className="flex-1 bg-slate-950 relative">
+    <div
+      className="flex-1 bg-slate-950 relative"
+      onContextMenu={(event) => event.preventDefault()}
+    >
       <Canvas
         key={`${totalWidth}-${stageConfig.depth}`}
         shadows
@@ -83,6 +88,7 @@ const Stage3D: React.FC<Stage3DProps> = ({
           onDragEnd={onDragEnd}
           readonly={readonly}
           dragEnabled={dragEnabled}
+          onOpenPerformerEditor={onOpenPerformerEditor}
         />
       </Canvas>
     </div>
