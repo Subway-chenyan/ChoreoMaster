@@ -1,7 +1,22 @@
 {
   "schemaVersion": 1,
-  "currentVersion": "1.2.2",
+  "currentVersion": "1.2.3",
   "releases": [
+    {
+      "version": "1.2.3",
+      "date": "2026-08-25",
+      "kind": "patch",
+      "title": "CosStage 1.2.3",
+      "summary": "优化演员与道具编辑体验，修复舞台滚动、3D 道具名称显示和旋转交互，并让分支推送自动执行质量检查。",
+      "changes": [
+        {
+          "kind": "patch",
+          "text": "优化演员与道具编辑体验，修复舞台滚动、3D 道具名称显示和旋转交互，并让分支推送自动执行质量检查。"
+        }
+      ],
+      "breakingChanges": [],
+      "migrationSteps": []
+    },
     {
       "version": "1.2.2",
       "date": "2026-08-11",
