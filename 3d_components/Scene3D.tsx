@@ -23,10 +23,12 @@ interface Scene3DProps {
   lockedPerformerIds?: string[];
   gridScale?: number;
   snapToGrid?: boolean;
+  showLabels?: boolean;
   showDirectionArrows?: boolean;
   onDragStart?: (ids: string[]) => void;
   onDragEnd?: (ids: string[], finalUpdates?: { id: string; pos: Position }[]) => void;
   onPositionChange?: (updates: { id: string; pos: Position }[]) => void;
+  onOpenPerformerEditor?: (id: string) => void;
   readonly?: boolean;
   dragEnabled?: boolean;
 }
@@ -45,10 +47,12 @@ const Scene3D: React.FC<Scene3DProps> = ({
   lockedPerformerIds = [],
   gridScale = 1,
   snapToGrid = false,
+  showLabels = true,
   showDirectionArrows = true,
   onDragStart,
   onDragEnd,
   onPositionChange,
+  onOpenPerformerEditor,
   readonly = false,
   dragEnabled = false
 }) => {
@@ -125,18 +129,25 @@ const Scene3D: React.FC<Scene3DProps> = ({
           isSelected: selectedIds.includes(p.id),
           onSelect,
           stageConfig,
+          showLabels,
           showDirectionArrows,
           dragEnabled: interactionPolicy.canDragObjects && !isLocked,
           onDragStart: () => handleDragStart(p.id),
           onDragEnd: (position?: Position) => handleDragEnd(p.id, position),
           onPositionChange: interactionPolicy.canDragObjects && !isLocked
             ? (newPos: Position) => handlePositionChange(p.id, newPos)
-            : undefined
+            : undefined,
         };
         if (p.type === 'prop') {
           return <Prop3D {...commonProps} platformLift={platformOccupancy.entityLiftById[p.id] ?? 0} />;
         }
-        return <Performer3D {...commonProps} platformLift={platformOccupancy.entityLiftById[p.id] ?? 0} />;
+        return (
+          <Performer3D
+            {...commonProps}
+            platformLift={platformOccupancy.entityLiftById[p.id] ?? 0}
+            onOpenEditor={onOpenPerformerEditor}
+          />
+        );
       })}
       <mesh position={[0, 0, -stageConfig.depth / 2 - 5]} scale={[100, 100, 1]} visible={false} onClick={() => onSelect('')}>
         <planeGeometry />

@@ -27,6 +27,7 @@ import { Stage } from './components/Stage';
 import Stage3D from './components/Stage3D';
 import { Timeline } from './components/Timeline';
 import { EditableNumberInput } from './components/FormControls';
+import { PerformerEditorModal } from './components/PerformerEditorModal';
 import { HelpModal } from './components/HelpModal';
 import { StageBackgroundDialog } from './components/StageBackgroundDialog';
 import { PerformerNoteDrawer } from './components/PerformerNoteDrawer';
@@ -63,6 +64,13 @@ import { getPropCenterFromAnchor, migratePropAnchor } from './utils/prop-pivot';
 import { filterUnlockedPerformerIds, getEffectivelyLockedPerformerIds } from './utils/performer-locking';
 import { useProjectTransfers } from './hooks/useProjectTransfers';
 import { createPersistedDesktopProject } from './services/desktopProjectService';
+import {
+  DEFAULT_PERFORMER_LABEL_FONT_SIZE,
+  DEFAULT_PROP_LABEL_FONT_SIZE,
+  getPerformerDimensions,
+  getStageLabelFontSize,
+  normalizeLabelFontSize,
+} from './electron/stage-defaults';
 import {
   calculateStageDimensionsFromImage,
   clampStageBackgroundOpacity,
@@ -107,6 +115,8 @@ const createDefaultStageConfig = (): StageConfig => ({
   ledContent: { type: 'none' },
   showStageLines: true,
   ledDistanceFromBack: 0,
+  performerLabelFontSize: DEFAULT_PERFORMER_LABEL_FONT_SIZE,
+  propLabelFontSize: DEFAULT_PROP_LABEL_FONT_SIZE,
 });
 
 interface PendingStageBackground {
@@ -426,6 +436,7 @@ const App: React.FC = () => {
   const [showDirectionArrows, setShowDirectionArrows] = useState(true);
   const [gridScale, setGridScale] = useState(DEFAULT_STAGE_GRID_SPACING);
   const [snapToGrid, setSnapToGrid] = useState(false);
+  const [performerEditorId, setPerformerEditorId] = useState<string | null>(null);
   const [showHelp, setShowHelp] = useState(false);
   const [showProductGuide, setShowProductGuide] = useState(false);
   const [showWebSaveReminder, setShowWebSaveReminder] = useState(() => !window.electronAPI?.isElectron);
@@ -951,6 +962,13 @@ const App: React.FC = () => {
     requestDeletePerformers(selectedPerformerIds.includes(performerId) ? selectedPerformerIds : [performerId]);
   };
 
+  const handleOpenPerformerEditor = useCallback((performerId: string) => {
+    const performer = performers.find((item) => item.id === performerId);
+    if (!performer || performer.type === 'prop' || effectivelyLockedPerformerIds.has(performerId)) return;
+    setSelectedPerformerIds([performerId]);
+    setPerformerEditorId(performerId);
+  }, [effectivelyLockedPerformerIds, performers]);
+
   const handleUpdatePerformer = (id: string, updates: Partial<Performer>) => {
     const performer = performers.find((item) => item.id === id);
     if (!performer || effectivelyLockedPerformerIds.has(id)) return;
@@ -1333,6 +1351,14 @@ const App: React.FC = () => {
         ...next,
         ledDistanceFromBack: getLedDistanceFromBack(next),
         ledBottomHeight: Math.max(0, Math.min(30, next.ledBottomHeight ?? 0)),
+        performerLabelFontSize: normalizeLabelFontSize(
+          next.performerLabelFontSize,
+          DEFAULT_PERFORMER_LABEL_FONT_SIZE,
+        ),
+        propLabelFontSize: normalizeLabelFontSize(
+          next.propLabelFontSize,
+          DEFAULT_PROP_LABEL_FONT_SIZE,
+        ),
         background: next.background
           ? { ...next.background, opacity: clampStageBackgroundOpacity(next.background.opacity) }
           : undefined,
@@ -3443,11 +3469,17 @@ const App: React.FC = () => {
         : pos;
       const cx = renderX + (stageXToViewPercent(renderPosition.x, stageConfig) / 100) * renderW;
       const cy = mapStageYPercent(renderPosition.y);
+      const dimensions = getPerformerDimensions(p);
+      const labelFontSize = getStageLabelFontSize(
+        p,
+        stageConfig.performerLabelFontSize,
+        stageConfig.propLabelFontSize,
+      );
 
       if (p.type === 'prop') {
         const propLift = platformOccupancy.entityLiftById[p.id] ?? 0;
-        const propW = (p.width || 1) / totalStageW * renderW;
-        const propD = (p.depth || 1) / stageD * renderH;
+        const propW = dimensions.width / totalStageW * renderW;
+        const propD = dimensions.depth / stageD * renderH;
         const rot = rotation * Math.PI / 180;
 
         ctx.save();
@@ -3484,7 +3516,7 @@ const App: React.FC = () => {
 
         if (includeLabels) {
           ctx.fillStyle = '#ffffff';
-          ctx.font = `${Math.round(9 * scale)}px sans-serif`;
+          ctx.font = `${Math.round(labelFontSize * scale)}px sans-serif`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'top';
           ctx.fillText(p.name, cx, cy + propD / 2 + 4 * scale - propLift * scale * 2);
@@ -3492,42 +3524,41 @@ const App: React.FC = () => {
       } else {
         const performerLift = platformOccupancy.entityLiftById[p.id] ?? 0;
         const rot = rotation * Math.PI / 180;
+        const performerW = Math.max(dimensions.width / totalStageW * renderW, 18 * scale);
+        const performerD = Math.max(dimensions.depth / stageD * renderH, 18 * scale);
         ctx.save();
         ctx.translate(cx, cy);
         ctx.rotate(isRehearsalView ? -rot : rot);
         ctx.fillStyle = p.color;
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 2 * scale;
-        const shapeSize = 32 * scale;
-        const iconScale = shapeSize / 24;
         if (p.shape === 'circle') {
           ctx.beginPath();
-          ctx.arc(0, 0, 9 * iconScale, 0, Math.PI * 2);
+          ctx.ellipse(0, 0, performerW / 2, performerD / 2, 0, 0, Math.PI * 2);
           ctx.fill();
           ctx.stroke();
         } else if (p.shape === 'square') {
-          const s = 16 * iconScale;
-          ctx.fillRect(-s / 2, -s / 2, s, s);
-          ctx.strokeRect(-s / 2, -s / 2, s, s);
+          ctx.fillRect(-performerW / 2, -performerD / 2, performerW, performerD);
+          ctx.strokeRect(-performerW / 2, -performerD / 2, performerW, performerD);
         } else {
           ctx.beginPath();
-          ctx.moveTo(0, -8 * iconScale);
-          ctx.lineTo(8 * iconScale, 8 * iconScale);
-          ctx.lineTo(-8 * iconScale, 8 * iconScale);
+          ctx.moveTo(0, -performerD / 2);
+          ctx.lineTo(performerW / 2, performerD / 2);
+          ctx.lineTo(-performerW / 2, performerD / 2);
           ctx.closePath();
           ctx.fill();
           ctx.stroke();
         }
         if (showDirectionArrows) {
-          drawDirectionArrow(shapeSize);
+          drawDirectionArrow(Math.max(performerW, performerD));
         }
         ctx.restore();
         if (includeLabels) {
           ctx.fillStyle = '#ffffff';
-          ctx.font = `${Math.round(10 * scale)}px sans-serif`;
+          ctx.font = `${Math.round(labelFontSize * scale)}px sans-serif`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'top';
-          ctx.fillText(p.name, cx, cy + Math.floor(shapeSize / 2) - performerLift * scale * 2);
+          ctx.fillText(p.name, cx, cy + performerD / 2 + 4 * scale - performerLift * scale * 2);
         }
       }
     });
@@ -4603,6 +4634,16 @@ const App: React.FC = () => {
     <div className={`min-h-[100dvh] h-[100dvh] w-screen flex flex-col safe-top safe-bottom ${theme === 'dark' ? 'bg-slate-950 text-slate-200' : 'bg-gray-50 text-gray-900'} overflow-hidden`}>
       {/* Help Modal */}
       <HelpModal isOpen={showHelp} onClose={() => setShowHelp(false)} />
+      <PerformerEditorModal
+        isOpen={performerEditorId !== null}
+        performer={performerEditorId ? performers.find((performer) => performer.id === performerEditorId) || null : null}
+        onSave={(updates) => {
+          if (!performerEditorId) return;
+          handleUpdatePerformer(performerEditorId, updates);
+          setPerformerEditorId(null);
+        }}
+        onClose={() => setPerformerEditorId(null)}
+      />
       {/* Performer Note Drawer */}
       <PerformerNoteDrawer
         open={noteDrawerOpen}
@@ -4919,6 +4960,7 @@ const App: React.FC = () => {
             onToggleGroupVisibility={handleToggleGroupVisibilityInFrame}
             onToggleGroupCollapsed={handleToggleGroupCollapsed}
             onSelectGroupPerformers={handleSelectGroupPerformers}
+            onOpenPerformerEditor={handleOpenPerformerEditor}
             stageConfig={stageConfig}
             onStageConfigChange={handleStageConfigChange}
             onLEDContentUpload={handleLEDContentUpload}
@@ -5042,6 +5084,7 @@ const App: React.FC = () => {
               stageConfig={stageConfig}
               mediaCache={mediaCache}
               onOpenNoteDrawer={handleOpenNoteDrawer}
+              onPerformerContextMenu={handleOpenPerformerEditor}
             />
           ) : (
             <Stage3D
@@ -5063,9 +5106,11 @@ const App: React.FC = () => {
               isPlaying={isPlaying}
               gridScale={gridScale}
               snapToGrid={snapToGrid}
+              showLabels={showLabels}
               showDirectionArrows={showDirectionArrows}
               readonly={isPlaying}
               dragEnabled={is3DDragEnabled}
+              onOpenPerformerEditor={handleOpenPerformerEditor}
             />
           )}
 

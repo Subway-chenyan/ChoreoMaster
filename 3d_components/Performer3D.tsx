@@ -11,6 +11,7 @@ import {
   resolveThreeHeightFromPointerDrag,
 } from '../utils/three-interaction';
 import DirectionArrow3D from './DirectionArrow3D';
+import { getPerformerDimensions, getStageLabelFontSize } from '../electron/stage-defaults';
 
 interface PointerCaptureApi extends EventTarget {
   hasPointerCapture(pointerId: number): boolean;
@@ -42,11 +43,13 @@ interface Performer3DProps {
   isSelected: boolean;
   onSelect: (id: string) => void;
   stageConfig: StageConfig;
+  showLabels?: boolean;
   showDirectionArrows?: boolean;
   dragEnabled?: boolean;
   onDragStart?: () => void;
   onDragEnd?: (position?: Position) => void;
   onPositionChange?: (pos: Position) => void;
+  onOpenEditor?: (id: string) => void;
 }
 
 const Performer3D: React.FC<Performer3DProps> = ({
@@ -57,11 +60,13 @@ const Performer3D: React.FC<Performer3DProps> = ({
   isSelected,
   onSelect,
   stageConfig,
+  showLabels = true,
   showDirectionArrows = true,
   dragEnabled = false,
   onDragStart,
   onDragEnd,
-  onPositionChange
+  onPositionChange,
+  onOpenEditor,
 }) => {
   const { camera, raycaster, pointer, gl } = useThree();
   const meshRef = useRef<THREE.Group>(null);
@@ -195,6 +200,13 @@ const Performer3D: React.FC<Performer3DProps> = ({
 
   // Plane drag handlers
   const handlePlanePointerDown = useCallback((event: ThreeEvent<PointerEvent>) => {
+    if (event.button === 2) {
+      event.stopPropagation();
+      event.nativeEvent.preventDefault();
+      onSelect(performer.id);
+      onOpenEditor?.(performer.id);
+      return;
+    }
     if (!onPositionChange || !canStartThreeObjectDrag({
       dragEnabled,
       readonly: false,
@@ -220,7 +232,7 @@ const Performer3D: React.FC<Performer3DProps> = ({
     }
 
     onDragStart?.();
-  }, [camera, capturePointer, dragEnabled, onDragStart, onPositionChange, pointer, raycaster]);
+  }, [camera, capturePointer, dragEnabled, onDragStart, onOpenEditor, onPositionChange, onSelect, performer.id, pointer, raycaster]);
 
   const handlePlanePointerUp = useCallback((event: ThreeEvent<PointerEvent>) => {
     if (!isPlaneDraggingRef.current) return;
@@ -288,7 +300,17 @@ const Performer3D: React.FC<Performer3DProps> = ({
 
   const baseColor = new THREE.Color(performer.color);
   const displayColor = isSelected ? '#ffffff' : (hovered ? baseColor.clone().offsetHSL(0, 0, 0.1) : baseColor);
-  const performerHeight = 1.8; // Average human height in meters
+  const performerDimensions = getPerformerDimensions(performer);
+  const performerHeight = performerDimensions.height;
+  const bodyWidth = Math.max(0.35, performerDimensions.width * 0.45);
+  const bodyDepth = Math.max(0.28, performerDimensions.depth * 0.45);
+  const bodyHeight = Math.max(0.9, performerHeight - 0.7);
+  const headRadius = Math.max(0.16, Math.min(0.34, performerHeight * 0.12));
+  const labelFontSize = getStageLabelFontSize(
+    performer,
+    stageConfig.performerLabelFontSize,
+    stageConfig.propLabelFontSize,
+  );
 
   return (
     <group
@@ -308,17 +330,17 @@ const Performer3D: React.FC<Performer3DProps> = ({
           <meshBasicMaterial color="#fbbf24" opacity={0.8} transparent />
         </mesh>
       )}
-      <group position={[0, (performerHeight || 1.8) / 2, 0]}>
-        <mesh position={[0, -0.4, 0]} castShadow receiveShadow>
-          <cylinderGeometry args={[0.25, 0.25, 1, 16]} />
+      <group position={[0, 0, 0]}>
+        <mesh position={[0, bodyHeight / 2, 0]} castShadow receiveShadow>
+          <boxGeometry args={[bodyWidth, bodyHeight, bodyDepth]} />
           <meshStandardMaterial color={displayColor} />
         </mesh>
-        <mesh position={[0, 0.25, 0]} castShadow>
-          <sphereGeometry args={[0.2, 16, 16]} />
+        <mesh position={[0, bodyHeight + headRadius * 0.9, 0]} castShadow>
+          <sphereGeometry args={[headRadius, 16, 16]} />
           <meshStandardMaterial color={displayColor} />
         </mesh>
-        <mesh position={[0, 0.25, 0.2]}>
-          <boxGeometry args={[0.05, 0.05, 0.1]} />
+        <mesh position={[0, bodyHeight + headRadius * 0.9, headRadius]}>
+          <boxGeometry args={[0.05, 0.05, Math.max(0.08, headRadius * 0.45)]} />
           <meshStandardMaterial color="#333" />
         </mesh>
       </group>
@@ -348,16 +370,21 @@ const Performer3D: React.FC<Performer3DProps> = ({
         </group>
       )}
 
-      <Html
-        position={[0, performerHeight + 0.5, 0]}
-        center
-        distanceFactor={10}
-        zIndexRange={[40, 0]}
-      >
-        <div className={`px-2 py-1 rounded text-xs font-bold whitespace-nowrap select-none ${isSelected ? 'bg-yellow-400 text-black' : 'bg-black/50 text-white'}`}>
-          {performer.name}
-        </div>
-      </Html>
+      {showLabels && (
+        <Html
+          position={[0, performerHeight + 0.5, 0]}
+          center
+          distanceFactor={10}
+          zIndexRange={[40, 0]}
+        >
+          <div
+            className={`px-2 py-1 rounded font-bold whitespace-nowrap select-none ${isSelected ? 'bg-yellow-400 text-black' : 'bg-black/50 text-white'}`}
+            style={{ fontSize: `${labelFontSize}px` }}
+          >
+            {performer.name}
+          </div>
+        </Html>
+      )}
     </group>
   );
 };

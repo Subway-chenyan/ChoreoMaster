@@ -28,6 +28,8 @@ interface Frame {
 - `Frame.rotations[id]` is the held angle for that formation.
 - Missing frame rotation falls back to `Performer.rotation`, then `0`.
 - Transition rotation interpolates from source-frame angle to target-frame angle unless `ObjectMotion` explicitly overrides it.
+- Rotation interpolation treats degrees as a circular value and always follows the shortest angular distance. A `350° -> 10°` transition passes through `360°`, not `180°`.
+- When the angular distance is exactly `180°`, preserve the sign of the authored delta: `0° -> 180°` uses `+180°`, while `0° -> -180°` uses `-180°`.
 - `center` positions describe geometry centers.
 - `left | right` positions describe local hinge points.
 - Platforms always normalize to `center`.
@@ -51,6 +53,7 @@ interface Frame {
 
 - Pure geometry tests assert anchor-to-center conversion for all pivot modes.
 - Scene evaluation tests assert static frame holds and gap interpolation.
+- Scene evaluation tests assert shortest-path rotation in both directions, wraparound at `0°/360°`, and signed `180°` ties for default and explicit `lerp` motion.
 - Project-service tests assert exact pivot and rotation persistence.
 - Browser tests assert all transition paths render, selected control points appear, and prop rotation controls are available.
 - Production build covers renderer and Electron shared contracts.
@@ -60,17 +63,19 @@ interface Frame {
 #### Wrong
 
 ```typescript
-const rotation = performer.rotation ?? 0;
+const heldRotation = performer.rotation ?? 0;
+const transitionRotation = startRotation + (endRotation - startRotation) * progress;
 mesh.position.copy(mapTo3D(frame.positions[id]));
 ```
 
-This ignores frame rotation and treats a hinge anchor as a center.
+This ignores frame rotation, treats a hinge anchor as a center, and makes wrapped angles take the long path.
 
 #### Correct
 
 ```typescript
-const rotation = frame.rotations?.[id] ?? performer.rotation ?? 0;
-const center = getPropCenterFromAnchor(frame.positions[id], rotation, performer, stageConfig);
+const heldRotation = frame.rotations?.[id] ?? performer.rotation ?? 0;
+const transitionRotation = interpolateRotationShortest(startRotation, endRotation, progress);
+const center = getPropCenterFromAnchor(frame.positions[id], transitionRotation, performer, stageConfig);
 mesh.position.copy(mapTo3D(center));
 ```
 

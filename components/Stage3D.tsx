@@ -21,11 +21,13 @@ interface Stage3DProps {
   isPlaying?: boolean;
   gridScale?: number;
   snapToGrid?: boolean;
+  showLabels?: boolean;
   showDirectionArrows?: boolean;
   readonly?: boolean;
   dragEnabled?: boolean;
   onDragStart?: (ids: string[]) => void;
   onDragEnd?: (ids: string[], finalUpdates?: { id: string; pos: Position }[]) => void;
+  onOpenPerformerEditor?: (id: string) => void;
 }
 
 const Stage3D: React.FC<Stage3DProps> = ({
@@ -45,18 +47,23 @@ const Stage3D: React.FC<Stage3DProps> = ({
   isPlaying = false,
   gridScale = 1,
   snapToGrid = false,
+  showLabels = true,
   showDirectionArrows = true,
   readonly = false,
   dragEnabled = false,
   onDragStart,
-  onDragEnd
+  onDragEnd,
+  onOpenPerformerEditor,
 }) => {
   const handleSelect = (id: string) => { onSelect(id === '' ? [] : [id]); };
   const totalWidth = getTotalStageWidth(stageConfig);
   const cameraDistance = Math.max(20, totalWidth * 0.85, stageConfig.depth * 1.35);
 
   return (
-    <div className="flex-1 bg-slate-950 relative">
+    <div
+      className="flex-1 bg-slate-950 relative"
+      onContextMenu={(event) => event.preventDefault()}
+    >
       <Canvas
         key={`${totalWidth}-${stageConfig.depth}`}
         shadows
@@ -77,12 +84,14 @@ const Stage3D: React.FC<Stage3DProps> = ({
           lockedPerformerIds={lockedPerformerIds}
           gridScale={gridScale}
           snapToGrid={snapToGrid}
+          showLabels={showLabels}
           showDirectionArrows={showDirectionArrows}
           onPositionChange={onPositionChange}
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}
           readonly={readonly}
           dragEnabled={dragEnabled}
+          onOpenPerformerEditor={onOpenPerformerEditor}
         />
       </Canvas>
     </div>

@@ -12,6 +12,13 @@ import { EditableNumberInput, SelectField, StepperNumberField } from './FormCont
 import { validateAgentAccess } from '../services/choreoAgentService';
 import { isPerformerGroupCompatible, resolveGroupAction, type GroupablePerformerType } from '../utils/performer-grouping';
 import { formatFrameDuration, isKeyframeFrame } from '../utils/frame-keyframes';
+import {
+    DEFAULT_PERFORMER_DEPTH,
+    DEFAULT_PERFORMER_HEIGHT,
+    DEFAULT_PERFORMER_LABEL_FONT_SIZE,
+    DEFAULT_PERFORMER_WIDTH,
+    DEFAULT_PROP_LABEL_FONT_SIZE,
+} from '../electron/stage-defaults';
 
 interface SidebarProps {
     performers: Performer[];
@@ -61,6 +68,7 @@ interface SidebarProps {
     onToggleGroupVisibility: (groupId: string) => void;
     onToggleGroupCollapsed: (groupId: string) => void;
     onSelectGroupPerformers: (groupId: string) => void;
+    onOpenPerformerEditor: (performerId: string) => void;
     // 新增 3D 相关 props
     stageConfig?: StageConfig;
     onStageConfigChange: (updates: Partial<StageConfig>) => void;
@@ -218,6 +226,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     onToggleGroupVisibility,
     onToggleGroupCollapsed,
     onSelectGroupPerformers,
+    onOpenPerformerEditor,
     stageConfig,
     onStageConfigChange,
     onLEDContentUpload,
@@ -250,6 +259,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const [newPerformerName, setNewPerformerName] = useState('');
     const [newPerformerShape, setNewPerformerShape] = useState<PerformerShape>('circle');
     const [newPerformerColor, setNewPerformerColor] = useState<string>(DEFAULT_COLORS[0]);
+    const [newPerformerWidth, setNewPerformerWidth] = useState<number>(DEFAULT_PERFORMER_WIDTH);
+    const [newPerformerDepth, setNewPerformerDepth] = useState<number>(DEFAULT_PERFORMER_DEPTH);
+    const [newPerformerHeight, setNewPerformerHeight] = useState<number>(DEFAULT_PERFORMER_HEIGHT);
     // Prop State (长 length, 宽 width, 高 height)
     const [newPropWidth, setNewPropWidth] = useState<number>(0.5); // Default 0.5m (宽)
     const [newPropDepth, setNewPropDepth] = useState<number>(0.5); // Default 0.5m (长)
@@ -360,7 +372,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
     const handleAdd = () => {
         if (newPerformerName.trim()) {
-            onAddPerformer(newPerformerName, newPerformerColor, newPerformerShape);
+            onAddPerformer(newPerformerName, newPerformerColor, newPerformerShape, {
+                width: newPerformerWidth,
+                depth: newPerformerDepth,
+                height: newPerformerHeight,
+                rotation: 0,
+            });
             setNewPerformerName('');
             setShowAddForm(false);
             const nextColorIndex = (DEFAULT_COLORS.indexOf(newPerformerColor) + 1) % DEFAULT_COLORS.length;
@@ -818,6 +835,37 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 <span className="text-xs font-bold text-slate-400 uppercase">舞台尺寸与显示</span>
                             </div>
 
+                                <div className="grid grid-cols-2 gap-3 mb-3">
+                                    <div className="space-y-2">
+                                        <label className="text-xs text-slate-400">演员名称字号</label>
+                                        <div className="flex items-center gap-2">
+                                            <EditableNumberInput
+                                                step={1}
+                                                min={6}
+                                                max={32}
+                                                value={stageConfig?.performerLabelFontSize ?? DEFAULT_PERFORMER_LABEL_FONT_SIZE}
+                                                onChange={(value) => onStageConfigChange({ performerLabelFontSize: value })}
+                                                className="min-w-0 flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                                            />
+                                            <span className="text-xs text-slate-500">px</span>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-xs text-slate-400">道具名称字号</label>
+                                        <div className="flex items-center gap-2">
+                                            <EditableNumberInput
+                                                step={1}
+                                                min={6}
+                                                max={32}
+                                                value={stageConfig?.propLabelFontSize ?? DEFAULT_PROP_LABEL_FONT_SIZE}
+                                                onChange={(value) => onStageConfigChange({ propLabelFontSize: value })}
+                                                className="min-w-0 flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                                            />
+                                            <span className="text-xs text-slate-500">px</span>
+                                        </div>
+                                    </div>
+                                </div>
+
                             <div className="grid grid-cols-2 gap-3 mb-3">
                                 <div className="space-y-2">
                                     <label className="text-xs text-slate-400">舞台宽度</label>
@@ -1223,34 +1271,48 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             </div>
                         ) : (
                             <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700 mb-3">
-                                <div className="flex gap-2 mb-2 min-w-0 items-stretch">
-                                    <input
-                                        type="text"
-                                        placeholder="演员名称"
-                                        className="flex-1 min-w-0 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
-                                        value={newPerformerName}
-                                        onChange={(e) => setNewPerformerName(e.target.value)}
-                                        onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
-                                    />
-                                    <button onClick={handleAdd} className="bg-blue-600 hover:bg-blue-500 px-3 rounded text-white">
-                                        <Plus size={18} />
-                                    </button>
-                                </div>
-                                <div className="flex items-center justify-between gap-2">
-                                    <div className="flex bg-slate-900 rounded p-1 gap-1 border border-slate-600">
-                                        <button onClick={() => setNewPerformerShape('circle')} className={`p-1.5 rounded ${newPerformerShape === 'circle' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`} title="圆形">
-                                            <Circle size={14} fill={newPerformerShape === 'circle' ? 'currentColor' : 'none'} />
-                                        </button>
-                                        <button onClick={() => setNewPerformerShape('triangle')} className={`p-1.5 rounded ${newPerformerShape === 'triangle' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`} title="三角形">
-                                            <Triangle size={14} fill={newPerformerShape === 'triangle' ? 'currentColor' : 'none'} />
-                                        </button>
-                                        <button onClick={() => setNewPerformerShape('square')} className={`p-1.5 rounded ${newPerformerShape === 'square' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`} title="方形">
-                                            <Square size={14} fill={newPerformerShape === 'square' ? 'currentColor' : 'none'} />
+                                <div className="flex flex-col gap-3">
+                                    <div className="flex gap-2 min-w-0 items-stretch">
+                                        <input
+                                            type="text"
+                                            placeholder="演员名称"
+                                            className="flex-1 min-w-0 bg-slate-900 border border-slate-600 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                                            value={newPerformerName}
+                                            onChange={(e) => setNewPerformerName(e.target.value)}
+                                            onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
+                                        />
+                                        <button onClick={handleAdd} className="bg-blue-600 hover:bg-blue-500 px-3 rounded text-white">
+                                            <Plus size={18} />
                                         </button>
                                     </div>
-                                    <div className="flex items-center gap-2 bg-slate-900 border border-slate-600 rounded px-2 py-1">
-                                        <input type="color" value={newPerformerColor} onChange={(e) => setNewPerformerColor(e.target.value)} className="w-6 h-6 bg-transparent border-none cursor-pointer" title="自定义颜色" />
-                                        <span className="text-[10px] text-slate-400 font-mono">{newPerformerColor.toUpperCase()}</span>
+                                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                        <StepperNumberField label="长度" value={newPerformerWidth} min={0.1} step={0.1} onChange={setNewPerformerWidth} />
+                                        <StepperNumberField label="宽度" value={newPerformerDepth} min={0.1} step={0.1} onChange={setNewPerformerDepth} />
+                                        <StepperNumberField label="高度" value={newPerformerHeight} min={0.1} step={0.1} onChange={setNewPerformerHeight} />
+                                        <div className="rounded-xl border border-slate-700 bg-slate-900/80 p-3 shadow-sm shadow-slate-950/20">
+                                            <label className="mb-2 block text-[11px] font-medium tracking-wide text-slate-400">
+                                                颜色
+                                            </label>
+                                            <div className="flex items-center justify-center rounded-lg border border-slate-600 bg-slate-950/70 px-3 py-3">
+                                                <input type="color" value={newPerformerColor} onChange={(e) => setNewPerformerColor(e.target.value)} className="h-14 w-20 cursor-pointer rounded-lg border border-slate-500 bg-transparent p-1" title="演员颜色" />
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-2">
+                                        <div className="flex bg-slate-900 rounded p-1 gap-1 border border-slate-600">
+                                            <button onClick={() => setNewPerformerShape('circle')} className={`p-1.5 rounded ${newPerformerShape === 'circle' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`} title="圆形">
+                                                <Circle size={14} fill={newPerformerShape === 'circle' ? 'currentColor' : 'none'} />
+                                            </button>
+                                            <button onClick={() => setNewPerformerShape('triangle')} className={`p-1.5 rounded ${newPerformerShape === 'triangle' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`} title="三角形">
+                                                <Triangle size={14} fill={newPerformerShape === 'triangle' ? 'currentColor' : 'none'} />
+                                            </button>
+                                            <button onClick={() => setNewPerformerShape('square')} className={`p-1.5 rounded ${newPerformerShape === 'square' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`} title="方形">
+                                                <Square size={14} fill={newPerformerShape === 'square' ? 'currentColor' : 'none'} />
+                                            </button>
+                                        </div>
+                                        <span className="rounded bg-slate-900 px-2 py-1 text-[10px] font-mono text-slate-400">
+                                            {newPerformerColor.toUpperCase()}
+                                        </span>
                                     </div>
                                 </div>
                             </div>
@@ -1526,6 +1588,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 )}
                                 {(() => {
                                     const targetPerformerId = contextMenuState.performerIds[0];
+                                    if (contextMenuState.performerIds.length === 1 && contextMenuState.performerType === 'performer') {
+                                        return (
+                                            <>
+                                                <div className="h-px bg-slate-700 my-1"></div>
+                                                <button
+                                                    onClick={() => {
+                                                        onOpenPerformerEditor(targetPerformerId);
+                                                        closeContextMenu();
+                                                    }}
+                                                    className="w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 flex items-center gap-2"
+                                                >
+                                                    <Edit2 size={12} /> 编辑演员
+                                                </button>
+                                            </>
+                                        );
+                                    }
                                     if (contextMenuState.performerIds.length === 1 && contextMenuState.performerType === 'prop') {
                                         return (
                                             <>

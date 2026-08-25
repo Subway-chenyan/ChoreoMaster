@@ -50,7 +50,7 @@ npm test
 5. `data/release-history.json.currentVersion`、首条 release 版本和生成版本一致。
 6. `build/release-notes.md` 标题为 `CosStage X.Y.Z`，内容与 CHANGELOG/history 一致。
 7. 已聚合的 `.changeset/*.md` 被消费，没有遗漏或误消费。
-8. Release PR 的 `npm run validate:release-data` 与 `npm test` 全部通过。
+8. Release PR 分支每次 push 都会自动运行 Quality，无需在 PR 页面手工批准；确认 `npm run validate:release-data` 与 `npm test` 全部通过。
 
 可在临时 clone 中预演生成结果，避免污染真实工作区：
 

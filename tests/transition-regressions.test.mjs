@@ -161,7 +161,10 @@ test('honors a shorter transition duration and holds the destination until the n
 });
 
 test('uses frame rotations for holds and interpolates them through gaps', async () => {
-  const { evaluateSceneStateAtTime } = await importTypeScriptModule('../utils/transitions.ts');
+  const {
+    evaluateSceneStateAtTime,
+    interpolateRotationShortest,
+  } = await importTypeScriptModule('../utils/transitions.ts');
   const frames = [
     {
       id: 'frame-a',
@@ -185,6 +188,49 @@ test('uses frame rotations for holds and interpolates them through gaps', async 
   assert.equal(evaluateSceneStateAtTime(500, frames, performers, []).rotations.door, 10);
   assert.equal(evaluateSceneStateAtTime(2000, frames, performers, []).rotations.door, 50);
   assert.equal(evaluateSceneStateAtTime(3500, frames, performers, []).rotations.door, 90);
+  assert.equal(interpolateRotationShortest(180, 270, 0.5), 225);
+  assert.equal(interpolateRotationShortest(270, 180, 0.5), 225);
+  assert.equal(interpolateRotationShortest(350, 10, 0.5), 360);
+  assert.equal(interpolateRotationShortest(10, 350, 0.5), 0);
+  assert.equal(interpolateRotationShortest(0, 180, 0.5), 90);
+  assert.equal(interpolateRotationShortest(0, -180, 0.5), -90);
+});
+
+test('uses the shortest rotation path for default and configured transition motion', async () => {
+  const { evaluateSceneStateAtTime } = await importTypeScriptModule('../utils/transitions.ts');
+  const frames = [
+    {
+      id: 'frame-a',
+      name: 'A',
+      startTime: 0,
+      duration: 1000,
+      positions: { actor: { x: 10, y: 20 } },
+      rotations: { actor: 350 },
+    },
+    {
+      id: 'frame-b',
+      name: 'B',
+      startTime: 3000,
+      duration: 1000,
+      positions: { actor: { x: 30, y: 20 } },
+      rotations: { actor: 10 },
+    },
+  ];
+  const performers = [{ id: 'actor', name: 'Actor', type: 'performer', rotation: 0 }];
+
+  assert.equal(evaluateSceneStateAtTime(2000, frames, performers, []).rotations.actor, 360);
+  assert.equal(
+    evaluateSceneStateAtTime(2000, frames, performers, [{
+      id: 'transition',
+      fromFrameId: 'frame-a',
+      toFrameId: 'frame-b',
+      duration: 2000,
+      objectMotions: {
+        actor: { rotationMode: 'lerp', startRotation: 10, endRotation: 350 },
+      },
+    }]).rotations.actor,
+    0,
+  );
 });
 
 test('converts between center and hinge anchors without moving prop geometry', async () => {

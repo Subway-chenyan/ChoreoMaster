@@ -12,6 +12,7 @@ import {
 import DirectionArrow3D from './DirectionArrow3D';
 import { denormalizePoints } from '../components/prop-editor/PolygonUtils';
 import { getPropAnchorFromCenter, getPropCenterFromAnchor } from '../utils/prop-pivot';
+import { getStageLabelFontSize } from '../electron/stage-defaults';
 
 interface PointerCaptureApi extends EventTarget {
   hasPointerCapture(pointerId: number): boolean;
@@ -54,6 +55,7 @@ interface Prop3DProps {
   isSelected: boolean;
   onSelect: (id: string) => void;
   stageConfig: StageConfig;
+  showLabels?: boolean;
   showDirectionArrows?: boolean;
   dragEnabled?: boolean;
   onDragStart?: () => void;
@@ -69,6 +71,7 @@ const Prop3D: React.FC<Prop3DProps> = ({
   isSelected,
   onSelect,
   stageConfig,
+  showLabels = true,
   showDirectionArrows = true,
   dragEnabled = false,
   onDragStart,
@@ -145,6 +148,11 @@ const Prop3D: React.FC<Prop3DProps> = ({
   }, [finishActiveDrag]);
 
   const dims = { width: performer.width || 1, height: performer.height || 1, depth: performer.depth || 1 };
+  const labelFontSize = getStageLabelFontSize(
+    performer,
+    stageConfig.performerLabelFontSize,
+    stageConfig.propLabelFontSize,
+  );
 
   const isExtruded = performer.propGeometryType === 'extruded' &&
     performer.polygonPoints && performer.polygonPoints.length >= 3;
@@ -367,9 +375,14 @@ const Prop3D: React.FC<Prop3DProps> = ({
         </lineSegments>
       )}
 
-      {isSelected && (
-        <Html position={[0, dims.height / 2 + 0.5, 0]} center zIndexRange={[40, 0]}>
-          <div className="bg-yellow-400 text-black px-2 py-0.5 rounded text-xs font-bold">{performer.name}</div>
+      {showLabels && (
+        <Html position={[0, dims.height / 2 + 0.5, 0]} center distanceFactor={10} zIndexRange={[40, 0]}>
+          <div
+            className={`px-2 py-1 rounded font-bold whitespace-nowrap select-none ${isSelected ? 'bg-yellow-400 text-black' : 'bg-black/50 text-white'}`}
+            style={{ fontSize: `${labelFontSize}px` }}
+          >
+            {performer.name}
+          </div>
         </Html>
       )}
     </group>
