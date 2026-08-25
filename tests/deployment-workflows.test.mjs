@@ -163,7 +163,7 @@ test('web workflow is reusable, least-privilege, production-concurrent, and supp
   });
   assert.deepEqual(workflow.permissions, { contents: 'read' });
   assert.deepEqual(Object.keys(workflow.jobs), ['deploy']);
-  assert.equal(workflow.jobs.deploy.environment, 'production');
+  assert.equal(workflow.jobs.deploy.environment, undefined);
   assert.equal(workflow.jobs.deploy['runs-on'], 'ubuntu-latest');
   assertOfficialActionsPinned(workflow, source);
 
@@ -279,7 +279,7 @@ test('desktop workflow detects safe modes, builds explicitly unsigned artifacts,
 
   const build = workflow.jobs['build-windows'];
   assert.equal(build.if, "needs.detect.outputs.mode == 'publish'");
-  assert.equal(build.environment, 'production');
+  assert.equal(build.environment, undefined);
   const unsigned = findStep(build, 'Build explicitly unsigned installer');
   assert.deepEqual(unsigned.env, {
     CSC_IDENTITY_AUTO_DISCOVERY: 'false',
@@ -312,7 +312,7 @@ test('desktop workflow detects safe modes, builds explicitly unsigned artifacts,
     "needs.detect.outputs.mode == 'publish' && github.ref == 'refs/heads/main'",
   );
   assert.deepEqual(publish.permissions, { contents: 'write' });
-  assert.equal(publish.environment, 'production');
+  assert.equal(publish.environment, undefined);
   const installTencent = findStep(publish, 'Install and configure verified Tencent CLIs').run;
   assert.match(installTencent, /--forbid-overwrite|bucket-versioning/);
   assert.match(installTencent, /bucket versioning status is Closed/);

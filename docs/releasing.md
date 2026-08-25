@@ -1,6 +1,6 @@
 # CosStage 发布手册
 
-本文说明 CosStage 桌面版本从日常变更、聚合 Release PR、Windows 签名、COS 发布到回滚的完整流程。生产发布以 GitHub Actions 中的 `production` Environment 为边界；不要在本地直接改写 COS 稳定指针、创建版本标签或发布 GitHub Release。
+本文说明 CosStage 桌面版本从日常变更、聚合 Release PR、Windows 签名、COS 发布到回滚的完整流程。合并并推送到 `main` 后，质量检查与发布任务自动执行；不要在本地直接改写 COS 稳定指针、创建版本标签或发布 GitHub Release。
 
 > 临时未签名例外（自 1.1.0 起）：当前尚未取得受信任的 Windows Authenticode 证书，生产工作流会显式关闭证书自动发现，并通过 `AllowUnsigned` 校验未签名状态。安装时 Windows 会显示“未知发布者”。取得正式证书后必须删除该例外、恢复强制签名，并在 Release PR 合并前完成真实签名预检。
 
@@ -63,18 +63,18 @@ npm test
 
 预演后检查版本、CHANGELOG、结构化历史和 release notes。不要在功能分支提交预演生成物；正式生成物由 Release PR 维护。
 
-## Production Environment 配置
+## 自动发布凭据配置
 
-在 GitHub 仓库 Settings → Environments 中创建 `production`，配置 required reviewers，并限制只有发布负责人可以批准。Deployment branches 只允许 `main` 和 Changesets Release PR 分支 `changeset-release/main`；禁止任意功能分支或临时分支进入 production。桌面构建、生产发布、Web 部署与回滚都使用该 Environment。
+Web 与桌面发布任务不绑定 Environment 审批；`main` push 即为发布授权。以下发布凭据配置为 Repository secrets，确保工作流无需人工确认即可读取。手工回滚仍使用 `production` Environment，并保留 required reviewers。
 
-Environment secrets（正式签名恢复后再增加后两项）：
+Repository secrets（正式签名恢复后再增加后两项）：
 
 - `TENCENT_SECRET_ID`
 - `TENCENT_SECRET_KEY`
 - `CSC_LINK`（临时未签名期间不配置）
 - `CSC_KEY_PASSWORD`（临时未签名期间不配置）
 
-Environment variable：
+Repository variable：
 
 - `WINDOWS_PUBLISHER_NAME`：正式签名恢复后配置，且必须与 Windows Authenticode 证书 Subject 中的发布者一致；临时未签名期间不配置。
 

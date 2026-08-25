@@ -83,7 +83,7 @@ win: {
 - Quality checks run automatically on pushes to every repository branch, including `changeset-release/main`; do not rely on manual approval of a bot-created pull-request workflow run.
 - Web deployment is independent from desktop version publication. Ordinary `main` commits may deploy the web build without creating a desktop tag or moving desktop pointers.
 - Desktop publication and manual rollback share the `desktop-release-stable` concurrency group with cancellation disabled.
-- Production signing and COS writes use the `production` Environment. Deployment branches are restricted to `main` and the Changesets Release PR branch `changeset-release/main`; `publish` and `repair-release` still require `refs/heads/main`.
+- A push to `main` authorizes automated Web and desktop publication without an Environment approval pause. Repository secrets supply deployment credentials; `publish` and `repair-release` still require `refs/heads/main`. Manual rollback remains protected by the `production` Environment.
 - The COS bucket versioning state must be `Closed`. Authenticated preflight must fail before the first write if that state cannot be proven.
 - Versioned objects are create-only and immutable. A same-name object is reusable only when its complete SHA-256 matches.
 - Publish mutable pointers in alias -> index -> root `latest.yml` order. This sequence is recoverable but is not a multi-object transaction.
