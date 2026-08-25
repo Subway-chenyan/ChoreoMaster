@@ -3,7 +3,7 @@
   "description": "CosStage desktop choreography editor",
   "author": "CosStage",
   "private": true,
-  "version": "1.2.2",
+  "version": "1.2.3",
   "main": "dist-electron/main.js",
   "type": "module",
   "scripts": {
