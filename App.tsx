@@ -70,7 +70,7 @@ import {
   getPerformerDimensions,
   getStageLabelFontSize,
   normalizeLabelFontSize,
-} from './stage-defaults';
+} from './electron/stage-defaults';
 import {
   calculateStageDimensionsFromImage,
   clampStageBackgroundOpacity,
@@ -5106,6 +5106,7 @@ const App: React.FC = () => {
               isPlaying={isPlaying}
               gridScale={gridScale}
               snapToGrid={snapToGrid}
+              showLabels={showLabels}
               showDirectionArrows={showDirectionArrows}
               readonly={isPlaying}
               dragEnabled={is3DDragEnabled}

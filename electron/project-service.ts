@@ -26,7 +26,7 @@ import {
   DEFAULT_PERFORMER_LABEL_FONT_SIZE,
   DEFAULT_PROP_LABEL_FONT_SIZE,
   normalizeLabelFontSize,
-} from '../stage-defaults.js';
+} from './stage-defaults.js';
 
 const PROJECT_VERSION = '3.0';
 const PROJECT_FILE_NAME = 'project.json';

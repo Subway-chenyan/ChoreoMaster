@@ -61,7 +61,7 @@ test('project archive tests declare their checksum dependency directly', async (
   assert.equal(pkg.devDependencies['buffer-crc32'], '1.0.0');
 });
 
-test('quality workflow gates pull requests and main with least privilege', async () => {
+test('quality workflow automatically checks every pushed branch and pull request with least privilege', async () => {
   const { workflow } = await readWorkflow('ci.yml');
 
   assert.equal(workflow.name, 'Quality');
@@ -69,7 +69,7 @@ test('quality workflow gates pull requests and main with least privilege', async
     pull_request: {
       types: ['opened', 'synchronize', 'reopened', 'labeled', 'unlabeled'],
     },
-    push: { branches: ['main'] },
+    push: { branches: ['**'] },
   });
   assert.deepEqual(workflow.permissions, {
     contents: 'read',
@@ -124,8 +124,8 @@ test('release workflow maintains one version pull request without publishing', a
 
   assert.equal(workflow.name, 'Release PR');
   assert.ok(source.includes(
-    '# GITHUB_TOKEN 创建或更新的 Release PR workflow run 需要 maintainer 在 PR UI 批准 quality。\n'
-    + '# 这是有意的人工发布门禁；Task 10 runbook 会正式记录该流程。',
+    '# Quality 监听所有仓库分支的 push，因此 GITHUB_TOKEN 更新 Release PR 分支后会自动检查，\n'
+    + '# 无需 maintainer 在 PR UI 手工批准 workflow run；Release PR 本身仍由负责人审核合并。',
   ));
   assert.ok(source.includes(`uses: ${actionRefs.changesets} # v1.9.0`));
   assert.deepEqual(workflow.on, {

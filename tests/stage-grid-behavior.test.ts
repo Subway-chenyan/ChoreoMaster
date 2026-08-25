@@ -8,6 +8,13 @@ import {
 } from '../utils/stage-grid.ts';
 import { getTimelineFollowPlayheadScrollLeft, getTimelineHorizontalWheelDelta } from '../utils/timeline-scroll.ts';
 import {
+  DEFAULT_PERFORMER_LABEL_FONT_SIZE,
+  DEFAULT_PROP_LABEL_FONT_SIZE,
+  getPerformerDimensions,
+  getStageLabelFontSize,
+  normalizeLabelFontSize,
+} from '../electron/stage-defaults.ts';
+import {
   KEYFRAME_DURATION_THRESHOLD_MS,
   MIN_FRAME_DURATION_MS,
   formatFrameDuration,
@@ -95,6 +102,27 @@ test('timeline playback keeps the playhead centered after it reaches the viewpor
       scrollWidth: 2000,
     }),
     1500,
+  );
+});
+
+test('stage entity dimensions and label sizes normalize legacy and invalid values', () => {
+  assert.deepEqual(
+    getPerformerDimensions({ type: 'performer', width: undefined, height: undefined, depth: undefined }),
+    { width: 1, height: 1.8, depth: 1 },
+  );
+  assert.deepEqual(
+    getPerformerDimensions({ type: 'prop', width: -2, height: Number.NaN, depth: 3 }),
+    { width: 0.1, height: 1, depth: 3 },
+  );
+  assert.equal(normalizeLabelFontSize(5.5, DEFAULT_PERFORMER_LABEL_FONT_SIZE), 6);
+  assert.equal(normalizeLabelFontSize(40, DEFAULT_PERFORMER_LABEL_FONT_SIZE), 32);
+  assert.equal(
+    getStageLabelFontSize({ type: 'performer' }, undefined, 24),
+    DEFAULT_PERFORMER_LABEL_FONT_SIZE,
+  );
+  assert.equal(
+    getStageLabelFontSize({ type: 'prop' }, 24, undefined),
+    DEFAULT_PROP_LABEL_FONT_SIZE,
   );
 });
 

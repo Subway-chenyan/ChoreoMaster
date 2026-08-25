@@ -23,6 +23,7 @@ interface Scene3DProps {
   lockedPerformerIds?: string[];
   gridScale?: number;
   snapToGrid?: boolean;
+  showLabels?: boolean;
   showDirectionArrows?: boolean;
   onDragStart?: (ids: string[]) => void;
   onDragEnd?: (ids: string[], finalUpdates?: { id: string; pos: Position }[]) => void;
@@ -46,6 +47,7 @@ const Scene3D: React.FC<Scene3DProps> = ({
   lockedPerformerIds = [],
   gridScale = 1,
   snapToGrid = false,
+  showLabels = true,
   showDirectionArrows = true,
   onDragStart,
   onDragEnd,
@@ -127,6 +129,7 @@ const Scene3D: React.FC<Scene3DProps> = ({
           isSelected: selectedIds.includes(p.id),
           onSelect,
           stageConfig,
+          showLabels,
           showDirectionArrows,
           dragEnabled: interactionPolicy.canDragObjects && !isLocked,
           onDragStart: () => handleDragStart(p.id),

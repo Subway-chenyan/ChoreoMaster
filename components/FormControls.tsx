@@ -103,7 +103,7 @@ export function SelectField<T extends string>({
   helperTone = 'default',
 }: SelectFieldProps<T>) {
   return (
-    <div className="rounded-xl border border-slate-700 bg-slate-900/80 p-3 shadow-sm shadow-slate-950/20">
+    <div className="min-w-0 rounded-xl border border-slate-700 bg-slate-900/80 p-3 shadow-sm shadow-slate-950/20">
       <label className="mb-2 block text-[11px] font-medium tracking-wide text-slate-400">
         {label}
       </label>
@@ -164,7 +164,7 @@ export function StepperNumberField({
         </div>
         <span className="shrink-0 rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-300">{unit}</span>
       </div>
-      <div className="grid grid-cols-[40px_minmax(0,1fr)_40px] gap-2 sm:grid-cols-[44px_minmax(72px,1fr)_44px]">
+      <div className="grid grid-cols-[40px_minmax(0,1fr)_40px] gap-2 sm:grid-cols-[44px_minmax(0,1fr)_44px]">
         <button
           type="button"
           onClick={() => updateValue(value - step)}
@@ -181,7 +181,7 @@ export function StepperNumberField({
           value={Number.isFinite(value) ? value : min}
           onChange={updateValue}
           formatValue={(next) => String(Number(next.toFixed(2)))}
-          className="min-w-[72px] w-full rounded-lg border border-slate-600 bg-slate-950/70 px-2 py-2.5 text-center text-base font-semibold text-white outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+          className="min-w-0 w-full rounded-lg border border-slate-600 bg-slate-950/70 px-2 py-2.5 text-center text-base font-semibold text-white outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
         />
         <button
           type="button"

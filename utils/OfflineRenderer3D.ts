@@ -11,7 +11,7 @@ import {
   getPerformerDimensions,
   getStageLabelFontSize,
   normalizeLabelFontSize,
-} from '../stage-defaults';
+} from '../electron/stage-defaults';
 
 export type CameraAngle = 'judge' | 'overhead' | 'rear-overhead';
 

@@ -343,16 +343,42 @@ test('2D stage renders background, LED marker, arrows, and actor rotation contro
   assert.match(stage, /bottom-\[-16px\] left-1\/2/);
   assert.match(stage, /h-11 w-8/);
   assert.match(stage, /strokeWidth="5"/);
-  assert.match(stage, /showDirectionArrows \? '-bottom-10' : '-bottom-6'/);
+  assert.match(stage, /const labelOffsetPercent = Math\.max\(\(performerDims\.depth \/ stageConfig\.depth\) \* 50, 2\.2\) \+ \(showDirectionArrows \? 2\.8 : 1\.4\)/);
   assert.match(stage, /\* 180 \/ Math\.PI\) - 90/);
   assert.doesNotMatch(stage, /\* 180 \/ Math\.PI\) \+ 90/);
   assert.match(stage, /data-performer-id=\{performer\.id\}/);
-  assert.match(stage, /onRotationStart\?\.\(performer\.id\)/);
+  assert.match(stage, /onRotationStart\?\.\(performerId\)/);
+  assert.match(stage, /event\.clientX - rotationDragState\.startClientX/);
+  assert.match(stage, /event\.clientY - rotationDragState\.startClientY/);
+  assert.match(stage, /if \(movement < 3\) return/);
+  assert.match(stage, /if \(rotationLastAngleRef\.current !== null && onRotationEnd\)/);
   assert.match(stage, /rotations\[performer\.id\] \?\? performer\.rotation \?\? 0/);
+  assert.equal((stage.match(/bottom-\[-34px\]/g) || []).length, 2);
+  assert.doesNotMatch(stage, /top-\[-34px\]/);
   assert.match(app, /const \[showDirectionArrows, setShowDirectionArrows\] = useState\(true\)/);
   assert.match(app, /setShowDirectionArrows\(!showDirectionArrows\)/);
   assert.match(app, /showDirectionArrows \? <Eye size=\{18\} \/> : <EyeOff size=\{18\} \/>/);
   assert.match(app, /showDirectionArrows=\{showDirectionArrows\}/);
+});
+
+test('performer editor keeps stepper controls contained and allows viewport scrolling', async () => {
+  const [modal, controls] = await Promise.all([
+    read('components/PerformerEditorModal.tsx'),
+    read('components/FormControls.tsx'),
+  ]);
+
+  assert.match(modal, /fixed inset-0[^"\n]*overflow-y-auto/);
+  assert.match(modal, /flex min-h-full items-start justify-center/);
+  assert.match(modal, /max-w-5xl/);
+  assert.match(controls, /sm:grid-cols-\[44px_minmax\(0,1fr\)_44px\]/);
+  assert.match(controls, /className="min-w-0 w-full rounded-lg/);
+  assert.doesNotMatch(controls, /min-w-\[72px\]/);
+  assert.match(modal, /StepperNumberField label="尺寸" value=\{size\}/);
+  assert.match(modal, /width: size,\s*depth: size,\s*height,/);
+  assert.doesNotMatch(modal, /StepperNumberField label="长度"/);
+  assert.doesNotMatch(modal, /StepperNumberField label="宽度"/);
+  assert.doesNotMatch(modal, /StepperNumberField label="旋转角度"/);
+  assert.doesNotMatch(modal, /rotation,\s*\}\)/);
 });
 
 test('2D export direction arrows default toward the stage front', async () => {
@@ -382,8 +408,10 @@ test('export modal offers rehearsal-oriented 2D output with stage front on top',
   assert.match(app, /view: export2DView/);
 });
 
-test('live 3D stage uses the background, LED depth, and direction arrows', async () => {
-  const [scene, floor, led, performer, prop] = await Promise.all([
+test('live 3D stage uses the background, LED depth, labels, and direction arrows', async () => {
+  const [app, stage, scene, floor, led, performer, prop] = await Promise.all([
+    read('App.tsx'),
+    read('components/Stage3D.tsx'),
     read('3d_components/Scene3D.tsx'),
     read('3d_components/StageFloor.tsx'),
     read('components/LEDTV.tsx'),
@@ -403,6 +431,12 @@ test('live 3D stage uses the background, LED depth, and direction arrows', async
   assert.match(prop, /DirectionArrow3D/);
   assert.match(scene, /showDirectionArrows = true/);
   assert.match(scene, /showDirectionArrows,/);
+  assert.match(app, /<Stage3D[\s\S]*showLabels=\{showLabels\}/);
+  assert.match(stage, /<Scene3D[\s\S]*showLabels=\{showLabels\}/);
+  assert.match(scene, /showLabels,/);
+  assert.match(performer, /\{showLabels && \(/);
+  assert.match(prop, /\{showLabels && \(/);
+  assert.doesNotMatch(prop, /\{isSelected && \(\s*<Html/);
   assert.match(performer, /\{showDirectionArrows && <DirectionArrow3D/);
   assert.match(prop, /\{showDirectionArrows && <DirectionArrow3D/);
   assert.match(await read('3d_components/DirectionArrow3D.tsx'), /0\.14, 0\.055, 0\.64/);

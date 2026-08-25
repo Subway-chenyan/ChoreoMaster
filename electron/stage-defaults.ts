@@ -1,4 +1,4 @@
-import type { Performer } from './electron/project-contract';
+import type { Performer } from './project-contract';
 
 export const DEFAULT_PERFORMER_WIDTH = 1;
 export const DEFAULT_PERFORMER_DEPTH = 1;

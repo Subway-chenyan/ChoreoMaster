@@ -18,7 +18,7 @@ import {
   STAGE_THIRD_POSITIONS,
 } from '../utils/stage-grid';
 import { getLedStageYPercent, resolveStageBackgroundUrl } from '../utils/stage-config';
-import { getPerformerDimensions, getStageLabelFontSize } from '../stage-defaults';
+import { getPerformerDimensions, getStageLabelFontSize } from '../electron/stage-defaults';
 
 interface StageProps {
   performers: Performer[];
@@ -126,6 +126,12 @@ interface TransitionStartDragState {
   startClientX: number;
   startClientY: number;
   initialPosition: Position;
+}
+
+interface RotationDragState {
+  performerId: string;
+  startClientX: number;
+  startClientY: number;
 }
 
 function getPolygonClipPath(points: { x: number; y: number }[] | undefined): string | undefined {
@@ -256,7 +262,8 @@ export const Stage: React.FC<StageProps> = ({
   const [resizeState, setResizeState] = useState<ResizeState | null>(null);
   const [controlPointDragIndex, setControlPointDragIndex] = useState<number | null>(null);
   const [startPointDragState, setStartPointDragState] = useState<TransitionStartDragState | null>(null);
-  const [rotationDragId, setRotationDragId] = useState<string | null>(null);
+  const [rotationDragState, setRotationDragState] = useState<RotationDragState | null>(null);
+  const rotationLastAngleRef = useRef<number | null>(null);
   const selectedTransitionPath = transitionPaths.find((path) => path.isSelected) ?? null;
 
   // Filter performers based on group visibility in current frame
@@ -351,22 +358,33 @@ export const Stage: React.FC<StageProps> = ({
   ]);
 
   useEffect(() => {
-    if (!rotationDragId || readonly || !onRotationChange) return undefined;
-    const handleRotationMove = (event: PointerEvent) => {
-      const element = stageRef.current?.querySelector<HTMLElement>(`[data-performer-id="${rotationDragId}"]`);
-      if (!element) return;
+    if (!rotationDragState || readonly || !onRotationChange) return undefined;
+    const getRotationAngle = (event: PointerEvent): number | null => {
+      const element = stageRef.current?.querySelector<HTMLElement>(`[data-performer-id="${rotationDragState.performerId}"]`);
+      if (!element) return null;
       const rect = element.getBoundingClientRect();
-      const angle = (Math.atan2(event.clientY - (rect.top + rect.height / 2), event.clientX - (rect.left + rect.width / 2)) * 180 / Math.PI) - 90;
-      onRotationChange(rotationDragId, angle);
+      return (Math.atan2(event.clientY - (rect.top + rect.height / 2), event.clientX - (rect.left + rect.width / 2)) * 180 / Math.PI) - 90;
+    };
+    const handleRotationMove = (event: PointerEvent) => {
+      const movement = Math.hypot(
+        event.clientX - rotationDragState.startClientX,
+        event.clientY - rotationDragState.startClientY,
+      );
+      if (movement < 3) return;
+      const angle = getRotationAngle(event);
+      if (angle === null) return;
+      rotationLastAngleRef.current = angle;
+      onRotationChange(rotationDragState.performerId, angle);
     };
     const handleRotationEnd = (event: PointerEvent) => {
-      const element = stageRef.current?.querySelector<HTMLElement>(`[data-performer-id="${rotationDragId}"]`);
-      if (element && onRotationEnd) {
-        const rect = element.getBoundingClientRect();
-        const angle = (Math.atan2(event.clientY - (rect.top + rect.height / 2), event.clientX - (rect.left + rect.width / 2)) * 180 / Math.PI) - 90;
-        onRotationEnd(rotationDragId, angle);
+      if (rotationLastAngleRef.current !== null && onRotationEnd) {
+        const angle = event.type === 'pointerup'
+          ? getRotationAngle(event) ?? rotationLastAngleRef.current
+          : rotationLastAngleRef.current;
+        onRotationEnd(rotationDragState.performerId, angle);
       }
-      setRotationDragId(null);
+      rotationLastAngleRef.current = null;
+      setRotationDragState(null);
     };
     window.addEventListener('pointermove', handleRotationMove);
     window.addEventListener('pointerup', handleRotationEnd);
@@ -376,7 +394,19 @@ export const Stage: React.FC<StageProps> = ({
       window.removeEventListener('pointerup', handleRotationEnd);
       window.removeEventListener('pointercancel', handleRotationEnd);
     };
-  }, [onRotationChange, onRotationEnd, readonly, rotationDragId]);
+  }, [onRotationChange, onRotationEnd, readonly, rotationDragState]);
+
+  const handleRotationPointerDown = (event: React.PointerEvent, performerId: string) => {
+    event.stopPropagation();
+    event.preventDefault();
+    rotationLastAngleRef.current = null;
+    onRotationStart?.(performerId);
+    setRotationDragState({
+      performerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+    });
+  };
 
   const handleResizeStart = (e: React.PointerEvent, id: string, handle: 'nw' | 'ne' | 'sw' | 'se', currentWidth: number, currentHeight: number) => {
     if (lockedPerformerIdSet.has(id)) return;
@@ -983,15 +1013,10 @@ export const Stage: React.FC<StageProps> = ({
                     {!isPlatform && (
                       <button
                         type="button"
-                        className="absolute left-1/2 top-[-34px] h-5 w-5 -translate-x-1/2 rounded-full border-2 border-white bg-amber-500 shadow-lg cursor-grab active:cursor-grabbing"
+                        className="absolute bottom-[-34px] left-1/2 h-5 w-5 -translate-x-1/2 rounded-full border-2 border-white bg-amber-500 shadow-lg cursor-grab active:cursor-grabbing"
                         style={{ transform: `translateX(-50%) rotate(${-rotation}deg)` }}
                         title="拖动旋转"
-                        onPointerDown={(event) => {
-                          event.stopPropagation();
-                          event.preventDefault();
-                          onRotationStart?.(performer.id);
-                          setRotationDragId(performer.id);
-                        }}
+                        onPointerDown={(event) => handleRotationPointerDown(event, performer.id)}
                       />
                     )}
                     <div className="absolute top-0 left-0 w-5 h-5 md:w-3 md:h-3 bg-white border border-blue-600 rounded-full cursor-nw-resize -translate-x-1/2 -translate-y-1/2 z-20 shadow-sm hover:scale-125 transition-transform touch-none" onPointerDown={(e) => handleResizeStart(e, performer.id, 'nw', performer.width || 1, performer.depth || 1)} />
@@ -1034,14 +1059,9 @@ export const Stage: React.FC<StageProps> = ({
                 {isSelected && !readonly && !lockedPerformerIdSet.has(performer.id) && (
                   <button
                     type="button"
-                    className="absolute left-1/2 top-[-34px] z-30 h-5 w-5 -translate-x-1/2 rounded-full border-2 border-white bg-amber-500 shadow-lg cursor-grab active:cursor-grabbing"
+                    className="absolute bottom-[-34px] left-1/2 z-30 h-5 w-5 -translate-x-1/2 rounded-full border-2 border-white bg-amber-500 shadow-lg cursor-grab active:cursor-grabbing"
                     title="拖动旋转"
-                    onPointerDown={(event) => {
-                      event.stopPropagation();
-                      event.preventDefault();
-                      onRotationStart?.(performer.id);
-                      setRotationDragId(performer.id);
-                    }}
+                    onPointerDown={(event) => handleRotationPointerDown(event, performer.id)}
                   />
                 )}
                 <div className={`relative flex h-full w-full items-center justify-center transition-transform duration-100 ${isSelected ? 'scale-110' : 'hover:scale-105'}`}>

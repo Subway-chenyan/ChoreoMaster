@@ -138,6 +138,19 @@ function normalizeRotation(value: number | undefined, fallback: number): number 
   return Number.isFinite(value) ? value as number : fallback;
 }
 
+export function interpolateRotationShortest(
+  startRotation: number,
+  endRotation: number,
+  progress: number,
+): number {
+  const rawDelta = endRotation - startRotation;
+  let shortestDelta = ((rawDelta + 180) % 360 + 360) % 360 - 180;
+  if (shortestDelta === -180 && rawDelta > 0) {
+    shortestDelta = 180;
+  }
+  return startRotation + shortestDelta * progress;
+}
+
 function getObjectRotationAtTime(
   performer: Performer,
   motion: ObjectMotion | undefined,
@@ -145,7 +158,7 @@ function getObjectRotationAtTime(
   frameStartRotation: number,
   frameEndRotation: number,
 ): number {
-  if (!motion) return lerp(frameStartRotation, frameEndRotation, progress);
+  if (!motion) return interpolateRotationShortest(frameStartRotation, frameEndRotation, progress);
 
   const startRotation = normalizeRotation(motion.startRotation, frameStartRotation);
   const endRotation = normalizeRotation(motion.endRotation, frameEndRotation);
@@ -155,10 +168,10 @@ function getObjectRotationAtTime(
   }
 
   if (motion.rotationMode === 'lerp') {
-    return lerp(startRotation, endRotation, progress);
+    return interpolateRotationShortest(startRotation, endRotation, progress);
   }
 
-  return lerp(frameStartRotation, frameEndRotation, progress);
+  return interpolateRotationShortest(frameStartRotation, frameEndRotation, progress);
 }
 
 function getBezierControlPoints(

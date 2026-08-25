@@ -11,7 +11,7 @@ import {
   resolveThreeHeightFromPointerDrag,
 } from '../utils/three-interaction';
 import DirectionArrow3D from './DirectionArrow3D';
-import { getPerformerDimensions, getStageLabelFontSize } from '../stage-defaults';
+import { getPerformerDimensions, getStageLabelFontSize } from '../electron/stage-defaults';
 
 interface PointerCaptureApi extends EventTarget {
   hasPointerCapture(pointerId: number): boolean;
@@ -43,6 +43,7 @@ interface Performer3DProps {
   isSelected: boolean;
   onSelect: (id: string) => void;
   stageConfig: StageConfig;
+  showLabels?: boolean;
   showDirectionArrows?: boolean;
   dragEnabled?: boolean;
   onDragStart?: () => void;
@@ -59,6 +60,7 @@ const Performer3D: React.FC<Performer3DProps> = ({
   isSelected,
   onSelect,
   stageConfig,
+  showLabels = true,
   showDirectionArrows = true,
   dragEnabled = false,
   onDragStart,
@@ -368,19 +370,21 @@ const Performer3D: React.FC<Performer3DProps> = ({
         </group>
       )}
 
-      <Html
-        position={[0, performerHeight + 0.5, 0]}
-        center
-        distanceFactor={10}
-        zIndexRange={[40, 0]}
-      >
-        <div
-          className={`px-2 py-1 rounded font-bold whitespace-nowrap select-none ${isSelected ? 'bg-yellow-400 text-black' : 'bg-black/50 text-white'}`}
-          style={{ fontSize: `${labelFontSize}px` }}
+      {showLabels && (
+        <Html
+          position={[0, performerHeight + 0.5, 0]}
+          center
+          distanceFactor={10}
+          zIndexRange={[40, 0]}
         >
-          {performer.name}
-        </div>
-      </Html>
+          <div
+            className={`px-2 py-1 rounded font-bold whitespace-nowrap select-none ${isSelected ? 'bg-yellow-400 text-black' : 'bg-black/50 text-white'}`}
+            style={{ fontSize: `${labelFontSize}px` }}
+          >
+            {performer.name}
+          </div>
+        </Html>
+      )}
     </group>
   );
 };

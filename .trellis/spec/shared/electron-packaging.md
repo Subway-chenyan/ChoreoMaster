@@ -80,6 +80,7 @@ win: {
 
 - Product changes add a Changeset; internal-only changes use the `release:none` PR label. Do not change package versions on feature branches.
 - Changesets maintain one aggregate Release PR. Only a human-approved merge of that Release PR authorizes a desktop production release.
+- Quality checks run automatically on pushes to every repository branch, including `changeset-release/main`; do not rely on manual approval of a bot-created pull-request workflow run.
 - Web deployment is independent from desktop version publication. Ordinary `main` commits may deploy the web build without creating a desktop tag or moving desktop pointers.
 - Desktop publication and manual rollback share the `desktop-release-stable` concurrency group with cancellation disabled.
 - Production signing and COS writes use the `production` Environment. Deployment branches are restricted to `main` and the Changesets Release PR branch `changeset-release/main`; `publish` and `repair-release` still require `refs/heads/main`.

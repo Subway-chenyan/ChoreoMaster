@@ -21,6 +21,7 @@ interface Stage3DProps {
   isPlaying?: boolean;
   gridScale?: number;
   snapToGrid?: boolean;
+  showLabels?: boolean;
   showDirectionArrows?: boolean;
   readonly?: boolean;
   dragEnabled?: boolean;
@@ -46,6 +47,7 @@ const Stage3D: React.FC<Stage3DProps> = ({
   isPlaying = false,
   gridScale = 1,
   snapToGrid = false,
+  showLabels = true,
   showDirectionArrows = true,
   readonly = false,
   dragEnabled = false,
@@ -82,6 +84,7 @@ const Stage3D: React.FC<Stage3DProps> = ({
           lockedPerformerIds={lockedPerformerIds}
           gridScale={gridScale}
           snapToGrid={snapToGrid}
+          showLabels={showLabels}
           showDirectionArrows={showDirectionArrows}
           onPositionChange={onPositionChange}
           onDragStart={onDragStart}

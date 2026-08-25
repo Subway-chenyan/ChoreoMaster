@@ -18,7 +18,7 @@ import {
     DEFAULT_PERFORMER_LABEL_FONT_SIZE,
     DEFAULT_PERFORMER_WIDTH,
     DEFAULT_PROP_LABEL_FONT_SIZE,
-} from '../stage-defaults';
+} from '../electron/stage-defaults';
 
 interface SidebarProps {
     performers: Performer[];
