@@ -136,6 +136,16 @@ test('sandboxed Electron loads the preload bridge as CommonJS', async () => {
   assert.match(main, /sandbox: true/);
 });
 
+test('packaged Electron includes local main-process modules required at startup', async () => {
+  const [builder, projectService] = await Promise.all([
+    read('electron-builder.config.cjs'),
+    read('electron/project-service.ts'),
+  ]);
+
+  assert.match(projectService, /from '\.\/stage-defaults\.js'/);
+  assert.match(builder, /'dist-electron\/stage-defaults\.js'/);
+});
+
 test('project asset protocol forwards media request headers', async () => {
   const source = await read('electron/main.ts');
   assert.match(source, /request\.headers\.get\('range'\)/);
