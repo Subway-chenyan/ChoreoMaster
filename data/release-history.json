@@ -1,7 +1,22 @@
 {
   "schemaVersion": 1,
-  "currentVersion": "1.2.3",
+  "currentVersion": "1.2.4",
   "releases": [
+    {
+      "version": "1.2.4",
+      "date": "2026-08-26",
+      "kind": "patch",
+      "title": "CosStage 1.2.4",
+      "summary": "修复 Windows 安装包启动时缺少舞台默认配置模块而崩溃的问题。",
+      "changes": [
+        {
+          "kind": "patch",
+          "text": "修复 Windows 安装包启动时缺少舞台默认配置模块而崩溃的问题。"
+        }
+      ],
+      "breakingChanges": [],
+      "migrationSteps": []
+    },
     {
       "version": "1.2.3",
       "date": "2026-08-25",
