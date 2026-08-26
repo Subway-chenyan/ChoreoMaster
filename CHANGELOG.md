@@ -1,5 +1,11 @@
 # CosStage 变更记录
 
+## 1.2.4
+
+### Patch Changes
+
+- a3f2c60: 修复 Windows 安装包启动时缺少舞台默认配置模块而崩溃的问题。
+
 ## 1.2.3
 
 ### Patch Changes
