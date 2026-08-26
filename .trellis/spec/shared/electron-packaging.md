@@ -56,6 +56,60 @@ win: {
 }
 ```
 
+## Scenario: Packaged main-process module closure
+
+### 1. Scope / Trigger
+
+- Applies when adding, moving, or renaming a local module imported by Electron main-process code, or when changing the Electron Builder `files` allowlist.
+
+### 2. Signatures
+
+- TypeScript output: `electron/*.ts` compiles into root-level `dist-electron/*.js` files.
+- Packaging allowlist: every runtime-reachable local module is explicitly present in `electron-builder.config.cjs`.
+
+### 3. Contracts
+
+- A successful TypeScript build proves that an imported module exists in `dist-electron`; it does not prove that Electron Builder copied the module into `app.asar`.
+- Whenever a main-process file gains a local runtime import, add the compiled target to the Builder `files` allowlist in the same change.
+- Type-only imports do not require packaged output. Runtime ESM imports do.
+- Do not move shared renderer utilities into `electron/` without checking both Vite bundling and Electron compilation output paths.
+
+### 4. Validation & Error Matrix
+
+- Compiled dependency exists but is absent from `files` -> installed application fails at startup with `ERR_MODULE_NOT_FOUND`.
+- Source import path and compiled output disagree -> Electron type-check or project tests fail.
+- Renderer-only dependency omitted from `app.asar` -> acceptable when Vite bundles it into `dist/` and main-process code cannot reach it.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `project-service.js` imports `./stage-defaults.js`, and both files are explicitly packaged.
+- Base: a type-only helper is erased by TypeScript and needs no Builder entry.
+- Bad: project tests import from the complete local `dist-electron/` tree, pass, and the release ships an incomplete `app.asar` allowlist.
+
+### 6. Tests Required
+
+- Assert every newly introduced local main-process runtime import has its compiled target in the Builder allowlist.
+- Run Electron type-check, project tests, desktop regressions, and a production Electron package build.
+- For release-critical changes, inspect the packaged archive or launch the unpacked application rather than relying only on `dist-electron/` imports.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```javascript
+files: ['dist-electron/project-service.js']
+// project-service.js imports ./stage-defaults.js, which is absent from app.asar.
+```
+
+#### Correct
+
+```javascript
+files: [
+  'dist-electron/project-service.js',
+  'dist-electron/stage-defaults.js',
+]
+```
+
 ## Scenario: Governed web and desktop releases
 
 ### 1. Scope / Trigger

@@ -388,6 +388,17 @@ If you encounter a cross-layer bug:
 4. **Test in isolation** - Can you reproduce with a simple test case?
 5. **Document the fix** - Add to "Lessons from Common Bugs" table
 
+### Electron compiled-output vs packaged-artifact boundary
+
+For Electron main-process changes, compilation and packaging are separate layers:
+
+- [ ] Identify where each local runtime import compiles inside `dist-electron/`.
+- [ ] Confirm the Electron Builder `files` allowlist includes every runtime-reachable compiled module.
+- [ ] Inspect the packaged `app.asar`, not only the complete local build directory.
+- [ ] Launch the packaged or unpacked application from a clean directory for release-critical changes.
+
+Passing type-check and importing from the local `dist-electron/` tree cannot detect an incomplete packaging allowlist.
+
 ---
 
 **Language**: All documentation should be written in **English**.
