@@ -13,6 +13,9 @@
     "dev:backend": "node scripts/run-backend-dev.cjs",
     "dev:electron": "concurrently \"vite\" \"tsc -p tsconfig.electron.json && wait-on http://localhost:5173 && electron .\"",
     "build": "vite build",
+    "android:sync": "npm run build && cap sync android",
+    "android:debug": "npm run android:sync && cd android && gradlew.bat assembleDebug",
+    "android:install": "cd android && gradlew.bat installDebug",
     "build:electron": "npm run build:main && npm run build && electron-builder --config electron-builder.config.cjs",
     "build:electron:win": "npm run build:main && npm run build && electron-builder --win nsis --x64 --config electron-builder.config.cjs",
     "build:main": "tsc -p tsconfig.electron.json",
@@ -22,7 +25,7 @@
     "version-packages": "node scripts/release/version-packages.mjs",
     "test:backend": "node scripts/run-backend-pytest.cjs",
     "test:project": "npm run build:main && node --test tests/project-service.test.mjs",
-    "test:desktop": "node --experimental-strip-types --test tests/desktop-regressions.test.mjs tests/desktop-binary-export.test.ts tests/export-progress.test.ts tests/performer-visibility.test.ts tests/performer-locking.test.ts tests/transition-regressions.test.mjs tests/update-contract.test.ts tests/update-preferences.test.ts tests/release-history.test.ts tests/cross-project-clipboard.test.ts tests/performer-grouping.test.ts tests/stage-grid-behavior.test.ts tests/three-interaction.test.ts",
+    "test:desktop": "node --experimental-strip-types --test tests/desktop-regressions.test.mjs tests/adaptive-layout.test.ts tests/android-packaging.test.mjs tests/desktop-binary-export.test.ts tests/export-progress.test.ts tests/performer-visibility.test.ts tests/performer-locking.test.ts tests/transition-regressions.test.mjs tests/update-contract.test.ts tests/update-preferences.test.ts tests/release-history.test.ts tests/cross-project-clipboard.test.ts tests/performer-grouping.test.ts tests/stage-grid-behavior.test.ts tests/three-interaction.test.ts",
     "test:release": "node --test tests/release-model.test.mjs tests/change-intent.test.mjs tests/version-packages.test.mjs tests/release-artifacts.test.mjs tests/release-workflows.test.mjs tests/published-index.test.mjs tests/publish-cos.test.mjs tests/deployment-workflows.test.mjs tests/rollback-workflow.test.mjs",
     "validate:release-data": "node scripts/release/validate-release-data.mjs",
     "verify:release-artifacts": "node scripts/release/verify-release-artifacts.mjs",
@@ -30,6 +33,9 @@
     "test": "npm run typecheck && npm run test:release && npm run test:backend && npm run test:project && npm run test:desktop && npm run build"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/app": "^8.1.1",
+    "@capacitor/core": "^8.5.0",
     "archiver": "^8.0.0",
     "core-util-is": "^1.0.3",
     "electron-is-dev": "^3.0.1",
@@ -38,6 +44,8 @@
     "unzipper": "^0.12.3"
   },
   "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^8.5.0",
     "@changesets/cli": "^2.31.0",
     "@google/genai": "^1.30.0",
     "@react-three/drei": "^10.7.7",

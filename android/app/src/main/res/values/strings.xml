@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">CosStage</string>
+    <string name="title_activity_main">CosStage</string>
+    <string name="package_name">com.choreomaster.app</string>
+    <string name="custom_url_scheme">com.choreomaster.app</string>
+</resources>

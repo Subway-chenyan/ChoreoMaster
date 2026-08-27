@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Capacitor } from '@capacitor/core';
 import {
   AudioMarker,
   Frame,
@@ -26,6 +27,12 @@ import { Sidebar } from './components/Sidebar';
 import { Stage } from './components/Stage';
 import Stage3D from './components/Stage3D';
 import { Timeline } from './components/Timeline';
+import {
+  MOBILE_TOOLS_DRAWER_ID,
+  MOBILE_TOOLS_DRAWER_LABEL_ID,
+  MobileEditorChrome,
+  useMobileToolsDialog,
+} from './components/MobileEditorChrome';
 import { EditableNumberInput } from './components/FormControls';
 import { PerformerEditorModal } from './components/PerformerEditorModal';
 import { HelpModal } from './components/HelpModal';
@@ -63,6 +70,9 @@ import {
 import { getPropCenterFromAnchor, migratePropAnchor } from './utils/prop-pivot';
 import { filterUnlockedPerformerIds, getEffectivelyLockedPerformerIds } from './utils/performer-locking';
 import { useProjectTransfers } from './hooks/useProjectTransfers';
+import { useAdaptiveLayout } from './hooks/useAdaptiveLayout';
+import { useAndroidBackButton } from './hooks/useAndroidBackButton';
+import { useMobileHistoryLayer } from './hooks/useMobileHistoryLayer';
 import { createPersistedDesktopProject } from './services/desktopProjectService';
 import {
   DEFAULT_PERFORMER_LABEL_FONT_SIZE,
@@ -91,6 +101,7 @@ import {
 import { createDesktopBinaryExportStream, type DesktopBinaryExportStream } from './utils/desktop-binary-export';
 import { createThrottledProgressReporter } from './utils/export-progress';
 import { showPerformersInAllFrames } from './utils/performer-visibility';
+import { resolvePhoneTimelineHeight } from './utils/adaptive-layout';
 
 const DEFAULT_FRAME: Frame = {
   id: 'start-frame',
@@ -439,7 +450,16 @@ const App: React.FC = () => {
   const [performerEditorId, setPerformerEditorId] = useState<string | null>(null);
   const [showHelp, setShowHelp] = useState(false);
   const [showProductGuide, setShowProductGuide] = useState(false);
-  const [showWebSaveReminder, setShowWebSaveReminder] = useState(() => !window.electronAPI?.isElectron);
+  const [showWebSaveReminder, setShowWebSaveReminder] = useState(
+    () => !window.electronAPI?.isElectron && !Capacitor.isNativePlatform(),
+  );
+  const {
+    isPhoneLayout,
+    isCompactLayout,
+    viewportHeight,
+    layoutViewportWidth,
+    layoutViewportHeight,
+  } = useAdaptiveLayout();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [stageToolbarCollapsed, setStageToolbarCollapsed] = useState(() => window.matchMedia('(max-width: 1100px)').matches);
   const [sidebarWidth, setSidebarWidth] = useState<number>(320);
@@ -447,8 +467,12 @@ const App: React.FC = () => {
     window.matchMedia('(max-width: 1100px)').matches ? 132 : 180
   ));
   const [timelineCollapsed, setTimelineCollapsed] = useState(false);
+  const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
+  const [phoneTimelineExpanded, setPhoneTimelineExpanded] = useState(false);
+  const [hasSidebarOverlay, setHasSidebarOverlay] = useState(false);
+  const mobileToolsDialog = useMobileToolsDialog(isPhoneLayout && mobileToolsOpen);
   const previousTimelineHeightRef = useRef(180);
-  const [isCompactLayout, setIsCompactLayout] = useState(() => window.matchMedia('(max-width: 1100px)').matches);
+  const sidebarOverlayCloseRef = useRef<(() => void) | null>(null);
   const [undoStack, setUndoStack] = useState<UndoAction[]>([]);
   const [redoStack, setRedoStack] = useState<UndoAction[]>([]);
   const [pendingDeleteRequest, setPendingDeleteRequest] = useState<PendingDeleteRequest | null>(null);
@@ -466,18 +490,20 @@ const App: React.FC = () => {
   const stageViewportRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const media = window.matchMedia('(max-width: 1100px)');
-    const syncLayout = () => {
-      setIsCompactLayout(media.matches);
-      if (media.matches) {
-        setTimelineHeight((height) => height === 180 ? 132 : Math.min(height, 320));
-        setStageToolbarCollapsed(true);
-      }
-    };
-    syncLayout();
-    media.addEventListener('change', syncLayout);
-    return () => media.removeEventListener('change', syncLayout);
-  }, []);
+    if (!isCompactLayout) return;
+    setTimelineHeight((height) => height === 180 ? 132 : Math.min(height, 320));
+    setStageToolbarCollapsed(true);
+  }, [isCompactLayout]);
+
+  useEffect(() => {
+    if (isPhoneLayout) {
+      setTimelineCollapsed(false);
+      setStageToolbarCollapsed(true);
+      return;
+    }
+    setMobileToolsOpen(false);
+    setPhoneTimelineExpanded(false);
+  }, [isPhoneLayout]);
 
   useEffect(() => {
     const element = stageViewportRef.current;
@@ -4618,6 +4644,35 @@ const App: React.FC = () => {
     });
   };
 
+  const handleSidebarOverlayChange = useCallback((isOpen: boolean, closeTopOverlay: (() => void) | null) => {
+    sidebarOverlayCloseRef.current = closeTopOverlay;
+    setHasSidebarOverlay(isOpen);
+  }, []);
+
+  const openMobileTools = useCallback(() => {
+    setMobileToolsOpen(true);
+    setPhoneTimelineExpanded(false);
+  }, []);
+
+  const closeMobileTools = useCallback(() => {
+    setMobileToolsOpen(false);
+  }, []);
+
+  const togglePhoneTimelineExpanded = useCallback(() => {
+    setPhoneTimelineExpanded((isExpanded) => {
+      const nextExpanded = !isExpanded;
+      if (nextExpanded) {
+        setMobileToolsOpen(false);
+        setStageToolbarCollapsed(true);
+      }
+      return nextExpanded;
+    });
+  }, []);
+
+  const collapsePhoneTimeline = useCallback(() => {
+    setPhoneTimelineExpanded(false);
+  }, []);
+
   const displayedPositions = currentSceneState.positions;
   const displayedRotations = currentSceneState.rotations;
   const selectedTransitionLabel = selectedTransition
@@ -4629,9 +4684,105 @@ const App: React.FC = () => {
     (maximum, frame) => Math.max(maximum, frame.startTime + frame.duration),
     0,
   );
+  const phoneTimelineHeight = resolvePhoneTimelineHeight({
+    density: phoneTimelineExpanded ? 'expanded' : 'compact',
+    viewportWidth: layoutViewportWidth,
+    viewportHeight: layoutViewportHeight,
+    visualViewportHeight: viewportHeight,
+  });
+  const hasMobileModal = Boolean(
+    showExportModal
+    || pendingDeleteRequest
+    || showProductGuide
+    || showWebSaveReminder
+    || resetProjectDialogMode
+    || pendingAIPlan
+    || pendingStageBackground
+    || noteDrawerOpen
+    || showHelp
+    || hasSidebarOverlay
+  );
+  const closeTopMobileModal = useCallback(() => {
+    if (showExportModal) {
+      setShowExportModal(false);
+      return;
+    }
+    if (pendingDeleteRequest) {
+      setPendingDeleteRequest(null);
+      return;
+    }
+    if (showProductGuide) {
+      setShowProductGuide(false);
+      return;
+    }
+    if (showWebSaveReminder) {
+      setShowWebSaveReminder(false);
+      return;
+    }
+    if (resetProjectDialogMode) {
+      setResetProjectDialogMode(null);
+      return;
+    }
+    if (pendingAIPlan) {
+      setPendingAIPlan(null);
+      return;
+    }
+    if (pendingStageBackground) {
+      setPendingStageBackground(null);
+      return;
+    }
+    if (noteDrawerOpen) {
+      setNoteDrawerOpen(false);
+      setNoteDrawerPerformerId(null);
+      return;
+    }
+    if (showHelp) {
+      setShowHelp(false);
+      return;
+    }
+    if (hasSidebarOverlay) sidebarOverlayCloseRef.current?.();
+  }, [
+    hasSidebarOverlay,
+    noteDrawerOpen,
+    pendingAIPlan,
+    pendingDeleteRequest,
+    pendingStageBackground,
+    resetProjectDialogMode,
+    showExportModal,
+    showHelp,
+    showProductGuide,
+    showWebSaveReminder,
+  ]);
+  const closeSelectedTransitionEditor = useCallback(() => {
+    handleSelectTransition(null);
+  }, [handleSelectTransition]);
+
+  useMobileHistoryLayer({
+    enabled: isPhoneLayout,
+    hasTransitionEditor: Boolean(selectedTransition && selectedTransitionFrames),
+    hasModal: hasMobileModal,
+    isToolsOpen: mobileToolsOpen,
+    isTimelineExpanded: phoneTimelineExpanded,
+    onCloseTransition: closeSelectedTransitionEditor,
+    onCloseModal: closeTopMobileModal,
+    onCloseTools: closeMobileTools,
+    onCollapseTimeline: collapsePhoneTimeline,
+  });
+  useAndroidBackButton({
+    enabled: isPhoneLayout,
+    hasHistoryLayer: Boolean(
+      (selectedTransition && selectedTransitionFrames)
+      || hasMobileModal
+      || mobileToolsOpen
+      || phoneTimelineExpanded
+    ),
+  });
 
   return (
-    <div className={`min-h-[100dvh] h-[100dvh] w-screen flex flex-col safe-top safe-bottom ${theme === 'dark' ? 'bg-slate-950 text-slate-200' : 'bg-gray-50 text-gray-900'} overflow-hidden`}>
+    <div
+      className={`min-h-0 h-[100dvh] w-screen flex flex-col safe-top safe-bottom ${isPhoneLayout ? 'phone-editor-shell' : ''} ${theme === 'dark' ? 'bg-slate-950 text-slate-200' : 'bg-gray-50 text-gray-900'} overflow-hidden`}
+      style={{ height: isPhoneLayout ? viewportHeight : undefined }}
+    >
       {/* Help Modal */}
       <HelpModal isOpen={showHelp} onClose={() => setShowHelp(false)} />
       <PerformerEditorModal
@@ -4852,7 +5003,8 @@ const App: React.FC = () => {
       {showProductGuide && <ProductGuide onClose={() => setShowProductGuide(false)} />}
 
       {/* Top Bar */}
-      <div className={`min-h-12 flex items-center justify-between px-3 sm:px-4 border-b ${theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-gray-200'}`}>
+      {!isPhoneLayout && (
+      <div className={`desktop-top-bar min-h-12 flex items-center justify-between px-3 sm:px-4 border-b ${theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-gray-200'}`}>
         <div className="flex items-center gap-2">
           <button
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
@@ -4910,9 +5062,42 @@ const App: React.FC = () => {
           </button>
         </div>
       </div>
+      )}
 
       <div className="flex-1 flex overflow-hidden relative">
-        {!sidebarCollapsed && (
+        {isPhoneLayout && mobileToolsOpen && (
+          <button
+            type="button"
+            className="mobile-tools-backdrop fixed inset-0 z-[70] bg-black/55 backdrop-blur-[1px]"
+            tabIndex={-1}
+            aria-hidden="true"
+            onClick={closeMobileTools}
+            aria-label="关闭工具面板"
+          />
+        )}
+        {((isPhoneLayout && mobileToolsOpen) || (!isPhoneLayout && !sidebarCollapsed)) && (
+          <div
+            id={isPhoneLayout ? MOBILE_TOOLS_DRAWER_ID : undefined}
+            ref={mobileToolsDialog.drawerRef}
+            role={isPhoneLayout ? 'dialog' : undefined}
+            aria-modal={isPhoneLayout ? 'true' : undefined}
+            aria-labelledby={isPhoneLayout ? MOBILE_TOOLS_DRAWER_LABEL_ID : undefined}
+            tabIndex={isPhoneLayout ? -1 : undefined}
+            className={isPhoneLayout ? 'mobile-tools-drawer fixed inset-y-0 left-0 z-[80] flex' : 'contents'}
+          >
+          {isPhoneLayout && (
+            <>
+            <h2 id={MOBILE_TOOLS_DRAWER_LABEL_ID} className="sr-only">完整工具面板</h2>
+            <button
+              type="button"
+              className="mobile-tools-drawer__close absolute right-1 top-[max(4px,var(--app-safe-top))] z-30 flex h-12 w-12 items-center justify-center rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white"
+              onClick={closeMobileTools}
+              aria-label="关闭工具面板"
+            >
+              <X size={20} />
+            </button>
+            </>
+          )}
           <Sidebar
             performers={performers}
             performerGroups={performerGroups}
@@ -4984,8 +5169,11 @@ const App: React.FC = () => {
             // Note Drawer props
             onOpenNoteDrawer={handleOpenNoteDrawer}
             performerNotes={performerNotes}
-          />)}
-        {!sidebarCollapsed && !isCompactLayout && (
+            onOverlayChange={handleSidebarOverlayChange}
+          />
+          </div>
+        )}
+        {!isPhoneLayout && !sidebarCollapsed && !isCompactLayout && (
           <div
             onPointerDown={(e) => {
               e.preventDefault();
@@ -5020,8 +5208,24 @@ const App: React.FC = () => {
           </div>
         )}
 
-        <div className={`min-w-0 flex-1 flex flex-col relative ${theme === 'dark' ? 'bg-black' : 'bg-gray-100'}`}>
+        <div
+          ref={mobileToolsDialog.backgroundRef}
+          className={`min-w-0 flex-1 flex flex-col relative ${theme === 'dark' ? 'bg-black' : 'bg-gray-100'}`}
+        >
           <div ref={stageViewportRef} className="min-h-0 flex-1 flex flex-col relative">
+          {isPhoneLayout && (
+            <MobileEditorChrome
+              isPlaying={isPlaying}
+              viewMode={viewMode}
+              isToolsOpen={mobileToolsOpen}
+              isStageSettingsOpen={!stageToolbarCollapsed}
+              toolsButtonRef={mobileToolsDialog.triggerRef}
+              onOpenTools={openMobileTools}
+              onPlayPause={handlePlayPause}
+              onToggleViewMode={() => setViewMode((mode) => mode === '2d' ? '3d' : '2d')}
+              onToggleStageSettings={() => setStageToolbarCollapsed((isCollapsed) => !isCollapsed)}
+            />
+          )}
           {!isCompactLayout && (
             <button
               type="button"
@@ -5323,7 +5527,9 @@ const App: React.FC = () => {
             </div>
           )}
 
+          {!isPhoneLayout && (
           <div
+            className={`timeline-resizer relative z-30 h-7 min-h-7 cursor-ns-resize touch-none flex items-center justify-center transition-colors ${theme === 'dark' ? 'bg-slate-800 hover:bg-slate-700' : 'bg-gray-300 hover:bg-gray-400'}`}
             onPointerDown={(e) => {
               e.preventDefault();
               if (timelineCollapsed) {
@@ -5356,7 +5562,6 @@ const App: React.FC = () => {
               window.addEventListener('pointerup', onUp);
               window.addEventListener('pointercancel', onUp);
             }}
-            className={`timeline-resizer relative z-30 h-7 min-h-7 cursor-ns-resize touch-none flex items-center justify-center transition-colors ${theme === 'dark' ? 'bg-slate-800 hover:bg-slate-700' : 'bg-gray-300 hover:bg-gray-400'}`}
             role="slider"
             aria-label="调整时间轴高度"
             aria-valuemin={isCompactLayout ? 132 : 152}
@@ -5379,9 +5584,11 @@ const App: React.FC = () => {
               </button>
             </div>
           </div>
+          )}
 
           {/* Floating Stage Toolbar */}
-          <div className={`stage-toolbar absolute bottom-3 right-3 z-20 backdrop-blur p-1.5 lg:p-2 rounded-lg border shadow-xl animate-in fade-in slide-in-from-bottom-4 mobile-compact-scroll ${theme === 'dark' ? 'bg-slate-900/90 border-slate-700' : 'bg-white/90 border-gray-300'}`}>
+          {(!isPhoneLayout || !stageToolbarCollapsed) && (
+          <div className={`stage-toolbar ${isPhoneLayout ? 'stage-toolbar--phone' : ''} absolute bottom-3 right-3 z-20 backdrop-blur p-1.5 lg:p-2 rounded-lg border shadow-xl animate-in fade-in slide-in-from-bottom-4 mobile-compact-scroll ${theme === 'dark' ? 'bg-slate-900/90 border-slate-700' : 'bg-white/90 border-gray-300'}`}>
             {stageToolbarCollapsed ? (
               <button
                 onClick={() => setStageToolbarCollapsed(false)}
@@ -5485,9 +5692,10 @@ const App: React.FC = () => {
               </div>
             )}
           </div>
+          )}
           </div>
 
-          {!timelineCollapsed && <Timeline
+          {(!timelineCollapsed || isPhoneLayout) && <Timeline
             performers={performers}
             frames={frames}
             transitions={transitions}
@@ -5515,7 +5723,9 @@ const App: React.FC = () => {
             onFrameRotationChange={handleFrameRotationChange}
             audioMarkers={audioMarkers}
             onAudioMarkersChange={setAudioMarkers}
-            heightPx={timelineHeight}
+            heightPx={isPhoneLayout ? phoneTimelineHeight : timelineHeight}
+            density={isPhoneLayout ? (phoneTimelineExpanded ? 'phone-expanded' : 'phone-compact') : 'standard'}
+            onToggleExpanded={isPhoneLayout ? togglePhoneTimelineExpanded : undefined}
             onRenameFrame={handleRenameFrame}
             inPointMs={inPointMs}
             outPointMs={outPointMs}
