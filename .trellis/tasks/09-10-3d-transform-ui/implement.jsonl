@@ -1,0 +1,7 @@
+{"path":".trellis/spec/frontend/three-interaction.md","reason":"3D 对象输入、相机仲裁和结束提交契约"}
+{"path":".trellis/spec/frontend/components.md","reason":"共享 React UI 组件设计"}
+{"path":".trellis/spec/frontend/css-design.md","reason":"界面样式与响应式约定"}
+{"path":".trellis/spec/frontend/type-safety.md","reason":"TypeScript 与 React Three Fiber 类型约束"}
+{"path":".trellis/spec/shared/typescript.md","reason":"共享类型规范"}
+{"path":".trellis/spec/guides/pre-implementation-thinking-guide.md","reason":"跨层改动前检查"}
+{"path":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"建模器与舞台复用工具条"}

@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // PolygonUtils.ts – Mathematical foundation for polygon operations
-// Used by ShapeEditor2D, PngOutlineExtractor, PropPreview3D, and Prop3D.
+// Shared by legacy prop rendering and the model asset runtime for polygon geometry.
 // ---------------------------------------------------------------------------
 
 // ── Public types ───────────────────────────────────────────────────────────

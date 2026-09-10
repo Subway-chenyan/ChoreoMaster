@@ -1,4 +1,4 @@
-import type { Performer, Position, StageConfig } from '../types.ts';
+import type { Performer, Position, ProjectModelAsset, StageConfig } from '../types.ts';
 import { pointInPolygon } from '../components/prop-editor/PolygonUtils.ts';
 
 export function isPlatformProp(performer: Performer): boolean {
@@ -35,6 +35,8 @@ export function isPerformerOnPlatform(
   platform: Performer,
   platformPosition: Position | undefined,
   stageConfig: StageConfig,
+  modelAssets: Record<string, ProjectModelAsset> = {},
+  rotationDegrees: number = platform.rotation || 0,
 ): boolean {
   if (!performerPosition || !platformPosition || !isPlatformProp(platform)) {
     return false;
@@ -44,17 +46,17 @@ export function isPerformerOnPlatform(
     performerPosition,
     platformPosition,
     stageConfig,
-    platform.rotation || 0,
+    rotationDegrees,
   );
 
-  if (platform.propGeometryType === 'extruded' && platform.polygonPoints && platform.polygonPoints.length >= 3) {
-    const width = Math.max(platform.width || 1, 0.1);
-    const depth = Math.max(platform.depth || 1, 0.1);
-    const normalizedPoint = {
-      x: localPoint.x / width + 0.5,
-      y: localPoint.y / depth + 0.5,
-    };
-    return pointInPolygon(normalizedPoint, platform.polygonPoints);
+  const modelAsset = platform.modelAssetId ? modelAssets[platform.modelAssetId] : undefined;
+  if (modelAsset?.footprints.length) {
+    const scaleX = (platform.width ?? modelAsset.intrinsicSize.width) / modelAsset.intrinsicSize.width;
+    const scaleY = (platform.depth ?? modelAsset.intrinsicSize.depth) / modelAsset.intrinsicSize.depth;
+    return modelAsset.footprints.some((polygon) => pointInPolygon(
+      localPoint,
+      polygon.map((point) => ({ x: point.x * scaleX, y: point.y * scaleY })),
+    ));
   }
 
   const halfWidth = (platform.width || 1) / 2;
@@ -72,6 +74,8 @@ export function buildPlatformOccupancy(
   performers: Performer[],
   positions: Record<string, Position>,
   stageConfig: StageConfig,
+  modelAssets: Record<string, ProjectModelAsset> = {},
+  rotations: Record<string, number> = {},
 ): PlatformOccupancy {
   const platforms = performers.filter(isPlatformProp);
   const entityLiftById: Record<string, number> = {};
@@ -89,7 +93,14 @@ export function buildPlatformOccupancy(
     }
 
     const overlappingPlatforms = platforms.filter((platform) =>
-      isPerformerOnPlatform(entityPosition, platform, positions[platform.id], stageConfig),
+      isPerformerOnPlatform(
+        entityPosition,
+        platform,
+        positions[platform.id],
+        stageConfig,
+        modelAssets,
+        rotations[platform.id] ?? platform.rotation ?? 0,
+      ),
     );
 
     if (overlappingPlatforms.length === 0) {

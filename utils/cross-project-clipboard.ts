@@ -1,11 +1,9 @@
 import type {
-  BoxTextures,
-  ExtrudedTextures,
-  FaceTexture,
   Frame,
   Performer,
   PerformerGroup,
   Position,
+  ProjectModelAsset,
 } from '../types';
 
 export interface SceneClipboardEntry {
@@ -16,6 +14,8 @@ export interface SceneClipboardEntry {
 export interface PerformerClipboardPayload {
   kind: 'performers';
   sourceProjectKey?: string;
+  sourceProjectId?: string;
+  modelAssets?: Record<string, ProjectModelAsset>;
   performers: Performer[];
   groups: PerformerGroup[];
   scene: Record<string, SceneClipboardEntry>;
@@ -140,6 +140,8 @@ export function pasteSameProjectPerformerPayload(
 export interface FormationClipboardPayload {
   kind: 'formation';
   sourceProjectKey?: string;
+  sourceProjectId?: string;
+  modelAssets?: Record<string, ProjectModelAsset>;
   performers: Performer[];
   groups: PerformerGroup[];
   frame: Frame;
@@ -241,59 +243,9 @@ export function pasteSameProjectFormationPayload(
 
 export type LoadAssetAsDataUrl = (url: string) => Promise<string>;
 
-async function loadPortableDataUrl(
-  source: string,
-  loadAssetAsDataUrl: LoadAssetAsDataUrl,
-): Promise<string> {
-  if (source.startsWith('data:')) return source;
-  const dataUrl = await loadAssetAsDataUrl(source);
-  if (!dataUrl.startsWith('data:')) {
-    throw new Error(`Clipboard asset loader returned a non-data URL for ${source}`);
-  }
-  return dataUrl;
-}
-
-async function makeFaceTexturePortable(
-  texture: FaceTexture | undefined,
-  loadAssetAsDataUrl: LoadAssetAsDataUrl,
-): Promise<FaceTexture | undefined> {
-  if (!texture) return undefined;
-  const source = texture.dataUrl ?? texture.assetPath;
-  if (!source) return texture.fileName ? { fileName: texture.fileName } : undefined;
-  return {
-    dataUrl: await loadPortableDataUrl(source, loadAssetAsDataUrl),
-    ...(texture.fileName ? { fileName: texture.fileName } : {}),
-  };
-}
-
-async function makeTextureMapPortable<T extends BoxTextures | ExtrudedTextures>(
-  textures: T | undefined,
-  loadAssetAsDataUrl: LoadAssetAsDataUrl,
-): Promise<T | undefined> {
-  if (!textures) return undefined;
-  const entries = await Promise.all(
-    Object.entries(textures).map(async ([slot, texture]) => [
-      slot,
-      await makeFaceTexturePortable(texture, loadAssetAsDataUrl),
-    ] as const),
-  );
-  return Object.fromEntries(entries) as unknown as T;
-}
-
 export async function makePerformersPortable(
   performers: Performer[],
-  loadAssetAsDataUrl: LoadAssetAsDataUrl,
+  _loadAssetAsDataUrl: LoadAssetAsDataUrl,
 ): Promise<Performer[]> {
-  return Promise.all(performers.map(async (performer) => {
-    const next = cloneValue(performer);
-    const legacyTextureSource = next.textureDataUrl ?? next.textureAssetPath;
-    if (legacyTextureSource) {
-      next.textureDataUrl = await loadPortableDataUrl(legacyTextureSource, loadAssetAsDataUrl);
-    }
-    delete next.textureAssetPath;
-
-    next.boxTextures = await makeTextureMapPortable(next.boxTextures, loadAssetAsDataUrl);
-    next.extrudedTextures = await makeTextureMapPortable(next.extrudedTextures, loadAssetAsDataUrl);
-    return next;
-  }));
+  return performers.map(cloneValue);
 }

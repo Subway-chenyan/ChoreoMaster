@@ -70,6 +70,44 @@ test('detects platform occupancy by footprint collision instead of exact coordin
   );
 });
 
+test('uses frame rotations when building platform occupancy', () => {
+  const performers: Performer[] = [
+    {
+      id: 'actor-1',
+      name: '演员A',
+      color: '#3b82f6',
+      label: 'A',
+      shape: 'circle',
+      type: 'performer',
+    },
+    {
+      id: 'platform-1',
+      name: '旋转高台',
+      color: '#f59e0b',
+      label: '台',
+      shape: 'square',
+      type: 'prop',
+      propCategory: 'platform',
+      width: 4,
+      depth: 2,
+      height: 0.8,
+      rotation: 0,
+    },
+  ];
+
+  const positions: Record<string, Position> = {
+    'actor-1': createPosition(50, 68),
+    'platform-1': createPosition(50, 50),
+  };
+
+  const withoutFrameRotation = buildPlatformOccupancy(performers, positions, stageConfig as any);
+  const withFrameRotation = buildPlatformOccupancy(performers, positions, stageConfig as any, {}, { 'platform-1': 90 });
+
+  assert.equal(withoutFrameRotation.entityLiftById['actor-1'], undefined);
+  assert.equal(withFrameRotation.entityLiftById['actor-1'], 0.8);
+  assert.equal(withFrameRotation.occupiedPlatformIds.has('platform-1'), true);
+});
+
 test('builds occupancy and lifts actors by the tallest overlapping platform', () => {
   const performers: Performer[] = [
     {

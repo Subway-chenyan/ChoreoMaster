@@ -12,6 +12,17 @@ import type {
   ProjectTemplateSummary,
 } from './project-contract.js';
 import type { UpdateState } from './update-contract.js';
+import type {
+  GlbImportCommitInput,
+  GlbImportSession,
+  ModelAssetManifest,
+  ModelAssetMetadataUpdateInput,
+  ModelAssetThumbnailUpdateInput,
+  ModelAssetSummary,
+  ParametricAssetSaveInput,
+  ProjectModelAsset,
+  ProjectModelAssetTransferResult,
+} from './model-asset-contract.js';
 
 export interface ElectronAPI {
   // Dialog operations
@@ -50,6 +61,25 @@ export interface ElectronAPI {
     duplicate: (projectId: string) => Promise<{ id: string; path: string }>;
   };
 
+  modelAssets: {
+    list: () => Promise<ModelAssetSummary[]>;
+    get: (assetId: string) => Promise<ModelAssetManifest>;
+    saveParametric: (input: ParametricAssetSaveInput) => Promise<ModelAssetManifest>;
+    updateMetadata: (input: ModelAssetMetadataUpdateInput) => Promise<ModelAssetManifest>;
+    updateThumbnail: (input: ModelAssetThumbnailUpdateInput) => Promise<ModelAssetManifest>;
+    beginGlbImport: () => Promise<GlbImportSession | null>;
+    commitGlbImport: (sessionId: string, input: GlbImportCommitInput) => Promise<ModelAssetManifest>;
+    cancelGlbImport: (sessionId: string) => Promise<void>;
+    duplicate: (assetId: string) => Promise<ModelAssetManifest>;
+    delete: (assetId: string) => Promise<void>;
+    materialize: (projectId: string, assetId: string, expectedRevision?: number) => Promise<ProjectModelAsset>;
+    transferProjectAssets: (
+      sourceProjectId: string,
+      targetProjectId: string,
+      assets: Record<string, ProjectModelAsset>,
+    ) => Promise<ProjectModelAssetTransferResult>;
+  };
+
   // Update operations
   update: {
     getState: () => Promise<UpdateState>;
@@ -63,6 +93,37 @@ export interface ElectronAPI {
   isElectron: boolean;
   platform: string;
   getAppVersion: () => Promise<string>;
+}
+
+function requireIdentifier(value: string, label: string): string {
+  if (typeof value !== 'string' || !/^[a-zA-Z0-9\u4e00-\u9fff][a-zA-Z0-9\u4e00-\u9fff-]{0,159}$/u.test(value)) {
+    throw new Error(`${label}无效`);
+  }
+  return value;
+}
+
+function requireObject<T extends object>(value: T, label: string): T {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error(`${label}无效`);
+  }
+  return value;
+}
+
+type ModelAssetIpcResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: { code: string; message: string } };
+
+async function invokeModelAsset<T>(channel: string, ...args: unknown[]): Promise<T> {
+  const result = await ipcRenderer.invoke(channel, ...args) as ModelAssetIpcResult<T>;
+  if (!result || typeof result !== 'object' || typeof result.ok !== 'boolean') {
+    const error = new Error('3D 资产服务返回了无效响应') as Error & { code?: string };
+    error.code = 'IO_ERROR';
+    throw error;
+  }
+  if (result.ok === true) return result.value;
+  const error = new Error(result.error.message) as Error & { code?: string };
+  error.code = result.error.code;
+  throw error;
 }
 
 const electronAPI: ElectronAPI = {
@@ -113,6 +174,38 @@ const electronAPI: ElectronAPI = {
     duplicate: (projectId) => ipcRenderer.invoke('project:duplicate', projectId),
   },
 
+  modelAssets: {
+    list: () => invokeModelAsset('modelAssets:list'),
+    get: (assetId) => invokeModelAsset('modelAssets:get', requireIdentifier(assetId, '资产 ID')),
+    saveParametric: (input) => invokeModelAsset('modelAssets:saveParametric', requireObject(input, '模型数据')),
+    updateMetadata: (input) => invokeModelAsset('modelAssets:updateMetadata', requireObject(input, '资产信息')),
+    updateThumbnail: (input) => invokeModelAsset('modelAssets:updateThumbnail', requireObject(input, '资产预览图')),
+    beginGlbImport: () => invokeModelAsset('modelAssets:beginGlbImport'),
+    commitGlbImport: (sessionId, input) => invokeModelAsset(
+      'modelAssets:commitGlbImport',
+      requireIdentifier(sessionId, '导入会话 ID'),
+      requireObject(input, 'GLB 校准数据'),
+    ),
+    cancelGlbImport: (sessionId) => invokeModelAsset(
+      'modelAssets:cancelGlbImport',
+      requireIdentifier(sessionId, '导入会话 ID'),
+    ),
+    duplicate: (assetId) => invokeModelAsset('modelAssets:duplicate', requireIdentifier(assetId, '资产 ID')),
+    delete: (assetId) => invokeModelAsset('modelAssets:delete', requireIdentifier(assetId, '资产 ID')),
+    materialize: (projectId, assetId, expectedRevision) => invokeModelAsset(
+      'modelAssets:materialize',
+      requireIdentifier(projectId, '项目 ID'),
+      requireIdentifier(assetId, '资产 ID'),
+      expectedRevision,
+    ),
+    transferProjectAssets: (sourceProjectId, targetProjectId, assets) => invokeModelAsset(
+      'modelAssets:transferProjectAssets',
+      requireIdentifier(sourceProjectId, '源项目 ID'),
+      requireIdentifier(targetProjectId, '目标项目 ID'),
+      requireObject(assets, '项目模型资产'),
+    ),
+  },
+
   // Update operations
   update: {
     getState: () => ipcRenderer.invoke('update:getState'),
@@ -134,10 +227,3 @@ const electronAPI: ElectronAPI = {
 
 // Expose API to renderer process
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);
-
-// Type declaration for window
-declare global {
-  interface Window {
-    electronAPI: ElectronAPI;
-  }
-}

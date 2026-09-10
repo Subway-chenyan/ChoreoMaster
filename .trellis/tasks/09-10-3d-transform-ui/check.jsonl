@@ -1,0 +1,4 @@
+{"path":".trellis/spec/frontend/three-interaction.md","reason":"验证 3D 输入和相机冲突回归"}
+{"path":".trellis/spec/frontend/quality.md","reason":"前端质量门"}
+{"path":".trellis/spec/shared/code-quality.md","reason":"通用质量检查"}
+{"path":".trellis/spec/shared/typescript.md","reason":"类型检查"}

@@ -10,6 +10,17 @@ import type {
   ProjectTemplateSummary,
 } from './electron/project-contract';
 import type { UpdateState } from './electron/update-contract.js';
+import type {
+  GlbImportCommitInput,
+  GlbImportSession,
+  ModelAssetManifest,
+  ModelAssetMetadataUpdateInput,
+  ModelAssetThumbnailUpdateInput,
+  ModelAssetSummary,
+  ParametricAssetSaveInput,
+  ProjectModelAsset,
+  ProjectModelAssetTransferResult,
+} from './electron/model-asset-contract';
 
 declare global {
   interface Window {
@@ -48,6 +59,25 @@ declare global {
         openStorageFolder: () => Promise<void>;
         rename: (projectId: string, newName: string) => Promise<void>;
         duplicate: (projectId: string) => Promise<{ id: string; path: string }>;
+      };
+
+      modelAssets: {
+        list: () => Promise<ModelAssetSummary[]>;
+        get: (assetId: string) => Promise<ModelAssetManifest>;
+        saveParametric: (input: ParametricAssetSaveInput) => Promise<ModelAssetManifest>;
+        updateMetadata: (input: ModelAssetMetadataUpdateInput) => Promise<ModelAssetManifest>;
+        updateThumbnail: (input: ModelAssetThumbnailUpdateInput) => Promise<ModelAssetManifest>;
+        beginGlbImport: () => Promise<GlbImportSession | null>;
+        commitGlbImport: (sessionId: string, input: GlbImportCommitInput) => Promise<ModelAssetManifest>;
+        cancelGlbImport: (sessionId: string) => Promise<void>;
+        duplicate: (assetId: string) => Promise<ModelAssetManifest>;
+        delete: (assetId: string) => Promise<void>;
+        materialize: (projectId: string, assetId: string, expectedRevision?: number) => Promise<ProjectModelAsset>;
+        transferProjectAssets: (
+          sourceProjectId: string,
+          targetProjectId: string,
+          assets: Record<string, ProjectModelAsset>,
+        ) => Promise<ProjectModelAssetTransferResult>;
       };
 
       // Update operations

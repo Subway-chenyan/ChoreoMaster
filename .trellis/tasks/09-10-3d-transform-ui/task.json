@@ -1,0 +1,8 @@
+{
+  "title": "3D 建模器与舞台变换 UI",
+  "status": "completed",
+  "scope": "frontend",
+  "createdAt": "2026-09-10",
+  "completedAt": "2026-09-10",
+  "notes": "uv 不可用，按 Trellis 契约手工管理任务。类型检查、项目服务、桌面回归、浏览器交互验证与 Windows x64 构建均通过；后端 pytest 因本机缺少 Python 被环境阻断。"
+}

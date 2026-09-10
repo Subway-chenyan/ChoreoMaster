@@ -14,6 +14,10 @@ import {
   ProjectDocument,
   ProjectLoadResult,
   ProjectTemplateData,
+  ProjectModelAsset,
+  ModelAssetManifest,
+  ModelAssetSummary,
+  PROJECT_SCHEMA_VERSION,
   PropRotationPivot,
   TransitionSegment,
   PerformerNote,
@@ -25,6 +29,7 @@ import {
 import { Sidebar } from './components/Sidebar';
 import { Stage } from './components/Stage';
 import Stage3D from './components/Stage3D';
+import type { StageTransformMode } from './components/three/TransformModeToolbar';
 import { Timeline } from './components/Timeline';
 import { EditableNumberInput } from './components/FormControls';
 import { PerformerEditorModal } from './components/PerformerEditorModal';
@@ -36,9 +41,10 @@ import { AppVersionBadge } from './components/AppVersionBadge';
 import { UpdateNotification } from './components/UpdateNotification';
 import { useTheme } from './contexts/ThemeContext';
 import { DEFAULT_COLORS, STAGE_ASPECT_RATIO } from './constants';
-import { createOfflineScene, preloadPropTextures, preloadLEDVideo, preloadStageBackground, type CameraAngle } from './utils/OfflineRenderer3D';
+import { createOfflineScene, preloadLEDVideo, preloadStageBackground, type CameraAngle } from './utils/OfflineRenderer3D';
 import { getTotalStageWidth, getWingWidth, stageXToViewPercent, getStageXBounds } from './utils/coordinates';
 import { buildPlatformOccupancy, isPlatformProp } from './utils/platforms';
+import { getModelTopPreviewScale } from './utils/model-preview-layout';
 import {
   createCenteredStageGridMarks,
   DEFAULT_STAGE_GRID_SPACING,
@@ -50,7 +56,7 @@ import {
   STAGE_GRID_SPACING_STEP,
   STAGE_THIRD_POSITIONS,
 } from './utils/stage-grid';
-import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, ChevronDown, ChevronUp, ChevronRight, PanelLeftClose, PanelLeftOpen, X, GripHorizontal, SlidersHorizontal, BookOpen, MessageCircle, Eye, EyeOff, Magnet, Lock, Unlock } from 'lucide-react';
+import { ZoomIn, ZoomOut, Type, PlusCircle, MinusCircle, HelpCircle, ChevronDown, ChevronUp, ChevronRight, PanelLeftClose, PanelLeftOpen, X, GripHorizontal, SlidersHorizontal, BookOpen, MessageCircle, Eye, EyeOff, Magnet } from 'lucide-react';
 import { StageConfig } from './types';
 import {
   evaluateSceneStateAtTime,
@@ -91,6 +97,9 @@ import {
 import { createDesktopBinaryExportStream, type DesktopBinaryExportStream } from './utils/desktop-binary-export';
 import { createThrottledProgressReporter } from './utils/export-progress';
 import { showPerformersInAllFrames } from './utils/performer-visibility';
+import ModelerWorkspace from './components/model-assets/ModelerWorkspace';
+import { calculateModelStageFitScale, createForwardFrameUpdates } from './utils/model-placement';
+import { generateModelAssetTopThumbnail } from './utils/model-thumbnail';
 
 const DEFAULT_FRAME: Frame = {
   id: 'start-frame',
@@ -240,6 +249,19 @@ type RotatePerformerUndoAction = {
   after: number;
 };
 
+type PerformerDimensions = {
+  width: number;
+  height: number;
+  depth: number;
+};
+
+type ResizePerformerUndoAction = {
+  type: 'resize-performer';
+  performerId: string;
+  before: PerformerDimensions;
+  after: PerformerDimensions;
+};
+
 type EditorDeletionState = {
   performers: Performer[];
   performerGroups: PerformerGroup[];
@@ -268,6 +290,7 @@ type UndoAction = MovePerformersUndoAction
   | PasteFrameUndoAction
   | PasteFormationUndoAction
   | RotatePerformerUndoAction
+  | ResizePerformerUndoAction
   | DeleteEditorStateUndoAction;
 
 const getSupportedVideoEncoderConfig = async (
@@ -463,6 +486,10 @@ const App: React.FC = () => {
     performerId: string;
     before: number;
   } | null>(null);
+  const pendingResizeUndoRef = useRef<{
+    performerId: string;
+    before: PerformerDimensions;
+  } | null>(null);
   const stageViewportRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -499,10 +526,60 @@ const App: React.FC = () => {
 
   // 新增：3D 模式相关状态
   const [viewMode, setViewMode] = useState<'2d' | '3d'>('2d');
-  const [is3DDragEnabled, setIs3DDragEnabled] = useState(false);
+  const [stageTransformMode, setStageTransformMode] = useState<StageTransformMode>('navigate');
+  const is3DDragEnabled = stageTransformMode === 'translate';
   const [stageConfig, setStageConfig] = useState<StageConfig>(createDefaultStageConfig);
   const [mediaCache, setMediaCache] = useState<Record<string, string>>({});
+  const [modelAssets, setModelAssets] = useState<Record<string, ProjectModelAsset>>({});
+  const [modelFloorplanPreviewUrls, setModelFloorplanPreviewUrls] = useState<Record<string, string>>({});
+  const modelFloorplanGenerationRef = useRef(new Map<string, Promise<string>>());
+  const [modelerState, setModelerState] = useState<{ asset?: ModelAssetManifest | null } | null>(null);
+  const [pendingModelPlacement, setPendingModelPlacement] = useState<{
+    asset: ProjectModelAsset;
+    width: number;
+    height: number;
+    depth: number;
+  } | null>(null);
   const [pendingStageBackground, setPendingStageBackground] = useState<PendingStageBackground | null>(null);
+
+  const getOrCreateModelFloorplanPreview = useCallback((asset: ProjectModelAsset): Promise<string> => {
+    const key = `${asset.id}:${asset.contentHash}`;
+    const existing = modelFloorplanGenerationRef.current.get(key);
+    if (existing) return existing;
+    const generation = generateModelAssetTopThumbnail(asset);
+    modelFloorplanGenerationRef.current.set(key, generation);
+    void generation.then(
+      () => modelFloorplanGenerationRef.current.delete(key),
+      () => modelFloorplanGenerationRef.current.delete(key),
+    );
+    return generation;
+  }, []);
+
+  useEffect(() => {
+    const candidates = Object.values(modelAssets).filter((asset) => asset.floorplanVersion !== 1);
+    const candidateIds = new Set(candidates.map((asset) => asset.id));
+    setModelFloorplanPreviewUrls((current) => Object.fromEntries(
+      Object.entries(current).filter(([assetId]) => candidateIds.has(assetId)),
+    ));
+    if (candidates.length === 0) return;
+
+    let cancelled = false;
+    void (async () => {
+      for (const asset of candidates) {
+        try {
+          const url = await getOrCreateModelFloorplanPreview(asset);
+          if (cancelled) return;
+          setModelFloorplanPreviewUrls((current) => ({ ...current, [asset.id]: url }));
+        } catch (error) {
+          console.warn(`无法为“${asset.name}”生成真实俯视图，将使用颜色占位：`, error);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [getOrCreateModelFloorplanPreview, modelAssets]);
   
   // Project storage state
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
@@ -553,7 +630,7 @@ const App: React.FC = () => {
     : localProjectClipboardKey;
 
   useEffect(() => {
-    setIs3DDragEnabled(false);
+    setStageTransformMode('navigate');
   }, [activeProjectClipboardKey]);
 
   // Playback State
@@ -589,8 +666,9 @@ const App: React.FC = () => {
   };
 
   const buildProjectDocument = useCallback((name: string = ''): ProjectDocument => ({
-    version: '3.0',
+    version: PROJECT_SCHEMA_VERSION,
     name,
+    modelAssets,
     performers,
     performerGroups,
     frames,
@@ -601,6 +679,7 @@ const App: React.FC = () => {
     musicAsset,
     performerNotes,
   }), [
+    modelAssets,
     performers,
     performerGroups,
     frames,
@@ -886,6 +965,34 @@ const App: React.FC = () => {
     return image;
   }, [mediaCache, stageConfig]);
 
+  const create2DExportModelFloorplans = useCallback(async (): Promise<Record<string, HTMLImageElement>> => {
+    const images: Record<string, HTMLImageElement> = {};
+    await Promise.all(Object.values(modelAssets).map(async (asset) => {
+      let url = modelFloorplanPreviewUrls[asset.id]
+        ?? (asset.floorplanVersion === 1 ? asset.floorplan?.runtimeUrl : undefined);
+      if (!url) {
+        try {
+          url = await getOrCreateModelFloorplanPreview(asset);
+        } catch (error) {
+          console.warn('2D 导出模型俯视图生成失败，将使用颜色占位：', error);
+          return;
+        }
+      }
+      const image = new Image();
+      try {
+        await new Promise<void>((resolve, reject) => {
+          image.onload = () => resolve();
+          image.onerror = () => reject(new Error(`${asset.name} 的模型俯视图加载失败`));
+          image.src = url;
+        });
+        images[asset.id] = image;
+      } catch (error) {
+        console.warn('2D 导出模型俯视图加载失败，将使用颜色占位：', error);
+      }
+    }));
+    return images;
+  }, [getOrCreateModelFloorplanPreview, modelAssets, modelFloorplanPreviewUrls]);
+
   // --- Actions ---
 
   const handleAddPerformer = (name: string, color: string, shape: PerformerShape, extra?: Partial<Performer>) => {
@@ -918,6 +1025,116 @@ const App: React.FC = () => {
       };
     }));
   };
+
+  const handlePrepareModelPlacement = async (asset: ModelAssetSummary, fitToStage: boolean) => {
+    if (!window.electronAPI?.isElectron || !currentProjectId) {
+      setProjectMessages(['请先在桌面端创建或打开项目，再放置 3D 资产。']);
+      return;
+    }
+    try {
+      const snapshot = await window.electronAPI.modelAssets.materialize(
+        currentProjectId,
+        asset.id,
+        asset.revision,
+      );
+      const fitScale = fitToStage
+        ? calculateModelStageFitScale(stageConfig, snapshot.intrinsicSize)
+        : 1;
+      setModelAssets((current) => ({ ...current, [snapshot.id]: snapshot }));
+      setPendingModelPlacement({
+        asset: snapshot,
+        width: snapshot.intrinsicSize.width * fitScale,
+        height: snapshot.intrinsicSize.height * fitScale,
+        depth: snapshot.intrinsicSize.depth * fitScale,
+      });
+      setProjectMessages([
+        fitScale < 1
+          ? `“${snapshot.name}”已按舞台等比缩放至 ${(fitScale * 100).toFixed(0)}%，请在舞台点击放置。`
+          : snapshot.intrinsicSize.width > getTotalStageWidth(stageConfig) || snapshot.intrinsicSize.depth > stageConfig.depth
+            ? `“${snapshot.name}”超出舞台，仍将保持真实尺寸；可取消后选择“等比适配”。左键确认，Esc 或右键取消。`
+            : `正在放置“${snapshot.name}”：左键确认，Esc 或右键取消。`,
+      ]);
+    } catch (error) {
+      setProjectMessages([error instanceof Error ? error.message : '3D 资产放置准备失败']);
+    }
+  };
+
+  const handlePlaceModelAsset = (position: Position) => {
+    if (!pendingModelPlacement) return;
+    const { asset, width, height, depth } = pendingModelPlacement;
+    const firstColor = asset.payload.kind === 'parametric'
+      ? asset.payload.recipe.parts[0]?.material.color ?? '#64748b'
+      : '#64748b';
+    const performer: Performer = {
+      id: generateId(),
+      name: asset.name,
+      label: asset.name.charAt(0).toUpperCase(),
+      color: firstColor,
+      shape: 'square',
+      type: 'prop',
+      propCategory: asset.defaultUsage,
+      rotationPivot: 'center',
+      modelAssetId: asset.id,
+      modelAspectLocked: true,
+      width,
+      height,
+      depth,
+    };
+    const frameUpdates = createForwardFrameUpdates(
+      frames,
+      currentFrameId,
+      performer.id,
+      position,
+    );
+    const previousSelectedIds = [...selectedPerformerIds];
+    setPerformers((current) => [...current, performer]);
+    setFrames((current) => current.map((frame) => frameUpdates[frame.id] ? {
+      ...frame,
+      positions: { ...frame.positions, ...frameUpdates[frame.id].positions },
+      rotations: { ...(frame.rotations ?? {}), ...frameUpdates[frame.id].rotations },
+    } : frame));
+    setSelectedPerformerIds([performer.id]);
+    setPendingModelPlacement(null);
+    pushUndoAction({
+      type: 'paste-performers',
+      performers: [structuredClone(performer)],
+      groups: [],
+      frameUpdates: structuredClone(frameUpdates),
+      previousSelectedIds,
+    });
+  };
+
+  const handleUpdateModelAssetVersion = async (performerId: string) => {
+    const performer = performers.find((item) => item.id === performerId);
+    const currentAsset = performer?.modelAssetId ? modelAssets[performer.modelAssetId] : undefined;
+    if (!currentProjectId || !performer || !currentAsset?.sourceAssetId) return;
+    try {
+      const latest = await window.electronAPI.modelAssets.materialize(
+        currentProjectId,
+        currentAsset.sourceAssetId,
+      );
+      setModelAssets((current) => ({ ...current, [latest.id]: latest }));
+      setPerformers((current) => current.map((item) => item.id === performerId
+        ? { ...item, modelAssetId: latest.id }
+        : item));
+      setProjectMessages([
+        latest.sourceRevision === currentAsset.sourceRevision
+          ? `“${currentAsset.name}”已经是资产库最新版本。`
+          : `“${currentAsset.name}”已更新到 v${latest.sourceRevision}，实例位置和尺寸保持不变。`,
+      ]);
+    } catch (error) {
+      setProjectMessages([error instanceof Error ? error.message : '资产版本更新失败']);
+    }
+  };
+
+  useEffect(() => {
+    if (!pendingModelPlacement) return;
+    const cancelPlacement = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPendingModelPlacement(null);
+    };
+    window.addEventListener('keydown', cancelPlacement);
+    return () => window.removeEventListener('keydown', cancelPlacement);
+  }, [pendingModelPlacement]);
 
   const deletePerformers = (performerIds: string[]) => {
     const targetIds = new Set(
@@ -1382,6 +1599,7 @@ const App: React.FC = () => {
     setStageConfig(data.stageConfig);
     setPerformerNotes(data.performerNotes || []);
     setMediaCache(mediaUrls);
+    setModelAssets(data.modelAssets);
     setCurrentTime(0);
     setAudioBuffer(null);
     setMusicUrl(audioUrl);
@@ -1414,6 +1632,7 @@ const App: React.FC = () => {
       musicName: data.musicName || null,
       musicAsset: data.musicAsset || null,
       performerNotes: data.performerNotes || [],
+      modelAssets: data.modelAssets,
     }));
     const loadedUpdatedAt = data.updatedAt ? Date.parse(data.updatedAt) : Number.NaN;
     setLastSavedAt(Number.isFinite(loadedUpdatedAt) ? loadedUpdatedAt : null);
@@ -1433,8 +1652,9 @@ const App: React.FC = () => {
       musicName,
       musicAsset,
       performerNotes,
+      modelAssets,
     });
-  }, [performers, performerGroups, frames, transitions, audioMarkers, stageConfig, musicName, musicAsset, performerNotes]);
+  }, [performers, performerGroups, frames, transitions, audioMarkers, stageConfig, musicName, musicAsset, performerNotes, modelAssets]);
 
   const currentProjectStateString = useMemo(() => getProjectStateString(), [getProjectStateString]);
   lastSavedStateRef.current = lastSavedState;
@@ -1482,6 +1702,7 @@ const App: React.FC = () => {
       }];
       const newStageConfig = createDefaultStageConfig();
       const initialEditorState = {
+        modelAssets: {},
         performers: [],
         performerGroups: [],
         frames: newFrames,
@@ -1493,7 +1714,7 @@ const App: React.FC = () => {
         performerNotes: [],
       };
       const initialDocument: ProjectDocument = {
-        version: '3.0',
+        version: PROJECT_SCHEMA_VERSION,
         name,
         ...initialEditorState,
       };
@@ -1511,6 +1732,7 @@ const App: React.FC = () => {
       setSelectedTransitionPerformerId(null);
       setStageConfig(newStageConfig);
       setMediaCache({});
+      setModelAssets({});
       setMusicName(null);
       setMusicAsset(null);
       setPerformerNotes([]);
@@ -1540,8 +1762,9 @@ const App: React.FC = () => {
 
       // Save template data into the new project
       const saveData: ProjectDocument = {
-        version: '3.0',
+        version: PROJECT_SCHEMA_VERSION,
         name,
+        modelAssets: templateData.modelAssets || {},
         performers: normalizePerformers(templateData.performers),
         performerGroups: templateData.performerGroups || [],
         frames: normalizeFrames(templateData.frames),
@@ -1563,6 +1786,7 @@ const App: React.FC = () => {
       setTransitions(saveData.transitions || []);
       setAudioMarkers(saveData.audioMarkers || []);
       setStageConfig(saveData.stageConfig);
+      setModelAssets(saveData.modelAssets);
       setCurrentFrameId(saveData.frames[0]?.id || '');
       setSelectedTransitionId(null);
       setSelectedTransitionPerformerId(null);
@@ -1584,6 +1808,7 @@ const App: React.FC = () => {
         musicName: null,
         musicAsset: null,
         performerNotes: [],
+        modelAssets: saveData.modelAssets,
       }));
       setLastSavedAt(Date.now());
       setProjectHasChanges(false);
@@ -2226,6 +2451,37 @@ const App: React.FC = () => {
     });
   }, [handleRotationChange, pushUndoAction]);
 
+  const handleResizeStart = useCallback((performerId: string) => {
+    if (effectivelyLockedPerformerIds.has(performerId)) return;
+    const performer = performers.find((item) => item.id === performerId && item.type === 'prop');
+    pendingResizeUndoRef.current = performer
+      ? {
+          performerId,
+          before: {
+            width: performer.width || 1,
+            height: performer.height || 1,
+            depth: performer.depth || 1,
+          },
+        }
+      : null;
+  }, [effectivelyLockedPerformerIds, performers]);
+
+  const handleResizeEnd = useCallback((performerId: string, dimensions: PerformerDimensions) => {
+    const pending = pendingResizeUndoRef.current;
+    pendingResizeUndoRef.current = null;
+    if (!pending || pending.performerId !== performerId) return;
+    const changed = Math.abs(pending.before.width - dimensions.width) >= 0.0001
+      || Math.abs(pending.before.height - dimensions.height) >= 0.0001
+      || Math.abs(pending.before.depth - dimensions.depth) >= 0.0001;
+    if (!changed) return;
+    pushUndoAction({
+      type: 'resize-performer',
+      performerId,
+      before: pending.before,
+      after: dimensions,
+    });
+  }, [pushUndoAction]);
+
   const handleStageDragStart = useCallback((performerIds: string[]) => {
     const editableIds = filterUnlockedPerformerIds(performerIds, effectivelyLockedPerformerIds);
     if (!currentFrameId || editableIds.length === 0) {
@@ -2374,7 +2630,6 @@ const App: React.FC = () => {
         height: entity.type === 'prop' ? (entity.height ?? 2) : entity.height,
         depth: entity.type === 'prop' ? (entity.depth ?? 0.3) : entity.depth,
         rotation: entity.rotation,
-        propGeometryType: entity.propGeometryType || (entity.type === 'prop' ? 'box' : undefined),
         propCategory: entity.type === 'prop' ? (entity.propCategory ?? 'prop') : undefined,
       };
     });
@@ -2579,6 +2834,11 @@ const App: React.FC = () => {
           ? { ...frame, rotations: { ...(frame.rotations ?? {}), [last.performerId]: last.before } }
           : frame
       )));
+    } else if (last.type === 'resize-performer') {
+      setPerformers((prev) => prev.map((performer) => (
+        performer.id === last.performerId ? { ...performer, ...last.before } : performer
+      )));
+      setSelectedPerformerIds([last.performerId]);
     } else if (last.type === 'paste-performers') {
       const pastedIds = last.performers.map((performer) => performer.id);
       const pastedGroupIds = new Set(last.groups.map((group) => group.id));
@@ -2624,6 +2884,11 @@ const App: React.FC = () => {
           ? { ...frame, rotations: { ...(frame.rotations ?? {}), [last.performerId]: last.after } }
           : frame
       )));
+    } else if (last.type === 'resize-performer') {
+      setPerformers((prev) => prev.map((performer) => (
+        performer.id === last.performerId ? { ...performer, ...last.after } : performer
+      )));
+      setSelectedPerformerIds([last.performerId]);
     } else if (last.type === 'paste-performers') {
       setPerformerGroups((prev) => [...prev, ...last.groups.map((group) => ({ ...group }))]);
       setPerformers((prev) => [...prev, ...last.performers.map((performer) => ({ ...performer }))]);
@@ -2680,9 +2945,14 @@ const App: React.FC = () => {
     }
 
     const projectData = buildProjectDocument('CosStage Project');
+    const choreographyOnly = {
+      ...projectData,
+      modelAssets: {},
+      performers: projectData.performers.map(({ modelAssetId: _asset, modelAspectLocked: _locked, ...performer }) => performer),
+    };
 
     // Fallback to web version (blob download)
-    const blob = new Blob([JSON.stringify(projectData, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(choreographyOnly, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -2758,6 +3028,7 @@ const App: React.FC = () => {
     setAudioMarkers([]);
     setStageConfig(newStageConfig);
     setMediaCache({});
+    setModelAssets({});
     setCurrentFrameId(newFrameId);
     setSelectedTransitionId(null);
     setSelectedTransitionPerformerId(null);
@@ -2843,7 +3114,8 @@ const App: React.FC = () => {
         if (!json.performers || !Array.isArray(json.performers)) throw new Error("Invalid project file: missing performers");
         if (!json.frames || !Array.isArray(json.frames)) throw new Error("Invalid project file: missing frames");
 
-        setPerformers(normalizePerformers(json.performers));
+        setPerformers(normalizePerformers(json.performers).map(({ modelAssetId: _asset, modelAspectLocked: _locked, ...performer }) => performer));
+        setModelAssets({});
         setPerformerGroups(json.performerGroups || []);
         setFrames(normalizeFrames(json.frames));
         setTransitions(normalizeTransitions(json.transitions));
@@ -2931,6 +3203,11 @@ const App: React.FC = () => {
     return {
       kind: 'performers',
       sourceProjectKey: activeProjectClipboardKey,
+      sourceProjectId: currentProjectId ?? undefined,
+      modelAssets: Object.fromEntries(sourcePerformers.flatMap((performer) => {
+        const asset = performer.modelAssetId ? modelAssets[performer.modelAssetId] : undefined;
+        return asset ? [[asset.id, structuredClone(asset)] as const] : [];
+      })),
       performers: portablePerformers,
       groups,
       scene,
@@ -2943,6 +3220,8 @@ const App: React.FC = () => {
     currentSceneState.rotations,
     loadClipboardAssetAsDataUrl,
     activeProjectClipboardKey,
+    currentProjectId,
+    modelAssets,
   ]);
 
   const copyPerformersToClipboard = useCallback(async (): Promise<void> => {
@@ -2965,6 +3244,11 @@ const App: React.FC = () => {
       setAppClipboard({
         kind: 'formation',
         sourceProjectKey: activeProjectClipboardKey,
+        sourceProjectId: currentProjectId ?? undefined,
+        modelAssets: Object.fromEntries(performers.flatMap((performer) => {
+          const asset = performer.modelAssetId ? modelAssets[performer.modelAssetId] : undefined;
+          return asset ? [[asset.id, structuredClone(asset)] as const] : [];
+        })),
         performers: portablePerformers,
         groups: performerGroups.map((group) => structuredClone(group)),
         frame: structuredClone(sourceFrame),
@@ -2974,9 +3258,9 @@ const App: React.FC = () => {
       console.error('Failed to copy formation:', error);
       setProjectMessages(['复制队形失败：无法完整读取演员或道具贴图']);
     }
-  }, [frames, currentFrameId, performers, performerGroups, loadClipboardAssetAsDataUrl, activeProjectClipboardKey]);
+  }, [frames, currentFrameId, performers, performerGroups, loadClipboardAssetAsDataUrl, activeProjectClipboardKey, currentProjectId, modelAssets]);
 
-  const pastePerformers = useCallback((payload?: PerformerClipboardPayload): void => {
+  const pastePerformers = useCallback(async (payload?: PerformerClipboardPayload): Promise<void> => {
     const source = payload ?? (appClipboard?.kind === 'performers' ? appClipboard : null);
     if (!source) return;
     if (!currentFrameId || !frames.some((frame) => frame.id === currentFrameId)) {
@@ -2986,14 +3270,42 @@ const App: React.FC = () => {
 
     const previousSelectedIds = [...selectedPerformerIds];
     const isSameProject = source.sourceProjectKey === activeProjectClipboardKey;
+    let transferableSource = source;
+    if (!isSameProject && source.modelAssets && Object.keys(source.modelAssets).length > 0) {
+      if (window.electronAPI?.isElectron && source.sourceProjectId && currentProjectId) {
+        try {
+          const transfer = await window.electronAPI.modelAssets.transferProjectAssets(
+            source.sourceProjectId,
+            currentProjectId,
+            source.modelAssets,
+          );
+          setModelAssets((current) => ({ ...current, ...transfer.assets }));
+          transferableSource = {
+            ...source,
+            performers: source.performers.map((performer) => ({
+              ...performer,
+              modelAssetId: performer.modelAssetId ? transfer.idMap[performer.modelAssetId] : undefined,
+            })),
+          };
+        } catch (error) {
+          setProjectMessages([error instanceof Error ? error.message : '跨项目复制 3D 模型失败']);
+          return;
+        }
+      } else {
+        transferableSource = {
+          ...source,
+          performers: source.performers.map(({ modelAssetId: _modelAssetId, modelAspectLocked: _locked, ...performer }) => performer),
+        };
+      }
+    }
     const pasted = isSameProject
       ? pasteSameProjectPerformerPayload(
-        source,
+        transferableSource,
         currentFrameId,
         generateId,
         new Set(performerGroups.map((group) => group.id)),
       )
-      : pastePerformerPayload(source, currentFrameId, generateId);
+      : pastePerformerPayload(transferableSource, currentFrameId, generateId);
     setPerformerGroups((prev) => [...prev, ...pasted.groups]);
     setPerformers((prev) => [...prev, ...pasted.performers]);
     setFrames((prev) => prev.map((frame) => {
@@ -3020,23 +3332,48 @@ const App: React.FC = () => {
     selectedPerformerIds,
     performerGroups,
     activeProjectClipboardKey,
+    currentProjectId,
     pushUndoAction,
   ]);
 
-  const pasteFormation = useCallback((payload?: FormationClipboardPayload): void => {
+  const pasteFormation = useCallback(async (payload?: FormationClipboardPayload): Promise<void> => {
     const source = payload ?? (appClipboard?.kind === 'formation' ? appClipboard : null);
     if (!source) return;
     const previousSelectedIds = [...selectedPerformerIds];
     const isSameProject = source.sourceProjectKey === activeProjectClipboardKey;
+    let transferableSource = source;
+    if (!isSameProject && source.modelAssets && Object.keys(source.modelAssets).length > 0) {
+      if (window.electronAPI?.isElectron && source.sourceProjectId && currentProjectId) {
+        try {
+          const transfer = await window.electronAPI.modelAssets.transferProjectAssets(source.sourceProjectId, currentProjectId, source.modelAssets);
+          setModelAssets((current) => ({ ...current, ...transfer.assets }));
+          transferableSource = {
+            ...source,
+            performers: source.performers.map((performer) => ({
+              ...performer,
+              modelAssetId: performer.modelAssetId ? transfer.idMap[performer.modelAssetId] : undefined,
+            })),
+          };
+        } catch (error) {
+          setProjectMessages([error instanceof Error ? error.message : '跨项目复制 3D 模型失败']);
+          return;
+        }
+      } else {
+        transferableSource = {
+          ...source,
+          performers: source.performers.map(({ modelAssetId: _modelAssetId, modelAspectLocked: _locked, ...performer }) => performer),
+        };
+      }
+    }
     const pasted = isSameProject
       ? pasteSameProjectFormationPayload(
-        source,
+        transferableSource,
         currentTime,
         generateId,
         new Set(performers.map((performer) => performer.id)),
         new Set(performerGroups.map((group) => group.id)),
       )
-      : pasteFormationPayload(source, currentTime, generateId);
+      : pasteFormationPayload(transferableSource, currentTime, generateId);
     setPerformerGroups((prev) => [...prev, ...pasted.groups]);
     setPerformers((prev) => [...prev, ...pasted.performers]);
     setFrames((prev) => {
@@ -3066,6 +3403,7 @@ const App: React.FC = () => {
     performers,
     performerGroups,
     activeProjectClipboardKey,
+    currentProjectId,
     pushUndoAction,
   ]);
 
@@ -3308,7 +3646,15 @@ const App: React.FC = () => {
   const renderFrameToCanvas = async (
     canvas: HTMLCanvasElement,
     timeMs: number,
-    opts?: { includeLabels?: boolean; includeGrid?: boolean; bgColor?: string; stageBackgroundImage?: HTMLImageElement | null; ledRenderer?: { draw: (ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, timeMs: number, flipY?: boolean) => Promise<void> | void } | null; view?: Export2DView; }
+    opts?: {
+      includeLabels?: boolean;
+      includeGrid?: boolean;
+      bgColor?: string;
+      stageBackgroundImage?: HTMLImageElement | null;
+      modelFloorplanImages?: Record<string, HTMLImageElement>;
+      ledRenderer?: { draw: (ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, timeMs: number, flipY?: boolean) => Promise<void> | void } | null;
+      view?: Export2DView;
+    }
   ) => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
@@ -3388,7 +3734,7 @@ const App: React.FC = () => {
     const hiddenGroupIds = sceneState.hiddenGroupIds;
     const positions = sceneState.positions;
     const rotations = sceneState.rotations;
-    const platformOccupancy = buildPlatformOccupancy(performers, positions, stageConfig);
+    const platformOccupancy = buildPlatformOccupancy(performers, positions, stageConfig, modelAssets);
 
     ctx.fillStyle = 'rgba(2,6,23,0.55)';
     ctx.fillRect(renderX, renderY, leftMainEdge - renderX, renderH);
@@ -3477,6 +3823,8 @@ const App: React.FC = () => {
       );
 
       if (p.type === 'prop') {
+        const modelAsset = p.modelAssetId ? modelAssets[p.modelAssetId] : undefined;
+        const floorplanImage = modelAsset ? opts?.modelFloorplanImages?.[modelAsset.id] : undefined;
         const propLift = platformOccupancy.entityLiftById[p.id] ?? 0;
         const propW = dimensions.width / totalStageW * renderW;
         const propD = dimensions.depth / stageD * renderH;
@@ -3486,20 +3834,35 @@ const App: React.FC = () => {
         ctx.translate(cx, cy);
         ctx.rotate(isRehearsalView ? -rot : rot);
 
-        if (p.polygonPoints && p.polygonPoints.length >= 3) {
+        const assetFootprint = floorplanImage ? undefined : modelAsset?.footprints[0];
+        if (assetFootprint && assetFootprint.length >= 3) {
           ctx.beginPath();
-          p.polygonPoints.forEach((pt, i) => {
-            const px = (pt.x - 0.5) * propW;
-            const py = (pt.y - 0.5) * propD;
-            i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+          assetFootprint.forEach((point, index) => {
+            const px = point.x / modelAsset.intrinsicSize.width * propW;
+            const py = point.y / modelAsset.intrinsicSize.depth * propD;
+            if (index === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
           });
           ctx.closePath();
           ctx.clip();
         }
 
-        const texUrl = p.boxTextures?.front?.dataUrl || p.textureDataUrl;
-        if (texUrl && (texUrl as any).loaded) {
-          ctx.drawImage((texUrl as any), -propW / 2, -propD / 2, propW, propD);
+        if (floorplanImage && modelAsset) {
+          const previewScale = getModelTopPreviewScale(
+            modelAsset.intrinsicSize.width,
+            modelAsset.intrinsicSize.depth,
+          );
+          const imageWidth = propW * previewScale.width;
+          const imageHeight = propD * previewScale.height;
+          ctx.save();
+          if (isRehearsalView) ctx.scale(1, -1);
+          ctx.drawImage(
+            floorplanImage,
+            -imageWidth / 2,
+            -imageHeight / 2,
+            imageWidth,
+            imageHeight,
+          );
+          ctx.restore();
         } else {
           ctx.fillStyle = p.color;
           ctx.fillRect(-propW / 2, -propD / 2, propW, propD);
@@ -3667,6 +4030,7 @@ const App: React.FC = () => {
     } catch (error) {
       console.warn('2D 导出舞台底图加载失败，将继续导出基础舞台：', error);
     }
+    const modelFloorplanImages = await create2DExportModelFloorplans();
 
     // Shared canvas for rendering (reused across both paths to avoid holding all frames in memory)
     const tmpCanvas = document.createElement('canvas');
@@ -3763,6 +4127,7 @@ const App: React.FC = () => {
             includeLabels: exportIncludeLabels,
             includeGrid: exportIncludeGrid,
             stageBackgroundImage,
+            modelFloorplanImages,
             ledRenderer,
             view: export2DView,
           });
@@ -3994,6 +4359,7 @@ const App: React.FC = () => {
         includeLabels: exportIncludeLabels,
         includeGrid: exportIncludeGrid,
         stageBackgroundImage,
+        modelFloorplanImages,
         ledRenderer,
         view: export2DView,
       });
@@ -4121,7 +4487,6 @@ const App: React.FC = () => {
     // Pre-load resources
     setExportProgress(0.03);
     await Promise.all([
-      preloadPropTextures(performers),
       preloadLEDVideo(stageConfig, mediaCache),
       preloadStageBackground(stageConfig, mediaCache).catch((error) => {
         console.warn('3D 导出舞台底图预加载失败，将继续导出基础舞台：', error);
@@ -4130,8 +4495,8 @@ const App: React.FC = () => {
     setExportProgress(0.08);
 
     // Create offline 3D scene
-    const offline = createOfflineScene(
-      width, height, stageConfig, performers, exportCameraAngle, gridScale, mediaCache, exportIncludeGrid, exportIncludeLabels, showDirectionArrows,
+    const offline = await createOfflineScene(
+      width, height, stageConfig, performers, exportCameraAngle, gridScale, mediaCache, exportIncludeGrid, exportIncludeLabels, showDirectionArrows, modelAssets,
     );
 
     // Pre-capture LED video frames for fast export (seeks once, then uses cache)
@@ -4630,6 +4995,19 @@ const App: React.FC = () => {
     0,
   );
 
+  if (modelerState) {
+    return (
+      <ModelerWorkspace
+        asset={modelerState.asset}
+        onClose={() => setModelerState(null)}
+        onSaved={(asset) => {
+          setModelerState(null);
+          setProjectMessages([`“${asset.name}”已保存到 3D 资产库。`]);
+        }}
+      />
+    );
+  }
+
   return (
     <div className={`min-h-[100dvh] h-[100dvh] w-screen flex flex-col safe-top safe-bottom ${theme === 'dark' ? 'bg-slate-950 text-slate-200' : 'bg-gray-50 text-gray-900'} overflow-hidden`}>
       {/* Help Modal */}
@@ -4984,6 +5362,10 @@ const App: React.FC = () => {
             // Note Drawer props
             onOpenNoteDrawer={handleOpenNoteDrawer}
             performerNotes={performerNotes}
+            modelAssets={modelAssets}
+            onPlaceModelAsset={handlePrepareModelPlacement}
+            onOpenModeler={(asset) => setModelerState({ asset })}
+            onUpdateModelAssetVersion={handleUpdateModelAssetVersion}
           />)}
         {!sidebarCollapsed && !isCompactLayout && (
           <div
@@ -5083,12 +5465,18 @@ const App: React.FC = () => {
               onZoom={handleGridZoom}
               stageConfig={stageConfig}
               mediaCache={mediaCache}
+              modelAssets={modelAssets}
+              modelFloorplanPreviewUrls={modelFloorplanPreviewUrls}
               onOpenNoteDrawer={handleOpenNoteDrawer}
               onPerformerContextMenu={handleOpenPerformerEditor}
+              placementPreview={pendingModelPlacement}
+              onPlaceAsset={handlePlaceModelAsset}
+              onCancelPlacement={() => setPendingModelPlacement(null)}
             />
           ) : (
             <Stage3D
               performers={performers}
+              modelAssets={modelAssets}
               positions={displayedPositions}
               rotations={displayedRotations}
               selectedIds={selectedPerformerIds}
@@ -5110,7 +5498,19 @@ const App: React.FC = () => {
               showDirectionArrows={showDirectionArrows}
               readonly={isPlaying}
               dragEnabled={is3DDragEnabled}
+              transformMode={stageTransformMode}
+              onTransformModeChange={setStageTransformMode}
+              onSnapToGridChange={setSnapToGrid}
+              shortcutsEnabled={!modelerState}
+              onRotationStart={handleRotationStart}
+              onRotationChange={handleRotationChange}
+              onRotationEnd={handleRotationEnd}
+              onResizeStart={handleResizeStart}
+              onResizeEnd={handleResizeEnd}
               onOpenPerformerEditor={handleOpenPerformerEditor}
+              placementPreview={pendingModelPlacement}
+              onPlaceAsset={handlePlaceModelAsset}
+              onCancelPlacement={() => setPendingModelPlacement(null)}
             />
           )}
 
@@ -5417,30 +5817,6 @@ const App: React.FC = () => {
                 >
                   {showDirectionArrows ? <Eye size={18} /> : <EyeOff size={18} />}
                 </button>
-                {viewMode === '3d' && (
-                  <button
-                    type="button"
-                    onClick={() => setIs3DDragEnabled((enabled) => !enabled)}
-                    disabled={isPlaying}
-                    className={`inline-flex shrink-0 items-center gap-1.5 rounded p-2 transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                      is3DDragEnabled
-                        ? 'bg-amber-500/15 text-amber-400'
-                        : theme === 'dark'
-                          ? 'text-slate-500 hover:bg-slate-800 hover:text-white'
-                          : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900'
-                    }`}
-                    aria-label={is3DDragEnabled ? '锁定 3D 对象' : '启用 3D 拖动编辑'}
-                    aria-pressed={is3DDragEnabled}
-                    title={isPlaying
-                      ? '播放中已临时锁定 3D 编辑'
-                      : is3DDragEnabled
-                        ? '锁定 3D 对象，恢复左键旋转视角'
-                        : '启用 3D 拖动编辑'}
-                  >
-                    {is3DDragEnabled ? <Unlock size={16} /> : <Lock size={16} />}
-                    <span className="whitespace-nowrap text-xs font-medium">3D 拖动编辑</span>
-                  </button>
-                )}
                 <div className={`w-px h-6 mx-1 ${theme === 'dark' ? 'bg-slate-700' : 'bg-gray-300'}`}></div>
                 <div className="flex items-center gap-2 px-2">
                   <button

@@ -2,9 +2,6 @@
 export type {
   AppSettings,
   AudioMarker,
-  BoxTextures,
-  ExtrudedTextures,
-  FaceTexture,
   Frame,
   LEDContent,
   MotionControlPoint,
@@ -27,7 +24,6 @@ export type {
   ProjectRecoverySnapshot,
   ProjectWarning,
   PropCategory,
-  PropGeometryType,
   PropRotationPivot,
   RotationMode,
   SceneState,
@@ -37,6 +33,51 @@ export type {
   PerformerNote,
   NoteItem,
 } from './electron/project-contract';
+
+export type {
+  GlbImportCommitInput,
+  GlbImportSession,
+  ModelAssetCorrection,
+  ModelAssetErrorCode,
+  ModelAssetErrorShape,
+  ModelAssetFile,
+  ModelAssetFormat,
+  ModelAssetManifest,
+  ModelAssetMetadataUpdateInput,
+  ModelAssetThumbnailUpdateInput,
+  ModelAssetOrigin,
+  ModelAssetPayload,
+  ModelAssetSummary,
+  ModelAssetUsage,
+  ModelBounds,
+  ModelPart,
+  ModelPartGeometry,
+  ModelPartMaterial,
+  ModelPrimitiveKind,
+  ModelSize,
+  ModelVector2,
+  ModelVector3,
+  ParametricAssetSaveInput,
+  ParametricModelRecipe,
+  ProjectModelAsset,
+  ProjectModelAssetTransferResult,
+} from './electron/model-asset-contract';
+
+export {
+  GLB_TRIANGLE_WARNING_THRESHOLD,
+  MAX_GLB_FILE_BYTES,
+  MAX_GLB_TRIANGLES,
+  MAX_PARAMETRIC_MODEL_PARTS,
+  MODEL_ASSET_SCHEMA_VERSION,
+  PROJECT_SCHEMA_VERSION,
+  TEXTURE_SIZE_WARNING_THRESHOLD,
+  createLegacyUnitBoxAsset,
+  normalizeModelAsset,
+  normalizeParametricRecipe,
+  normalizeProjectModelAssets,
+  toModelAssetSummary,
+  isSimplePolygon,
+} from './electron/model-asset-contract';
 
 export {
   normalizeFrames,
@@ -53,7 +94,6 @@ import type {
   PerformerShape,
   Position,
   PropCategory,
-  PropGeometryType,
   SceneState,
   StageConfig,
   TransitionSegment,
@@ -137,7 +177,6 @@ export interface AIEntityCreate {
   height?: number;
   depth?: number;
   rotation?: number;
-  propGeometryType?: PropGeometryType;
   propCategory?: PropCategory;
 }
 

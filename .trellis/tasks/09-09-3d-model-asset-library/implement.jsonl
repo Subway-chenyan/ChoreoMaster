@@ -1,0 +1,14 @@
+{"file":".trellis/spec/frontend/index.md","reason":"Frontend and Electron guideline routing"}
+{"file":".trellis/spec/frontend/three-interaction.md","reason":"Placement and TransformControls must preserve 3D camera and pointer contracts"}
+{"file":".trellis/spec/frontend/ipc-electron.md","reason":"Native asset storage and protocols require typed, validated IPC"}
+{"file":".trellis/spec/frontend/electron-browser-api-restrictions.md","reason":"Desktop-only file operations need browser-safe degradation"}
+{"file":".trellis/spec/frontend/react-pitfalls.md","reason":"Large stateful modeler and pointer gesture history need stable React patterns"}
+{"file":".trellis/spec/frontend/components.md","reason":"Asset catalog, modeler controls, and dialogs must follow component conventions"}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"Schema v4 unions and IPC payloads require strict TypeScript contracts"}
+{"file":".trellis/spec/frontend/quality.md","reason":"Testing, loading states, cleanup, and performance requirements"}
+{"file":".trellis/spec/shared/index.md","reason":"Cross-layer shared contract guidance"}
+{"file":".trellis/spec/shared/code-quality.md","reason":"Validation, structured errors, and maintainable module boundaries"}
+{"file":".trellis/spec/shared/typescript.md","reason":"Shared serializable types and safe narrowing"}
+{"file":".trellis/spec/guides/index.md","reason":"Shared implementation guide routing"}
+{"file":".trellis/spec/guides/pre-implementation-checklist.md","reason":"Cross-layer pre-development checklist"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Storage-to-UI and export data-flow verification"}

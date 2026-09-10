@@ -1,12 +1,12 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Performer, Frame, PerformerShape, PerformerGroup, PerformerType, PropCategory, AIConfig, AIChoreoPlan, ProjectTemplateData } from '../types';
+import { Performer, Frame, PerformerShape, PerformerGroup, PerformerType, PropCategory, AIConfig, AIChoreoPlan, ModelAssetManifest, ModelAssetSummary, ProjectModelAsset, ProjectTemplateData } from '../types';
 import { Plus, Users, Trash2, Download, Grid, Music, Sparkles, Wand2, Film, Copy, Search, Settings, Scaling, Upload, FilePlus, Circle, Square, Triangle, UserCheck, UserX, Eye, EyeOff, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreVertical, Palette, Edit2, Box, Library, Save, StickyNote, Lock, Unlock } from 'lucide-react';
 import { PRESET_SHAPES, DEFAULT_COLORS } from '../constants';
 import { StageConfig } from '../types';
 import { ProjectBrowser } from './ProjectBrowser';
-import { PropEditorModal } from './PropEditorModal';
+import ModelAssetSidebar from './model-assets/ModelAssetSidebar';
 import { ChoreoAgentModal } from './ChoreoAgentModal';
 import { EditableNumberInput, SelectField, StepperNumberField } from './FormControls';
 import { validateAgentAccess } from '../services/choreoAgentService';
@@ -91,6 +91,10 @@ interface SidebarProps {
     lastSavedAt?: number | null;
     performerNotes?: import('../types').PerformerNote[];
     onOpenNoteDrawer?: (performerId: string) => void;
+    modelAssets?: Record<string, ProjectModelAsset>;
+    onPlaceModelAsset?: (asset: ModelAssetSummary, fitToStage: boolean) => void;
+    onOpenModeler?: (asset?: ModelAssetManifest | null) => void;
+    onUpdateModelAssetVersion?: (performerId: string) => void;
 }
 
 type Tab = 'library' | 'project' | 'formations' | 'performers' | 'props' | 'presets';
@@ -248,6 +252,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
     lastSavedAt = null,
     performerNotes = [],
     onOpenNoteDrawer,
+    modelAssets = {},
+    onPlaceModelAsset,
+    onOpenModeler,
+    onUpdateModelAssetVersion,
 }) => {
     const [activeTab, setActiveTab] = useState<Tab>('library');
     const [editingFrameId, setEditingFrameId] = useState<string | null>(null);
@@ -304,9 +312,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         groupId: string | null;
         color: string;
     }>({ show: false, groupId: null, color: '#000000' });
-
-    const [propEditorOpen, setPropEditorOpen] = useState(false);
-    const [propEditorPerformerId, setPropEditorPerformerId] = useState<string | null>(null);
 
     // Ref for context menu click outside detection
     const contextMenuRef = useRef<HTMLDivElement>(null);
@@ -1164,8 +1169,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     </div>
                 )}
 
-                {/* PERFORMERS & PROPS TAB */}
-                {(activeTab === 'performers' || activeTab === 'props') && (
+                {activeTab === 'props' && (
+                    <ModelAssetSidebar
+                        performers={performers}
+                        projectAssets={modelAssets}
+                        selectedIds={selectedPerformerIds}
+                        currentProjectId={currentProjectId}
+                        stageWidth={(stageConfig?.width ?? 20) + 2 * (stageConfig?.wingWidth ?? 0)}
+                        stageDepth={stageConfig?.depth ?? 11.25}
+                        onSelectionChange={onSelectionChange}
+                        onRemovePerformer={onRemovePerformer}
+                        onUpdatePerformer={onUpdatePerformer}
+                        onPlaceAsset={(asset, fitToStage) => onPlaceModelAsset?.(asset, fitToStage)}
+                        onOpenModeler={(asset) => onOpenModeler?.(asset)}
+                        onUpdateAssetVersion={onUpdateModelAssetVersion}
+                    />
+                )}
+
+                {/* PERFORMERS TAB */}
+                {(['performers'] as Tab[]).includes(activeTab) && (
                     <div className="h-full min-h-0 flex flex-col p-4 pb-3">
                         <div className="flex items-center justify-between mb-3">
                             <h2 className="text-sm font-bold text-slate-400 uppercase">{activeTab === 'props' ? '道具列表' : '演员列表'}</h2>
@@ -1604,23 +1626,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                             </>
                                         );
                                     }
-                                    if (contextMenuState.performerIds.length === 1 && contextMenuState.performerType === 'prop') {
-                                        return (
-                                            <>
-                                                <div className="h-px bg-slate-700 my-1"></div>
-                                                <button
-                                                    onClick={() => {
-                                                        setPropEditorPerformerId(targetPerformerId);
-                                                        setPropEditorOpen(true);
-                                                        closeContextMenu();
-                                                    }}
-                                                    className="w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 flex items-center gap-2"
-                                                >
-                                                    <Edit2 size={12} /> 编辑道具
-                                                </button>
-                                            </>
-                                        );
-                                    }
                                     return null;
                                 })()}
                                     </>
@@ -1830,8 +1835,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
 
             {/* Custom Color Picker Modal */}
-            {colorPickerState.show && (
-                <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+            {colorPickerState.show && createPortal(
+                <div className="fixed inset-0 z-[100010] flex items-center justify-center bg-black/50 backdrop-blur-sm"
                     onClick={(e) => e.stopPropagation()}>
                     <div className="bg-slate-900 border border-slate-700 p-6 rounded-lg shadow-2xl w-80">
                         <h3 className="text-lg font-bold text-white mb-4">选择分组颜色</h3>
@@ -1874,30 +1879,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             </div>
                         </div>
                     </div>
-                </div>
+                </div>,
+                document.body,
             )}
 
-            <PropEditorModal
-              isOpen={propEditorOpen}
-              performer={propEditorPerformerId ? performers.find(p => p.id === propEditorPerformerId) || null : null}
-              mode={propEditorPerformerId ? 'edit' : 'create'}
-              onSave={(updates) => {
-                if (propEditorPerformerId) {
-                  onUpdatePerformer(propEditorPerformerId, updates);
-                } else {
-                  onAddPerformer(updates.name || '道具', updates.color || '#475569', 'square', {
-                    type: 'prop',
-                    ...updates
-                  });
-                }
-                setPropEditorOpen(false);
-                setPropEditorPerformerId(null);
-              }}
-              onClose={() => {
-                setPropEditorOpen(false);
-                setPropEditorPerformerId(null);
-              }}
-            />
         </div>
     );
 };

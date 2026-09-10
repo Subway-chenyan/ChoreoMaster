@@ -17,7 +17,7 @@ export function resolveThreeInteractionPolicy(
   const canDragObjects = input.dragEnabled && !input.readonly;
   return {
     canDragObjects,
-    enableRotate: !canDragObjects,
+    enableRotate: !canDragObjects && !input.isDragging,
     enablePan: !input.isDragging,
     enableZoom: true,
   };

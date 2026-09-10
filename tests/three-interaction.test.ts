@@ -51,11 +51,24 @@ test('playback read-only mode overrides the requested drag mode', () => {
 });
 
 test('active object movement temporarily disables camera pan', () => {
-  assert.equal(resolveThreeInteractionPolicy({
+  const policy = resolveThreeInteractionPolicy({
     dragEnabled: true,
     readonly: false,
     isDragging: true,
-  }).enablePan, false);
+  });
+  assert.equal(policy.enablePan, false);
+  assert.equal(policy.enableRotate, false);
+});
+
+test('transform controls temporarily disable camera rotation without enabling plane drag', () => {
+  const policy = resolveThreeInteractionPolicy({
+    dragEnabled: false,
+    readonly: false,
+    isDragging: true,
+  });
+  assert.equal(policy.canDragObjects, false);
+  assert.equal(policy.enableRotate, false);
+  assert.equal(policy.enablePan, false);
 });
 
 test('only a primary button can start an enabled writable object drag', () => {

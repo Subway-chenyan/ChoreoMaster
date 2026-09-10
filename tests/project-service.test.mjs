@@ -126,18 +126,20 @@ async function createRawZip(targetPath, entries) {
   await writeFile(targetPath, Buffer.concat([...localParts, centralDirectory, end]));
 }
 
-test('saves prop textures as assets and restores them through project URLs', async () => {
+test('migrates v3 prop textures to the shared unit-box snapshot', async () => {
   await withTempDir(async (storagePath) => {
     const created = await createManagedProject(storagePath, 'Texture Project');
     await saveManagedProject(storagePath, created.id, projectDocument('Texture Project'));
 
     const saved = JSON.parse(await readFile(path.join(created.path, 'project.json'), 'utf8'));
-    const texture = saved.performers[0].boxTextures.front;
-    assert.equal(texture.dataUrl, undefined);
-    assert.match(texture.assetPath, /^assets\/props\//);
+    assert.equal(saved.version, '4.0');
+    assert.equal(saved.performers[0].boxTextures, undefined);
+    assert.equal(saved.performers[0].modelAssetId, 'legacy-unit-box-v1');
+    assert.ok(saved.modelAssets['legacy-unit-box-v1']);
 
     const loaded = await loadManagedProject(storagePath, created.id);
-    assert.match(loaded.data.performers[0].boxTextures.front.dataUrl, /^choreo-asset:\/\//);
+    assert.equal(loaded.data.performers[0].boxTextures, undefined);
+    assert.equal(loaded.data.performers[0].modelAssetId, 'legacy-unit-box-v1');
     assert.deepEqual(loaded.warnings, []);
   });
 });
@@ -393,7 +395,9 @@ test('creates a named project from the verified ChinaJoy template and reuses its
     assert.equal(second.data.name, 'ChinaJoy 副本');
     assert.notEqual(first.projectId, second.projectId);
     assert.equal(third.data.name, 'ChinaJoy 缓存恢复');
-    assert.match(first.data.performers[2].boxTextures.front.dataUrl, /^choreo-asset:\/\//);
+    assert.equal(first.data.performers[2].boxTextures, undefined);
+    assert.equal(first.data.performers[2].modelAssetId, 'legacy-unit-box-v1');
+    assert.ok(first.data.modelAssets['legacy-unit-box-v1']);
     assert.equal(first.warnings.length, 0);
     assert.match(
       first.mediaUrls[first.data.stageConfig.ledContent.value],

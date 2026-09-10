@@ -6,6 +6,7 @@ import { randomUUID } from 'crypto';
 import { createManagedProject, deleteManagedProject, duplicateManagedProject, exportChoreographyDocument, exportProjectPackage, importChoreographyDocument, importProjectPackage, ingestProjectAsset, listManagedProjects, listProjectRecoverySnapshots, loadManagedProject, resolveManagedProjectPath, renameManagedProject, restoreProjectRecoverySnapshot, saveManagedProject, } from './project-service.js';
 import { createProjectFromTemplate, listProjectTemplates } from './project-template-service.js';
 import { updaterManager } from './updater.js';
+import { beginGlbModelImport, cancelGlbModelImport, commitGlbModelImport, duplicateModelAsset, getModelAsset, getModelAssetDeletionPath, listModelAssets, materializeModelAsset, saveParametricModelAsset, transferProjectModelAssets, updateModelAssetMetadata, updateModelAssetThumbnail, ModelAssetError, } from './model-asset-service.js';
 // ==================== Default Settings ====================
 const DEFAULT_STORAGE_PATH = path.join(os.homedir(), '.choreo');
 function getSettingsPath() {
@@ -37,6 +38,35 @@ async function saveSettings(settings) {
     await ensureStorageDir(DEFAULT_STORAGE_PATH);
     const settingsPath = getSettingsPath();
     await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
+}
+function requireIdentifier(value, label) {
+    if (typeof value !== 'string'
+        || !/^[a-zA-Z0-9\u4e00-\u9fff][a-zA-Z0-9\u4e00-\u9fff-]{0,159}$/u.test(value)) {
+        throw new Error(`${label}无效`);
+    }
+    return value;
+}
+function requireRecord(value, label) {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        throw new Error(`${label}无效`);
+    }
+    return value;
+}
+function registerModelAssetHandler(channel, handler) {
+    ipcMain.handle(channel, async (_, ...args) => {
+        try {
+            return { ok: true, value: await handler(...args) };
+        }
+        catch (error) {
+            return {
+                ok: false,
+                error: {
+                    code: error instanceof ModelAssetError ? error.code : 'IO_ERROR',
+                    message: error instanceof Error ? error.message : '3D 资产操作失败',
+                },
+            };
+        }
+    });
 }
 export function registerIpcHandlers(mainWindow) {
     const binaryExportSessions = new Map();
@@ -331,6 +361,74 @@ export function registerIpcHandlers(mainWindow) {
     ipcMain.handle('project:duplicate', async (_, projectId) => {
         const settings = await loadSettings();
         return duplicateManagedProject(settings.storagePath, projectId);
+    });
+    // ==================== 3D Model Asset Handlers ====================
+    registerModelAssetHandler('modelAssets:list', async () => {
+        const settings = await loadSettings();
+        return listModelAssets(settings.storagePath);
+    });
+    registerModelAssetHandler('modelAssets:get', async (rawAssetId) => {
+        const settings = await loadSettings();
+        return getModelAsset(settings.storagePath, requireIdentifier(rawAssetId, '资产 ID'));
+    });
+    registerModelAssetHandler('modelAssets:saveParametric', async (rawInput) => {
+        const settings = await loadSettings();
+        requireRecord(rawInput, '模型数据');
+        return saveParametricModelAsset(settings.storagePath, rawInput);
+    });
+    registerModelAssetHandler('modelAssets:updateMetadata', async (rawInput) => {
+        const settings = await loadSettings();
+        requireRecord(rawInput, '资产信息');
+        return updateModelAssetMetadata(settings.storagePath, rawInput);
+    });
+    registerModelAssetHandler('modelAssets:updateThumbnail', async (rawInput) => {
+        const settings = await loadSettings();
+        requireRecord(rawInput, '资产预览图');
+        return updateModelAssetThumbnail(settings.storagePath, rawInput);
+    });
+    registerModelAssetHandler('modelAssets:beginGlbImport', async () => {
+        const result = await dialog.showOpenDialog(mainWindow, {
+            properties: ['openFile'],
+            filters: [{ name: '自包含 GLB 模型', extensions: ['glb'] }],
+        });
+        if (result.filePaths.length === 0)
+            return null;
+        const settings = await loadSettings();
+        return beginGlbModelImport(settings.storagePath, result.filePaths[0]);
+    });
+    registerModelAssetHandler('modelAssets:commitGlbImport', async (rawSessionId, rawInput) => {
+        const settings = await loadSettings();
+        requireRecord(rawInput, 'GLB 校准数据');
+        return commitGlbModelImport(settings.storagePath, requireIdentifier(rawSessionId, '导入会话 ID'), rawInput);
+    });
+    registerModelAssetHandler('modelAssets:cancelGlbImport', async (rawSessionId) => {
+        await cancelGlbModelImport(requireIdentifier(rawSessionId, '导入会话 ID'));
+    });
+    registerModelAssetHandler('modelAssets:duplicate', async (rawAssetId) => {
+        const settings = await loadSettings();
+        return duplicateModelAsset(settings.storagePath, requireIdentifier(rawAssetId, '资产 ID'));
+    });
+    registerModelAssetHandler('modelAssets:delete', async (rawAssetId) => {
+        const settings = await loadSettings();
+        const deletionPath = await getModelAssetDeletionPath(settings.storagePath, requireIdentifier(rawAssetId, '资产 ID'));
+        await shell.trashItem(deletionPath);
+    });
+    registerModelAssetHandler('modelAssets:materialize', async (rawProjectId, rawAssetId, expectedRevision) => {
+        const settings = await loadSettings();
+        const projectId = requireIdentifier(rawProjectId, '项目 ID');
+        const assetId = requireIdentifier(rawAssetId, '资产 ID');
+        if (expectedRevision !== undefined
+            && (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1)) {
+            throw new Error('资产版本无效');
+        }
+        return materializeModelAsset(settings.storagePath, projectId, resolveManagedProjectPath(settings.storagePath, projectId), assetId, expectedRevision);
+    });
+    registerModelAssetHandler('modelAssets:transferProjectAssets', async (rawSourceProjectId, rawTargetProjectId, rawAssets) => {
+        const settings = await loadSettings();
+        const sourceProjectId = requireIdentifier(rawSourceProjectId, '源项目 ID');
+        const targetProjectId = requireIdentifier(rawTargetProjectId, '目标项目 ID');
+        requireRecord(rawAssets, '项目模型资产');
+        return transferProjectModelAssets(resolveManagedProjectPath(settings.storagePath, sourceProjectId), resolveManagedProjectPath(settings.storagePath, targetProjectId), targetProjectId, rawAssets);
     });
     console.log('IPC handlers registered successfully');
 }

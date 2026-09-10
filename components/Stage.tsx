@@ -1,6 +1,6 @@
 
 import React, { useRef, useState, useEffect, useMemo } from 'react';
-import { Performer, Position, SelectionBox, ToolMode, PerformerGroup, StageConfig, TransitionPathDisplay } from '../types';
+import { Performer, Position, SelectionBox, ToolMode, PerformerGroup, ProjectModelAsset, StageConfig, TransitionPathDisplay } from '../types';
 import {
   getStageXBounds,
   getTotalStageWidth,
@@ -18,6 +18,7 @@ import {
   STAGE_THIRD_POSITIONS,
 } from '../utils/stage-grid';
 import { getLedStageYPercent, resolveStageBackgroundUrl } from '../utils/stage-config';
+import { getModelTopPreviewScale } from '../utils/model-preview-layout';
 import { getPerformerDimensions, getStageLabelFontSize } from '../electron/stage-defaults';
 
 interface StageProps {
@@ -49,8 +50,13 @@ interface StageProps {
   onZoom?: (delta: number) => void;
   stageConfig: StageConfig;
   mediaCache?: Record<string, string>;
+  modelAssets?: Record<string, ProjectModelAsset>;
+  modelFloorplanPreviewUrls?: Record<string, string>;
   onOpenNoteDrawer?: (performerId: string) => void;
   onPerformerContextMenu?: (performerId: string) => void;
+  placementPreview?: { asset: ProjectModelAsset; width: number; height: number; depth: number } | null;
+  onPlaceAsset?: (position: Position) => void;
+  onCancelPlacement?: () => void;
 }
 
 const ShapeIcon: React.FC<{ shape: string; color: string; width: number | string; height: number | string; className?: string }> = ({ shape, color, width, height, className }) => {
@@ -134,11 +140,33 @@ interface RotationDragState {
   startClientY: number;
 }
 
-function getPolygonClipPath(points: { x: number; y: number }[] | undefined): string | undefined {
-  if (!points || points.length < 3) return undefined;
-  return `polygon(${points.map(p =>
-    `${Math.max(0, Math.min(100, p.x * 100))}% ${Math.max(0, Math.min(100, p.y * 100))}%`
-  ).join(', ')})`;
+function getAssetFootprintPolygonPoints(asset: ProjectModelAsset | undefined): string[] {
+  if (!asset) return [];
+  return asset.footprints
+    .filter((points) => points.length >= 3)
+    .map((points) => points.map((point) => {
+      const x = Math.max(0, Math.min(100, (point.x / asset.intrinsicSize.width + 0.5) * 100));
+      const y = Math.max(0, Math.min(100, (point.y / asset.intrinsicSize.depth + 0.5) * 100));
+      return `${x},${y}`;
+    }).join(' '));
+}
+
+function getAssetFloorplanBackgroundSize(asset: ProjectModelAsset | undefined): string {
+  if (!asset) return 'cover';
+  const scale = getModelTopPreviewScale(asset.intrinsicSize.width, asset.intrinsicSize.depth);
+  return `${scale.width * 100}% ${scale.height * 100}%`;
+}
+
+const AssetFootprintOverlay: React.FC<{ asset: ProjectModelAsset | undefined }> = ({ asset }) => {
+  const polygons = getAssetFootprintPolygonPoints(asset);
+  if (polygons.length === 0) return null;
+  return (
+    <svg className="pointer-events-none absolute inset-0 h-full w-full" preserveAspectRatio="none" viewBox="0 0 100 100">
+      {polygons.map((points, index) => (
+        <polygon key={`${points}-${index}`} points={points} fill="rgba(14,165,233,0.18)" stroke="rgba(125,211,252,0.85)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+      ))}
+    </svg>
+  );
 }
 
 export const Stage: React.FC<StageProps> = ({
@@ -170,14 +198,20 @@ export const Stage: React.FC<StageProps> = ({
   onZoom,
   stageConfig,
   mediaCache = {},
+  modelAssets = {},
+  modelFloorplanPreviewUrls = {},
   onOpenNoteDrawer,
   onPerformerContextMenu,
+  placementPreview = null,
+  onPlaceAsset,
+  onCancelPlacement,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
   const [panState, setPanState] = useState<PanState | null>(null);
+  const [placementPosition, setPlacementPosition] = useState<Position>({ x: 50, y: 50 });
   const [availableSize, setAvailableSize] = useState({ width: 0, height: 0 });
   const [viewportScale, setViewportScale] = useState(1);
   const [viewportOffset, setViewportOffset] = useState({ x: 0, y: 0 });
@@ -185,6 +219,12 @@ export const Stage: React.FC<StageProps> = ({
   const lockedPerformerIdSet = useMemo(() => new Set(lockedPerformerIds), [lockedPerformerIds]);
   const wingWidth = getWingWidth(stageConfig);
   const totalStageWidth = getTotalStageWidth(stageConfig);
+  const placementFloorplanUrl = placementPreview
+    ? modelFloorplanPreviewUrls[placementPreview.asset.id]
+      ?? (placementPreview.asset.floorplanVersion === 1
+        ? placementPreview.asset.floorplan?.runtimeUrl
+        : undefined)
+    : undefined;
   const gridMarks = useMemo(
     () => createCenteredStageGridMarks(totalStageWidth, gridScale),
     [gridScale, totalStageWidth],
@@ -257,6 +297,7 @@ export const Stage: React.FC<StageProps> = ({
     startClientY: number;
     startWidth: number;
     startHeight: number;
+    startObjectHeight: number;
     handle: 'nw' | 'ne' | 'sw' | 'se';
   }
   const [resizeState, setResizeState] = useState<ResizeState | null>(null);
@@ -274,8 +315,8 @@ export const Stage: React.FC<StageProps> = ({
     });
   }, [performers, hiddenGroupIds]);
   const platformOccupancy = useMemo(
-    () => buildPlatformOccupancy(visiblePerformers, positions, stageConfig),
-    [visiblePerformers, positions, stageConfig],
+    () => buildPlatformOccupancy(visiblePerformers, positions, stageConfig, modelAssets, rotations),
+    [visiblePerformers, positions, stageConfig, modelAssets, rotations],
   );
 
   // Convert client coordinates to percentage relative to stage
@@ -419,11 +460,26 @@ export const Stage: React.FC<StageProps> = ({
       startClientY: e.clientY,
       startWidth: currentWidth || 1,
       startHeight: currentHeight || 1,
+      startObjectHeight: performers.find((performer) => performer.id === id)?.height ?? 1,
       handle
     });
   };
 
   const handlePointerDown = (e: React.PointerEvent) => {
+    if (placementPreview) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.button === 2) {
+        onCancelPlacement?.();
+      } else if (e.button === 0) {
+        const next = getPercentagePos(e.clientX, e.clientY);
+        onPlaceAsset?.({
+          x: Math.max(stageXBounds.min, Math.min(stageXBounds.max, next.x)),
+          y: Math.max(0, Math.min(100, next.y)),
+  });
+}
+      return;
+    }
     if (e.button === 2 && e.ctrlKey) {
       e.preventDefault();
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -456,6 +512,14 @@ export const Stage: React.FC<StageProps> = ({
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
+    if (placementPreview) {
+      const next = getPercentagePos(e.clientX, e.clientY);
+      setPlacementPosition({
+        x: Math.max(stageXBounds.min, Math.min(stageXBounds.max, next.x)),
+        y: Math.max(0, Math.min(100, next.y)),
+      });
+      return;
+    }
     if (panState) {
       setViewportOffset({
         x: panState.initialOffsetX + (e.clientX - panState.startX),
@@ -507,7 +571,19 @@ export const Stage: React.FC<StageProps> = ({
       const newDepth = Math.max(0.1, resizeState.startHeight + (deltaH * metersPerPx * 2));
 
       // width(长) for 2D x-axis, depth(宽) for 2D y-axis
-      onUpdatePerformer(resizeState.id, { width: newWidth, depth: newDepth });
+      const resizingPerformer = performers.find((performer) => performer.id === resizeState.id);
+      if (resizingPerformer?.modelAspectLocked) {
+        const widthRatio = newWidth / resizeState.startWidth;
+        const depthRatio = newDepth / resizeState.startHeight;
+        const ratio = Math.abs(deltaW) >= Math.abs(deltaH) ? widthRatio : depthRatio;
+        onUpdatePerformer(resizeState.id, {
+          width: Math.max(0.1, resizeState.startWidth * ratio),
+          depth: Math.max(0.1, resizeState.startHeight * ratio),
+          height: Math.max(0.1, resizeState.startObjectHeight * ratio),
+        });
+      } else {
+        onUpdatePerformer(resizeState.id, { width: newWidth, depth: newDepth });
+      }
       return;
     }
 
@@ -674,6 +750,11 @@ export const Stage: React.FC<StageProps> = ({
   };
 
   const handleContextMenu = (e: React.MouseEvent) => {
+    if (placementPreview) {
+      e.preventDefault();
+      onCancelPlacement?.();
+      return;
+    }
     if (e.ctrlKey || panState) {
       e.preventDefault();
     }
@@ -776,7 +857,7 @@ export const Stage: React.FC<StageProps> = ({
           width: fittedSize.width > 0 ? `${fittedSize.width}px` : '100%',
           height: fittedSize.height > 0 ? `${fittedSize.height}px` : 'auto',
           aspectRatio: `${visualAspectRatio}`,
-          cursor: panState ? 'grabbing' : mode === ToolMode.SELECT ? 'default' : 'crosshair',
+          cursor: placementPreview ? 'crosshair' : panState ? 'grabbing' : mode === ToolMode.SELECT ? 'default' : 'crosshair',
           transform: `translate(${viewportOffset.x}px, ${viewportOffset.y}px) scale(${viewportScale})`,
           transformOrigin: 'center center',
           transition: panState ? 'none' : 'transform 75ms ease-out',
@@ -788,6 +869,26 @@ export const Stage: React.FC<StageProps> = ({
         onWheel={handleWheel}
         onContextMenu={handleContextMenu}
       >
+        {placementPreview && (
+          <div
+            className="pointer-events-none absolute z-[60] grid -translate-x-1/2 -translate-y-1/2 place-items-center border-2 border-dashed border-cyan-300 bg-cyan-400/20 shadow-[0_0_24px_rgba(34,211,238,0.35)]"
+            style={{
+              left: `${stageXToViewPercent(placementPosition.x, stageConfig)}%`,
+              top: `${placementPosition.y}%`,
+              width: `${placementPreview.width / totalStageWidth * 100}%`,
+              height: `${placementPreview.depth / stageConfig.depth * 100}%`,
+              backgroundImage: placementFloorplanUrl
+                ? `url(${placementFloorplanUrl})`
+                : undefined,
+              backgroundSize: getAssetFloorplanBackgroundSize(placementPreview.asset),
+              backgroundPosition: 'center',
+              backgroundRepeat: 'no-repeat',
+            }}
+          >
+            <AssetFootprintOverlay asset={placementPreview.asset} />
+            <span className="relative rounded bg-slate-950/80 px-2 py-1 text-[10px] text-cyan-100">高 {placementPreview.height.toFixed(2)}m</span>
+          </div>
+        )}
         {backgroundUrl && (
           <img
             src={backgroundUrl}
@@ -944,12 +1045,17 @@ export const Stage: React.FC<StageProps> = ({
 
           // Render Prop
           if (performer.type === 'prop') {
+            const modelAsset = performer.modelAssetId ? modelAssets[performer.modelAssetId] : undefined;
             const performerDims = getPerformerDimensions(performer);
             const STAGE_DEPTH_METERS = stageConfig.depth;
             const isPlatform = isPlatformProp(performer);
             const isOccupiedPlatform = platformOccupancy.occupiedPlatformIds.has(performer.id);
             const propLift = platformOccupancy.entityLiftById[performer.id] ?? 0;
             const displayPos = getPropCenterFromAnchor(pos, rotation, performer, stageConfig);
+            const floorplanUrl = modelAsset
+              ? modelFloorplanPreviewUrls[modelAsset.id]
+                ?? (modelAsset.floorplanVersion === 1 ? modelAsset.floorplan?.runtimeUrl : undefined)
+              : undefined;
             const labelFontSize = getStageLabelFontSize(
               performer,
               stageConfig.performerLabelFontSize,
@@ -977,7 +1083,7 @@ export const Stage: React.FC<StageProps> = ({
                   top: `${displayPos.y}%`,
                   width: `${widthPct}%`,
                   height: `${heightPct}%`,
-                  backgroundColor: performer.color,
+                  backgroundColor: floorplanUrl ? 'transparent' : performer.color,
                   transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
                   border: isSelected
                     ? '2px solid white'
@@ -989,15 +1095,16 @@ export const Stage: React.FC<StageProps> = ({
                     : isOccupiedPlatform
                       ? '0 0 0 2px rgba(251,191,36,0.25)'
                       : 'none',
-                  backgroundImage: performer.boxTextures?.front?.dataUrl || performer.textureDataUrl
-                    ? `url(${performer.boxTextures?.front?.dataUrl || performer.textureDataUrl})`
+                  backgroundImage: floorplanUrl
+                    ? `url(${floorplanUrl})`
                     : undefined,
-                  backgroundSize: 'cover',
+                  backgroundSize: getAssetFloorplanBackgroundSize(modelAsset),
                   backgroundPosition: 'center',
-                  clipPath: getPolygonClipPath(performer.polygonPoints),
+                  backgroundRepeat: 'no-repeat',
                   zIndex: isPlatform ? (isOccupiedPlatform ? 12 : 10) : propLift > 0 ? 13 : 11,
                 }}
               >
+                {isSelected && <AssetFootprintOverlay asset={modelAsset} />}
                 {/* Prop Label (Optional, maybe small text inside or standard label above) */}
                 <div
                   className="opacity-0 group-hover:opacity-100 text-white font-mono bg-black/50 px-1 rounded absolute pointer-events-none"

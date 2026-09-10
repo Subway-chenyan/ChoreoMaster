@@ -83,16 +83,6 @@ const EditorPanel3D: React.FC<EditorPanel3DProps> = ({ performer, position, onUp
             </div>
           </div>
         </div>
-        {isProp && performer.propGeometryType === 'extruded' && (
-          <div className="text-xs text-amber-400 bg-amber-400/10 rounded px-2 py-1 mt-2">
-            异形道具 ({(performer.polygonPoints?.length || 0)} 顶点)
-          </div>
-        )}
-        {isProp && performer.boxTextures && Object.keys(performer.boxTextures).length > 0 && (
-          <div className="text-xs text-blue-400 bg-blue-400/10 rounded px-2 py-1 mt-2">
-            {Object.keys(performer.boxTextures).length} 面贴图
-          </div>
-        )}
         <div className="space-y-2">
           <label className="text-xs text-slate-400">颜色</label>
           <div className="flex gap-2">

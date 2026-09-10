@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import isDev from 'electron-is-dev';
 import { getProjectStoragePath, registerIpcHandlers } from './ipc-handlers.js';
 import { resolveProjectAssetPath } from './project-service.js';
+import { resolveLibraryAssetPath } from './model-asset-service.js';
 import { updaterManager } from './updater.js';
 // ESM 兼容: 获取 __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -15,6 +16,16 @@ let mainWindow = null;
 protocol.registerSchemesAsPrivileged([
     {
         scheme: 'choreo-asset',
+        privileges: {
+            standard: true,
+            secure: true,
+            supportFetchAPI: true,
+            corsEnabled: true,
+            stream: true,
+        },
+    },
+    {
+        scheme: 'choreo-library',
         privileges: {
             standard: true,
             secure: true,
@@ -39,6 +50,8 @@ function contentTypeForPath(assetPath) {
         '.jpeg': 'image/jpeg',
         '.gif': 'image/gif',
         '.webp': 'image/webp',
+        '.glb': 'model/gltf-binary',
+        '.ktx2': 'image/ktx2',
     };
     return typeByExt[ext] ?? null;
 }
@@ -114,6 +127,27 @@ function registerProjectAssetProtocol() {
         }
         catch {
             return new Response('Project asset not found', { status: 404 });
+        }
+    });
+    protocol.handle('choreo-library', async (request) => {
+        try {
+            const url = new URL(request.url);
+            const scope = url.hostname;
+            if (scope !== 'asset' && scope !== 'staging') {
+                return new Response('Library asset not found', { status: 404 });
+            }
+            const pathParts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+            const id = pathParts.shift();
+            if (!id || !/^[a-zA-Z0-9\u4e00-\u9fff][a-zA-Z0-9\u4e00-\u9fff-]{0,159}$/u.test(id)) {
+                return new Response('Library asset not found', { status: 404 });
+            }
+            const relativePath = pathParts.join('/');
+            const storagePath = await getProjectStoragePath();
+            const assetPath = resolveLibraryAssetPath(storagePath, scope, id, relativePath);
+            return await respondWithProjectAsset(request, assetPath);
+        }
+        catch {
+            return new Response('Library asset not found', { status: 404 });
         }
     });
 }

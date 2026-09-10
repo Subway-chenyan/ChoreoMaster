@@ -5,10 +5,14 @@ import { pipeline } from 'stream/promises';
 import * as archiver from 'archiver';
 import unzipper from 'unzipper';
 import { normalizeFrames, normalizePerformers, normalizeTransitions } from './project-contract.js';
+import {
+  PROJECT_SCHEMA_VERSION,
+  createLegacyUnitBoxAsset,
+  normalizeProjectModelAssets,
+} from './model-asset-contract.js';
 import type {
   AudioMarker,
   ChoreographyDocument,
-  FaceTexture,
   Performer,
   PerformerNote,
   ProjectAssetKind,
@@ -22,13 +26,13 @@ import type {
   StageBackground,
   StageConfig,
 } from './project-contract.js';
+import type { ModelAssetFile, ProjectModelAsset } from './model-asset-contract.js';
 import {
   DEFAULT_PERFORMER_LABEL_FONT_SIZE,
   DEFAULT_PROP_LABEL_FONT_SIZE,
   normalizeLabelFontSize,
 } from './stage-defaults.js';
 
-const PROJECT_VERSION = '3.0';
 const PROJECT_FILE_NAME = 'project.json';
 const MAX_PACKAGE_ENTRIES = 500;
 const MAX_PACKAGE_EXTRACTED_BYTES = 512 * 1024 * 1024;
@@ -293,14 +297,31 @@ function parseProjectDocument(value: unknown, fallbackName: string): ProjectDocu
       DEFAULT_PROP_LABEL_FONT_SIZE,
     ),
   };
+  const sourceVersion = typeof value.version === 'string' ? value.version : '1.0';
+  const performers = normalizePerformers(value.performers).map((performer) => {
+    if (sourceVersion !== PROJECT_SCHEMA_VERSION && performer.type === 'prop') {
+      return {
+        ...performer,
+        modelAssetId: 'legacy-unit-box-v1',
+        modelAspectLocked: true,
+      };
+    }
+    return performer;
+  });
+  const modelAssets = normalizeProjectModelAssets(value.modelAssets);
+  if (sourceVersion !== PROJECT_SCHEMA_VERSION && performers.some((performer) => performer.type === 'prop')) {
+    const legacyAsset = createLegacyUnitBoxAsset();
+    modelAssets[legacyAsset.id] = legacyAsset;
+  }
   return {
-    version: typeof value.version === 'string' ? value.version : '1.0',
+    version: PROJECT_SCHEMA_VERSION,
     name: sanitizeName(typeof value.name === 'string' ? value.name : fallbackName),
     createdAt: typeof value.createdAt === 'string' ? value.createdAt : undefined,
     updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : undefined,
     musicName: typeof value.musicName === 'string' ? value.musicName : null,
     musicAsset: typeof value.musicAsset === 'string' ? value.musicAsset : null,
-    performers: normalizePerformers(value.performers),
+    modelAssets,
+    performers,
     performerGroups: Array.isArray(value.performerGroups)
       ? value.performerGroups as ProjectDocument['performerGroups']
       : [],
@@ -342,55 +363,45 @@ async function externalizeStageBackground(
   return { ...background, value: relativePath };
 }
 
-async function persistFaceTexture(
-  projectDir: string,
-  performerId: string,
-  slot: string,
-  texture: FaceTexture | undefined,
-): Promise<FaceTexture | undefined> {
-  if (!texture?.dataUrl?.startsWith('data:')) return texture;
-  const decoded = decodeDataUrl(texture.dataUrl);
-  if (!decoded) return texture;
-  const relativePath = `assets/props/${performerId}-${slot}-${Date.now()}${decoded.extension}`;
-  const targetPath = resolveInside(projectDir, relativePath);
-  await fs.mkdir(path.dirname(targetPath), { recursive: true });
-  await fs.writeFile(targetPath, decoded.buffer);
-  return { assetPath: relativePath, fileName: texture.fileName };
-}
-
-async function externalizePerformerTextures(projectDir: string, performer: Performer): Promise<Performer> {
-  const next: Performer = { ...performer };
-  if (next.textureDataUrl?.startsWith('data:')) {
-    const decoded = decodeDataUrl(next.textureDataUrl);
-    if (decoded) {
-      const relativePath = `assets/props/${next.id}-legacy-${Date.now()}${decoded.extension}`;
-      const targetPath = resolveInside(projectDir, relativePath);
-      await fs.mkdir(path.dirname(targetPath), { recursive: true });
-      await fs.writeFile(targetPath, decoded.buffer);
-      next.textureAssetPath = relativePath;
-      delete next.textureDataUrl;
-    }
-  }
-  if (next.boxTextures) {
-    const entries = await Promise.all(Object.entries(next.boxTextures).map(async ([slot, texture]) => [
-      slot,
-      await persistFaceTexture(projectDir, next.id, slot, texture),
-    ] as const));
-    next.boxTextures = Object.fromEntries(entries);
-  }
-  if (next.extrudedTextures) {
-    const entries = await Promise.all(Object.entries(next.extrudedTextures).map(async ([slot, texture]) => [
-      slot,
-      await persistFaceTexture(projectDir, next.id, slot, texture),
-    ] as const));
-    next.extrudedTextures = Object.fromEntries(entries);
-  }
-  return next;
-}
-
 function assetUrl(projectId: string, relativePath: string): string {
   const encodedPath = relativePath.split('/').map(encodeURIComponent).join('/');
   return `choreo-asset://asset/${encodeURIComponent(projectId)}/${encodedPath}`;
+}
+
+function dehydrateModelFile(file: ModelAssetFile | undefined): ModelAssetFile | undefined {
+  if (!file) return undefined;
+  return {
+    assetPath: file.assetPath,
+    ...(file.fileName ? { fileName: file.fileName } : {}),
+  };
+}
+
+function dehydrateProjectModelAssets(
+  assets: Record<string, ProjectModelAsset> | undefined,
+): Record<string, ProjectModelAsset> {
+  return Object.fromEntries(Object.entries(assets ?? {}).map(([id, asset]) => {
+    const payload = asset.payload.kind === 'glb'
+      ? { kind: 'glb' as const, file: dehydrateModelFile(asset.payload.file) as ModelAssetFile }
+      : {
+        kind: 'parametric' as const,
+        recipe: {
+          ...asset.payload.recipe,
+          parts: asset.payload.recipe.parts.map((part) => ({
+            ...part,
+            material: {
+              ...part.material,
+              baseColorTexture: dehydrateModelFile(part.material.baseColorTexture),
+            },
+          })),
+        },
+      };
+    return [id, {
+      ...asset,
+      thumbnail: dehydrateModelFile(asset.thumbnail),
+      floorplan: dehydrateModelFile(asset.floorplan),
+      payload,
+    }];
+  }));
 }
 
 async function assetExists(projectDir: string, relativePath: string): Promise<boolean> {
@@ -455,51 +466,53 @@ async function hydrateProject(
     }
   }
 
-  const hydrateTexture = async (texture: FaceTexture | undefined): Promise<FaceTexture | undefined> => {
-    if (!texture?.assetPath) return texture;
-    if (await assetExists(projectDir, texture.assetPath)) {
-      return { ...texture, dataUrl: assetUrl(projectId, texture.assetPath) };
+  const performers = document.performers;
+
+  const hydrateModelFile = async (
+    file: ModelAssetFile | undefined,
+    label: string,
+  ): Promise<ModelAssetFile | undefined> => {
+    if (!file?.assetPath) return file;
+    if (await assetExists(projectDir, file.assetPath)) {
+      return { ...file, runtimeUrl: assetUrl(projectId, file.assetPath) };
     }
     warnings.push({
       code: 'missing_asset',
-      resource: texture.assetPath,
-      message: `道具贴图缺失：${texture.assetPath}`,
+      resource: file.assetPath,
+      message: `${label}缺失：${file.assetPath}`,
     });
-    return { fileName: texture.fileName };
+    return { assetPath: file.assetPath, fileName: file.fileName };
   };
-
-  const performers = await Promise.all(document.performers.map(async (performer) => {
-    const next: Performer = { ...performer };
-    if (next.textureAssetPath) {
-      if (await assetExists(projectDir, next.textureAssetPath)) {
-        next.textureDataUrl = assetUrl(projectId, next.textureAssetPath);
-      } else {
-        warnings.push({
-          code: 'missing_asset',
-          resource: next.textureAssetPath,
-          message: `道具贴图缺失：${next.textureAssetPath}`,
-        });
+  const modelAssetEntries = await Promise.all(Object.entries(document.modelAssets).map(async ([id, asset]) => {
+    const payload = asset.payload.kind === 'glb'
+      ? {
+        kind: 'glb' as const,
+        file: await hydrateModelFile(asset.payload.file, '3D 模型文件') ?? asset.payload.file,
       }
-    }
-    if (next.boxTextures) {
-      const entries = await Promise.all(Object.entries(next.boxTextures).map(async ([slot, texture]) => [
-        slot,
-        await hydrateTexture(texture),
-      ] as const));
-      next.boxTextures = Object.fromEntries(entries);
-    }
-    if (next.extrudedTextures) {
-      const entries = await Promise.all(Object.entries(next.extrudedTextures).map(async ([slot, texture]) => [
-        slot,
-        await hydrateTexture(texture),
-      ] as const));
-      next.extrudedTextures = Object.fromEntries(entries);
-    }
-    return next;
+      : {
+        kind: 'parametric' as const,
+        recipe: {
+          ...asset.payload.recipe,
+          parts: await Promise.all(asset.payload.recipe.parts.map(async (part) => ({
+            ...part,
+            material: {
+              ...part.material,
+              baseColorTexture: await hydrateModelFile(part.material.baseColorTexture, '模型贴图'),
+            },
+          }))),
+        },
+      };
+    const hydrated: ProjectModelAsset = {
+      ...asset,
+      thumbnail: await hydrateModelFile(asset.thumbnail, '模型缩略图'),
+      floorplan: await hydrateModelFile(asset.floorplan, '模型俯视图'),
+      payload,
+    };
+    return [id, hydrated] as const;
   }));
 
   return {
-    data: { ...document, performers },
+    data: { ...document, performers, modelAssets: Object.fromEntries(modelAssetEntries) },
     projectPath: projectDir,
     audioUrl,
     mediaUrls,
@@ -520,12 +533,13 @@ export async function createManagedProject(
   await fs.mkdir(path.join(projectDir, 'assets/props'), { recursive: true });
   const now = new Date().toISOString();
   const project: ProjectDocument = {
-    version: PROJECT_VERSION,
+    version: PROJECT_SCHEMA_VERSION,
     name: safeName,
     createdAt: now,
     updatedAt: now,
     musicName: null,
     musicAsset: null,
+    modelAssets: {},
     performers: [],
     performerGroups: [],
     frames: [],
@@ -550,30 +564,30 @@ export async function saveManagedProject(
   const projectDir = resolveManagedProjectPath(storagePath, projectId);
   const projectPath = path.join(projectDir, PROJECT_FILE_NAME);
   const existing = parseProjectDocument(JSON.parse(await fs.readFile(projectPath, 'utf8')) as unknown, projectData.name);
+  const normalizedInput = parseProjectDocument(projectData, projectData.name || existing.name);
   if (hasRecoverableContent(existing)) {
     await createRecoverySnapshot(storagePath, projectId, existing);
   }
-  const performers = await Promise.all(
-    projectData.performers.map((performer) => externalizePerformerTextures(projectDir, performer)),
-  );
-  const background = await externalizeStageBackground(projectDir, projectData.stageConfig.background);
+  const performers = normalizedInput.performers;
+  const background = await externalizeStageBackground(projectDir, normalizedInput.stageConfig.background);
   const document: ProjectDocument = {
-    ...projectData,
-    version: PROJECT_VERSION,
-    name: projectData.name ? sanitizeName(projectData.name) : existing.name,
+    ...normalizedInput,
+    version: PROJECT_SCHEMA_VERSION,
+    name: normalizedInput.name ? sanitizeName(normalizedInput.name) : existing.name,
     createdAt: existing.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     performers,
-    audioMarkers: parseAudioMarkers(projectData.audioMarkers),
+    modelAssets: dehydrateProjectModelAssets(normalizedInput.modelAssets),
+    audioMarkers: parseAudioMarkers(normalizedInput.audioMarkers),
     stageConfig: {
-      ...projectData.stageConfig,
+      ...normalizedInput.stageConfig,
       background,
       showStageLines: projectData.stageConfig.showStageLines !== false,
       ledDistanceFromBack: Math.max(0, Math.min(
-        projectData.stageConfig.depth,
-        projectData.stageConfig.ledDistanceFromBack ?? 0,
+        normalizedInput.stageConfig.depth,
+        normalizedInput.stageConfig.ledDistanceFromBack ?? 0,
       )),
-      ledBottomHeight: Math.max(0, Math.min(30, projectData.stageConfig.ledBottomHeight ?? 0)),
+      ledBottomHeight: Math.max(0, Math.min(30, normalizedInput.stageConfig.ledBottomHeight ?? 0)),
     },
   };
   await writeJsonAtomically(projectPath, document);
@@ -770,10 +784,11 @@ export async function importChoreographyDocument(
   const created = await createManagedProject(storagePath, choreography.name);
   try {
     await saveManagedProject(storagePath, created.id, {
-      version: PROJECT_VERSION,
+      version: PROJECT_SCHEMA_VERSION,
       name: choreography.name,
       musicName: null,
       musicAsset: null,
+      modelAssets: {},
       performers: choreography.performers,
       performerGroups: choreography.performerGroups,
       frames: choreography.frames,
@@ -860,10 +875,8 @@ export async function restoreProjectRecoverySnapshot(
 
 function stripPerformerAssets(performer: Performer): Performer {
   const {
-    boxTextures: _boxTextures,
-    extrudedTextures: _extrudedTextures,
-    textureAssetPath: _textureAssetPath,
-    textureDataUrl: _textureDataUrl,
+    modelAssetId: _modelAssetId,
+    modelAspectLocked: _modelAspectLocked,
     ...portable
   } = performer;
   return portable;
@@ -913,7 +926,7 @@ function parseChoreographyDocument(value: unknown, fallbackName: string): Choreo
   }
   const document = parseProjectDocument({
     ...value,
-    version: PROJECT_VERSION,
+    version: PROJECT_SCHEMA_VERSION,
     musicName: null,
     musicAsset: null,
   }, fallbackName);
@@ -940,7 +953,7 @@ export async function importProjectPackage(
     const importedDocument: ProjectDocument = {
       ...document,
       name: importedName,
-      version: PROJECT_VERSION,
+      version: PROJECT_SCHEMA_VERSION,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };

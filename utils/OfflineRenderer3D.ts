@@ -1,7 +1,6 @@
 import * as THREE from 'three';
-import type { Performer, Position, StageConfig, LEDContent } from '../types';
+import type { Performer, Position, ProjectModelAsset, StageConfig, LEDContent } from '../types';
 import { mapTo3D, degToRad, getTotalStageWidth, getWingWidth } from './coordinates';
-import { denormalizePoints } from '../components/prop-editor/PolygonUtils';
 import { buildPlatformOccupancy, isPlatformProp } from './platforms';
 import { getPropCenterFromAnchor } from './prop-pivot';
 import { createCenteredStageGridMarks, STAGE_THIRD_POSITIONS } from './stage-grid';
@@ -12,6 +11,12 @@ import {
   getStageLabelFontSize,
   normalizeLabelFontSize,
 } from '../electron/stage-defaults';
+import {
+  createMissingModelPlaceholder,
+  createPreloadedModelAssetInstance,
+  preloadModelAssets,
+  releaseModelAssetInstance,
+} from './model-runtime';
 
 export type CameraAngle = 'judge' | 'overhead' | 'rear-overhead';
 
@@ -255,82 +260,44 @@ function createLabelSprite(text: string, height: number, fontSize: number): THRE
   return sprite;
 }
 
-/** Create face material matching Prop3D.tsx createFaceMaterial */
-function createFaceMaterial(faceTexture?: { dataUrl?: string }, fallbackColor: string = '#475569'): THREE.MeshStandardMaterial {
-  const mat = new THREE.MeshStandardMaterial({ color: fallbackColor, transparent: true, opacity: 1, side: THREE.FrontSide });
-  if (faceTexture?.dataUrl) {
-    const texture = new THREE.TextureLoader().load(faceTexture.dataUrl);
-    texture.colorSpace = THREE.SRGBColorSpace;
-    mat.map = texture;
-    mat.color.set('#ffffff');
-  }
-  return mat;
-}
-
 /** Create a prop mesh matching Prop3D.tsx */
-function createPropMesh(performer: Performer, includeDirectionArrow: boolean = true): THREE.Group {
+function createPropMesh(
+  performer: Performer,
+  modelAsset: ProjectModelAsset | undefined,
+  includeDirectionArrow: boolean = true,
+): THREE.Group {
   const group = new THREE.Group();
   const dims = { width: performer.width || 1, height: performer.height || 1, depth: performer.depth || 1 };
 
-  const isExtruded = performer.propGeometryType === 'extruded' &&
-    performer.polygonPoints && performer.polygonPoints.length >= 3;
-
-  if (isExtruded && performer.polygonPoints) {
-    const h = performer.extrudeHeight || dims.height;
-    const denorm = denormalizePoints(performer.polygonPoints, dims.width, dims.depth);
-    const cx = denorm.reduce((s, p) => s + p.x, 0) / denorm.length;
-    const cy = denorm.reduce((s, p) => s + p.y, 0) / denorm.length;
-    const shape = new THREE.Shape();
-    shape.moveTo(denorm[0].x - cx, denorm[0].y - cy);
-    for (let i = 1; i < denorm.length; i++) shape.lineTo(denorm[i].x - cx, denorm[i].y - cy);
-    shape.closePath();
-    const geo = new THREE.ExtrudeGeometry(shape, { depth: h, bevelEnabled: false });
-    geo.rotateX(-Math.PI / 2);
-    geo.translate(0, h / 2, 0);
-
-    const hasTextures = performer.extrudedTextures;
-    if (hasTextures) {
-      const mats = [
-        createFaceMaterial(hasTextures.side, performer.color),
-        createFaceMaterial(hasTextures.top, performer.color),
-        createFaceMaterial(hasTextures.bottom, performer.color),
-      ];
-      const mesh = new THREE.Mesh(geo, mats);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      group.add(mesh);
-    } else {
-      const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: performer.color }));
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      group.add(mesh);
+  if (modelAsset) {
+    try {
+      const instance = createPreloadedModelAssetInstance(modelAsset);
+      instance.scale.set(
+        dims.width / modelAsset.intrinsicSize.width,
+        dims.height / modelAsset.intrinsicSize.height,
+        dims.depth / modelAsset.intrinsicSize.depth,
+      );
+      instance.position.y = -dims.height / 2;
+      instance.userData.offlineModelAssetInstance = true;
+      group.add(instance);
+    } catch {
+      group.add(createMissingModelPlaceholder(dims.width, dims.height, dims.depth));
     }
-  } else {
-    // Box prop
-    const geo = new THREE.BoxGeometry(dims.width, dims.height, dims.depth);
-    const hasTextures = (performer.boxTextures && Object.keys(performer.boxTextures).length > 0) || performer.textureDataUrl;
-
-    if (hasTextures) {
-      const mats = [
-        createFaceMaterial(performer.boxTextures?.right, performer.color),
-        createFaceMaterial(performer.boxTextures?.left, performer.color),
-        createFaceMaterial(performer.boxTextures?.top, performer.color),
-        createFaceMaterial(performer.boxTextures?.bottom, performer.color),
-        createFaceMaterial(performer.boxTextures?.front || (performer.textureDataUrl ? { dataUrl: performer.textureDataUrl } : undefined), performer.color),
-        createFaceMaterial(performer.boxTextures?.back, performer.color),
-      ];
-      const mesh = new THREE.Mesh(geo, mats);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      group.add(mesh);
-    } else {
-      const mat = new THREE.MeshStandardMaterial({ color: performer.color });
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      group.add(mesh);
+    if (includeDirectionArrow) {
+      group.add(createDirectionArrow(
+        Math.max(0.75, Math.min(1.5, dims.width)),
+        -dims.height / 2 + 0.06,
+      ));
     }
+    return group;
   }
+
+  const geo = new THREE.BoxGeometry(dims.width, dims.height, dims.depth);
+  const mat = new THREE.MeshStandardMaterial({ color: performer.color });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  group.add(mesh);
 
   if (includeDirectionArrow) {
     group.add(createDirectionArrow(
@@ -365,7 +332,7 @@ function getTimelineVideoTime(video: HTMLVideoElement, timelineTimeSec: number, 
  * Create an offline 3D renderer that builds the same scene as Scene3D.
  * Returns renderer, scene, camera, and helpers for frame-by-frame rendering.
  */
-export function createOfflineScene(
+export async function createOfflineScene(
   width: number,
   height: number,
   stageConfig: StageConfig,
@@ -376,7 +343,8 @@ export function createOfflineScene(
   includeGrid: boolean = true,
   includeLabels: boolean = true,
   includeDirectionArrows: boolean = true,
-): OfflineSceneResult {
+  modelAssets: Record<string, ProjectModelAsset> = {},
+): Promise<OfflineSceneResult> {
   // Renderer
   const renderer = new THREE.WebGLRenderer({
     antialias: true,
@@ -388,6 +356,8 @@ export function createOfflineScene(
   renderer.shadowMap.enabled = true;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.0;
+  const modelPreloadResult = await preloadModelAssets(modelAssets, renderer);
+  modelPreloadResult.warnings.forEach((warning) => console.warn(`3D 导出模型降级：${warning}`));
 
   // Scene
   const scene = new THREE.Scene();
@@ -490,9 +460,10 @@ export function createOfflineScene(
   performers.forEach(p => {
     let mesh: THREE.Group;
     if (p.type === 'prop') {
-      mesh = createPropMesh(p, includeDirectionArrows);
+      const modelAsset = p.modelAssetId ? modelAssets[p.modelAssetId] : undefined;
+      mesh = createPropMesh(p, modelAsset, includeDirectionArrows);
       // Collect materials for cleanup
-      mesh.traverse(child => {
+      if (!modelAsset) mesh.traverse(child => {
         if (child instanceof THREE.Mesh) {
           if (Array.isArray(child.material)) {
             propMaterials.push(...child.material);
@@ -610,7 +581,7 @@ export function createOfflineScene(
     hiddenGroupIds: string[] = [],
   ): void {
     const visiblePerformers = performers.filter((p) => !p.groupId || !hiddenGroupIds.includes(p.groupId));
-    const platformOccupancy = buildPlatformOccupancy(visiblePerformers, positions, stageConfig);
+    const platformOccupancy = buildPlatformOccupancy(visiblePerformers, positions, stageConfig, modelAssets, rotations);
 
     performers.forEach(p => {
       const mesh = meshMap.get(p.id);
@@ -706,8 +677,11 @@ export function createOfflineScene(
 
     // Dispose all mesh geometries
     meshMap.forEach(mesh => {
+      mesh.children
+        .filter((child): child is THREE.Group => child instanceof THREE.Group && child.userData.offlineModelAssetInstance === true)
+        .forEach(releaseModelAssetInstance);
       mesh.traverse(child => {
-        if (child instanceof THREE.Mesh) {
+        if (child instanceof THREE.Mesh && child.userData.sharedModelAssetResource !== true) {
           child.geometry.dispose();
         } else if (child instanceof THREE.Sprite) {
           child.material.map?.dispose();
@@ -718,7 +692,7 @@ export function createOfflineScene(
 
     // Dispose floor and LED geometries
     scene.traverse(child => {
-      if (child instanceof THREE.Mesh) {
+      if (child instanceof THREE.Mesh && child.userData.sharedModelAssetResource !== true) {
         child.geometry.dispose();
       }
     });
@@ -733,22 +707,6 @@ export function createOfflineScene(
  * Pre-load all prop textures as data URLs (matching 2D export behavior).
  * Returns a promise that resolves when all textures are ready.
  */
-export async function preloadPropTextures(performers: Performer[]): Promise<void> {
-  const texturePromises = performers
-    .filter(p => p.type === 'prop')
-    .map(async (p) => {
-      const texUrl = p.boxTextures?.front?.dataUrl || p.textureDataUrl;
-      if (!texUrl) return;
-      const img = new Image();
-      await new Promise<void>((resolve, reject) => {
-        img.onload = () => resolve();
-        img.onerror = reject;
-        img.src = texUrl;
-      });
-    });
-  await Promise.all(texturePromises);
-}
-
 export async function preloadStageBackground(
   stageConfig: StageConfig,
   mediaCache: Record<string, string>,

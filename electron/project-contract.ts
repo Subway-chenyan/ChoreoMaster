@@ -1,3 +1,5 @@
+import type { ProjectModelAsset } from './model-asset-contract.js';
+
 export interface Position {
   x: number;
   y: number;
@@ -117,30 +119,8 @@ export interface SceneState {
 
 export type PerformerShape = 'circle' | 'square' | 'triangle';
 export type PerformerType = 'performer' | 'prop';
-export type PropGeometryType = 'box' | 'extruded';
 export type PropCategory = 'prop' | 'platform';
 export type PropRotationPivot = 'center' | 'left' | 'right';
-
-export interface FaceTexture {
-  dataUrl?: string;
-  assetPath?: string;
-  fileName?: string;
-}
-
-export interface BoxTextures {
-  front?: FaceTexture;
-  back?: FaceTexture;
-  left?: FaceTexture;
-  right?: FaceTexture;
-  top?: FaceTexture;
-  bottom?: FaceTexture;
-}
-
-export interface ExtrudedTextures {
-  side?: FaceTexture;
-  top?: FaceTexture;
-  bottom?: FaceTexture;
-}
 
 export interface Performer {
   id: string;
@@ -154,14 +134,8 @@ export interface Performer {
   height?: number;
   depth?: number;
   rotation?: number;
-  propGeometryType?: PropGeometryType;
-  boxTextures?: BoxTextures;
-  extrudedTextures?: ExtrudedTextures;
-  extrudeHeight?: number;
-  polygonPoints?: { x: number; y: number }[];
-  textureDataUrl?: string;
-  textureAssetPath?: string;
-  propShape?: 'rectangle' | 'ellipse' | 'triangle' | 'diamond' | 'hexagon' | 'custom';
+  modelAssetId?: string;
+  modelAspectLocked?: boolean;
   propCategory?: PropCategory;
   rotationPivot?: PropRotationPivot;
   boundToId?: string;
@@ -244,7 +218,18 @@ export function normalizePerformers(value: unknown): Performer[] {
     if (!isRecord(entry) || typeof entry.id !== 'string' || typeof entry.name !== 'string') {
       return [];
     }
-    const performer = { ...entry } as unknown as Performer;
+    const {
+      propGeometryType: _propGeometryType,
+      boxTextures: _boxTextures,
+      extrudedTextures: _extrudedTextures,
+      extrudeHeight: _extrudeHeight,
+      polygonPoints: _polygonPoints,
+      textureDataUrl: _textureDataUrl,
+      textureAssetPath: _textureAssetPath,
+      propShape: _propShape,
+      ...activeFields
+    } = entry;
+    const performer = { ...activeFields } as unknown as Performer;
     performer.rotationPivot = performer.type === 'prop' && performer.propCategory !== 'platform'
       && (entry.rotationPivot === 'left' || entry.rotationPivot === 'right')
       ? entry.rotationPivot
@@ -295,6 +280,7 @@ export interface ProjectDocument {
   updatedAt?: string;
   musicName?: string | null;
   musicAsset?: string | null;
+  modelAssets: Record<string, ProjectModelAsset>;
   performers: Performer[];
   performerGroups: PerformerGroup[];
   frames: Frame[];

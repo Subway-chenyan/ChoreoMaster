@@ -371,6 +371,28 @@ test('2D stage renders background, LED marker, arrows, and actor rotation contro
   assert.match(app, /showDirectionArrows=\{showDirectionArrows\}/);
 });
 
+test('2D stage and export render model assets from their real top view', async () => {
+  const [app, stage, thumbnail] = await Promise.all([
+    read('App.tsx'),
+    read('components/Stage.tsx'),
+    read('utils/model-thumbnail.ts'),
+  ]);
+
+  assert.match(thumbnail, /renderModelView\(model, 'top'\)/);
+  assert.match(thumbnail, /camera\.up\.set\(0, 0, -1\)/);
+  assert.match(thumbnail, /renderer\.setClearColor\(0x0f172a, view === 'front' \? 1 : 0\)/);
+  assert.match(stage, /modelFloorplanPreviewUrls\[modelAsset\.id\]/);
+  assert.match(stage, /backgroundImage: floorplanUrl/);
+  assert.match(stage, /backgroundSize: getAssetFloorplanBackgroundSize\(modelAsset\)/);
+  assert.match(app, /const getOrCreateModelFloorplanPreview = useCallback/);
+  assert.match(app, /asset\.floorplanVersion !== 1/);
+  assert.match(app, /generateModelAssetTopThumbnail\(asset\)/);
+  assert.match(app, /const create2DExportModelFloorplans = useCallback/);
+  assert.match(app, /const floorplanImage = modelAsset \? opts\?\.modelFloorplanImages\?\.\[modelAsset\.id\]/);
+  assert.match(app, /ctx\.drawImage\(\s*floorplanImage,/);
+  assert.equal((app.match(/modelFloorplanImages,/g) || []).length, 2);
+});
+
 test('performer editor keeps stepper controls contained and allows viewport scrolling', async () => {
   const [modal, controls] = await Promise.all([
     read('components/PerformerEditorModal.tsx'),
@@ -465,31 +487,44 @@ test('stage-front guide is rendered outside the playable stage in every 3D path'
   assert.match(offline, /depth \/ 2 \+ 0\.05/);
 });
 
-test('3D drag editing is transient and uses the shared interaction policy', async () => {
-  const [appSource, stage3DSource, scene3DSource] = await Promise.all([
+test('3D transform editing is transient and uses the shared interaction policy', async () => {
+  const [appSource, stage3DSource, scene3DSource, controlsSource, toolbarSource] = await Promise.all([
     read('App.tsx'),
     read('components/Stage3D.tsx'),
     read('3d_components/Scene3D.tsx'),
+    read('3d_components/StageTransformControls.tsx'),
+    read('components/three/TransformModeToolbar.tsx'),
   ]);
 
-  assert.match(appSource, /const \[is3DDragEnabled, setIs3DDragEnabled\] = useState\(false\)/);
+  assert.match(appSource, /const \[stageTransformMode, setStageTransformMode\] = useState<StageTransformMode>\('navigate'\)/);
+  assert.match(appSource, /const is3DDragEnabled = stageTransformMode === 'translate'/);
   assert.match(
     appSource,
-    /useEffect\(\(\) => \{\s*setIs3DDragEnabled\(false\);\s*\}, \[activeProjectClipboardKey\]\);/,
-  );
-  assert.match(appSource, /\{viewMode === '3d' && \([\s\S]{0,1200}aria-pressed=\{is3DDragEnabled\}/);
-  assert.match(appSource, /aria-label=\{is3DDragEnabled \? '锁定 3D 对象' : '启用 3D 拖动编辑'\}/);
-  assert.match(
-    appSource,
-    /aria-pressed=\{is3DDragEnabled\}[\s\S]{0,500}<span className="whitespace-nowrap text-xs font-medium">3D 拖动编辑<\/span>/,
+    /useEffect\(\(\) => \{\s*setStageTransformMode\('navigate'\);\s*\}, \[activeProjectClipboardKey\]\);/,
   );
   assert.match(appSource, /<Stage3D[\s\S]*dragEnabled=\{is3DDragEnabled\}/);
+  assert.match(appSource, /transformMode=\{stageTransformMode\}/);
+  assert.match(appSource, /onTransformModeChange=\{setStageTransformMode\}/);
+  assert.match(stage3DSource, /<TransformModeToolbar/);
+  assert.match(stage3DSource, /onResizeChange=\{\(id, dimensions\) => onUpdatePerformer\(id, dimensions\)\}/);
+  assert.match(scene3DSource, /<StageTransformControls/);
+  assert.match(scene3DSource, /suppressSceneClickRef\.current = true/);
+  assert.match(scene3DSource, /if \(!suppressSceneClickRef\.current\) onSelect\(''\)/);
+  assert.match(controlsSource, /mode=\{mode\}/);
+  assert.match(controlsSource, /onObjectChange=\{applyCurrentTransform\}/);
+  assert.match(appSource, /type: 'resize-performer'/);
+  assert.match(appSource, /last\.type === 'resize-performer'[\s\S]{0,220}last\.before/);
+  assert.match(appSource, /last\.type === 'resize-performer'[\s\S]{0,220}last\.after/);
+  assert.match(toolbarSource, /label: '观察', shortcut: 'Q'/);
+  assert.match(toolbarSource, /label: '位移', shortcut: 'W'/);
+  assert.match(toolbarSource, /label: '旋转', shortcut: 'E'/);
+  assert.match(toolbarSource, /label: '缩放', shortcut: 'R'/);
 
   const projectDocumentStart = appSource.indexOf('const buildProjectDocument = useCallback');
   const projectDocumentEnd = appSource.indexOf('// Initialize Audio Context', projectDocumentStart);
   assert.notEqual(projectDocumentStart, -1);
   assert.notEqual(projectDocumentEnd, -1);
-  assert.doesNotMatch(appSource.slice(projectDocumentStart, projectDocumentEnd), /is3DDragEnabled/);
+  assert.doesNotMatch(appSource.slice(projectDocumentStart, projectDocumentEnd), /stageTransformMode|is3DDragEnabled/);
 
   const projectSnapshotStart = appSource.indexOf('const getProjectStateString = useCallback');
   const projectSnapshotEnd = appSource.indexOf('// Track changes to project', projectSnapshotStart);
@@ -501,7 +536,7 @@ test('3D drag editing is transient and uses the shared interaction policy', asyn
     projectSnapshotSource,
     /latestProjectSnapshotRef\.current = \{\s*projectId: currentProjectId,\s*document: buildProjectDocument\(\),\s*state: currentProjectStateString,\s*\};/,
   );
-  assert.doesNotMatch(projectSnapshotSource, /is3DDragEnabled/);
+  assert.doesNotMatch(projectSnapshotSource, /stageTransformMode|is3DDragEnabled/);
 
   const appSyntaxTree = ts.createSourceFile(
     'App.tsx',
@@ -556,31 +591,28 @@ test('3D drag editing is transient and uses the shared interaction policy', asyn
   for (const call of localStorageCalls) {
     assert.doesNotMatch(
       call.getText(appSyntaxTree),
-      /\bis3DDragEnabled\b/,
-      '3D drag editing mode must remain outside localStorage calls',
+      /\b(?:stageTransformMode|is3DDragEnabled)\b/,
+      '3D transform editing mode must remain outside localStorage calls',
     );
   }
   for (const call of pushUndoActionCalls) {
     assert.doesNotMatch(
       call.getText(appSyntaxTree),
-      /\bis3DDragEnabled\b/,
-      '3D drag editing mode must remain outside undo history calls',
+      /\b(?:stageTransformMode|is3DDragEnabled)\b/,
+      '3D transform editing mode must remain outside undo history calls',
     );
   }
 
   assert.match(stage3DSource, /dragEnabled\?: boolean/);
   assert.match(stage3DSource, /dragEnabled=\{dragEnabled\}/);
-  assert.match(
-    scene3DSource,
-    /const interactionPolicy = resolveThreeInteractionPolicy\(\{\s*dragEnabled,\s*readonly,\s*isDragging,\s*\}\);/,
-  );
+  assert.match(scene3DSource, /isDragging: isDragging \|\| isObjectTransforming/);
   assert.match(
     scene3DSource,
     /onPositionChange: interactionPolicy\.canDragObjects && !isLocked\s*\? \(newPos: Position\) => handlePositionChange\(p\.id, newPos\)\s*: undefined/,
   );
-  assert.match(scene3DSource, /enableRotate=\{interactionPolicy\.enableRotate\}/);
-  assert.match(scene3DSource, /enablePan=\{interactionPolicy\.enablePan\}/);
-  assert.match(scene3DSource, /enableZoom=\{interactionPolicy\.enableZoom\}/);
+  assert.match(scene3DSource, /enableRotate=\{!placementPreview && interactionPolicy\.enableRotate\}/);
+  assert.match(scene3DSource, /enablePan=\{!placementPreview && interactionPolicy\.enablePan\}/);
+  assert.match(scene3DSource, /enableZoom=\{!placementPreview && interactionPolicy\.enableZoom\}/);
   assert.doesNotMatch(scene3DSource, /enableRotate=\{[^}]*hasSelection/);
 });
 
@@ -644,6 +676,64 @@ test('3D pointer lifecycle captures accepted drags and commits exact final updat
   assert.match(appSource, /if \(last\.type === 'move-performers'\)[\s\S]{0,260}last\.after/);
 });
 
+test('modeler viewport selects parts by clicking model geometry', async () => {
+  const source = await read('components/model-assets/ModelerWorkspace.tsx');
+
+  assert.match(source, /function findPartIdFromPointerEvent/);
+  assert.match(source, /event\.intersections\.map\(\(intersection\) => intersection\.object\)/);
+  assert.match(source, /useRef\(new THREE\.Raycaster\(\)\)/);
+  assert.match(source, /raycaster\.intersectObject\(model, true\)/);
+  assert.match(source, /canvas\.addEventListener\('pointerdown', handlePointerDown, true\)/);
+  assert.match(source, /canvas\.addEventListener\('pointercancel', finishTransform\)/);
+  assert.match(source, /canvas\.addEventListener\('lostpointercapture', finishTransform\)/);
+  assert.match(source, /transformDraggingRef\.current \|\| event\.button !== 0 \|\| event\.defaultPrevented/);
+  assert.match(source, /onMouseDown=\{\(\) => \{[\s\S]{0,120}transformDraggingRef\.current = true/);
+  assert.match(source, /<OrbitControls makeDefault enabled=\{!isTransforming\}/);
+  assert.match(source, /onPointerDown=\{\(event: ThreeEvent<PointerEvent>\)/);
+  assert.match(source, /onSelect\(partId\)/);
+  assert.match(source, /onPointerMissed=\{\(\) => setSelectedId\(null\)\}/);
+});
+
+test('modeler shortcuts switch transform tools without stealing text input', async () => {
+  const [source, toolbarSource] = await Promise.all([
+    read('components/model-assets/ModelerWorkspace.tsx'),
+    read('components/three/TransformModeToolbar.tsx'),
+  ]);
+
+  assert.match(source, /function isEditableKeyboardTarget/);
+  assert.match(source, /window\.addEventListener\('keydown', handleKeyDown\)/);
+  assert.match(source, /event\.ctrlKey \|\| event\.metaKey \|\| event\.altKey \|\| event\.shiftKey \|\| event\.repeat \|\| isEditableKeyboardTarget\(event\.target\)/);
+  assert.match(source, /key === 'w'[\s\S]{0,90}setMode\('translate'\)/);
+  assert.match(source, /key === 'e'[\s\S]{0,90}setMode\('rotate'\)/);
+  assert.match(source, /key === 'r'[\s\S]{0,90}setMode\('scale'\)/);
+  assert.match(source, /key === 's'[\s\S]{0,90}setSnap\(\(value\) => !value\)/);
+  assert.match(source, /<TransformModeToolbar/);
+  assert.match(source, /左键选择 · 拖动彩色控制轴 · 右键旋转视角 · 滚轮缩放视图/);
+  assert.match(toolbarSource, /<kbd/);
+  assert.match(toolbarSource, /吸附.*快捷键 S/);
+});
+
+test('model asset dialogs escape the sidebar stacking context', async () => {
+  const [glbImport, assetSidebar, sidebar] = await Promise.all([
+    read('components/model-assets/GlbImportDialog.tsx'),
+    read('components/model-assets/ModelAssetSidebar.tsx'),
+    read('components/Sidebar.tsx'),
+  ]);
+
+  assert.match(glbImport, /import \{ createPortal \} from 'react-dom'/);
+  assert.match(glbImport, /return createPortal\(/);
+  assert.match(glbImport, /z-\[100000\]/);
+  assert.match(glbImport, /document\.body,\s*\);/);
+  assert.match(assetSidebar, /import \{ createPortal \} from 'react-dom'/);
+  assert.match(assetSidebar, /deleteAsset && createPortal\(/);
+  assert.match(assetSidebar, /metadataEditor && createPortal\(/);
+  assert.match(assetSidebar, /z-\[100010\]/);
+  assert.match(assetSidebar, /document\.body\)\}/);
+  assert.match(sidebar, /colorPickerState\.show && createPortal\(/);
+  assert.match(sidebar, /z-\[100010\]/);
+  assert.match(sidebar, /document\.body,\s*\)\}/);
+});
+
 test('offline 3D renderer includes stage background, LED depth, and arrows', async () => {
   const offline = await read('utils/OfflineRenderer3D.ts');
 
@@ -653,7 +743,8 @@ test('offline 3D renderer includes stage background, LED depth, and arrows', asy
   assert.match(offline, /bottomHeight \+ height \/ 2/);
   assert.match(offline, /createDirectionArrow/);
   assert.match(offline, /includeDirectionArrows: boolean = true/);
-  assert.match(offline, /createPropMesh\(p, includeDirectionArrows\)/);
+  assert.match(offline, /createPropMesh\(p, modelAsset, includeDirectionArrows\)/);
+  assert.match(offline, /await preloadModelAssets\(modelAssets, renderer\)/);
   assert.match(offline, /createPerformerMesh\(p\.color, includeDirectionArrows\)/);
   assert.match(offline, /0\.14, 0\.055, 0\.64/);
   assert.match(offline, /0\.26, 0\.46, 16/);

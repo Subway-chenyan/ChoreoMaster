@@ -221,7 +221,7 @@ test('pastes a same-project formation without duplicating performers or props', 
   assert.deepEqual(pasted.frame.hiddenGroupIds, ['group-a']);
 });
 
-test('makes performer textures self-contained for another project', async () => {
+test('keeps active performer fields portable while model snapshots transfer separately', async () => {
   const sourceProp: Performer = {
     id: 'door',
     name: '门板',
@@ -229,27 +229,11 @@ test('makes performer textures self-contained for another project', async () => 
     label: '门',
     shape: 'square',
     type: 'prop',
-    textureDataUrl: 'choreo-asset://asset/source/assets/props/legacy.png',
-    textureAssetPath: 'assets/props/legacy.png',
-    boxTextures: {
-      front: {
-        dataUrl: 'choreo-asset://asset/source/assets/props/front.png',
-        assetPath: 'assets/props/front.png',
-        fileName: 'front.png',
-      },
-      back: {
-        dataUrl: 'data:image/png;base64,YmFjaw==',
-        assetPath: 'assets/props/back.png',
-        fileName: 'back.png',
-      },
-    },
-    extrudedTextures: {
-      side: {
-        dataUrl: 'choreo-asset://asset/source/assets/props/side.png',
-        assetPath: 'assets/props/side.png',
-        fileName: 'side.png',
-      },
-    },
+    width: 2,
+    height: 3,
+    depth: 0.2,
+    modelAssetId: 'snapshot-door-v2',
+    modelAspectLocked: true,
   };
   const loadedUrls: string[] = [];
 
@@ -258,14 +242,7 @@ test('makes performer textures self-contained for another project', async () => 
     return `data:image/png;base64,${Buffer.from(url).toString('base64')}`;
   });
 
-  assert.equal(loadedUrls.length, 3);
-  assert.ok(loadedUrls.every((url) => url.startsWith('choreo-asset:')));
-  assert.equal(portable.textureAssetPath, undefined);
-  assert.match(portable.textureDataUrl ?? '', /^data:image\/png/);
-  assert.equal(portable.boxTextures?.front?.assetPath, undefined);
-  assert.equal(portable.boxTextures?.front?.fileName, 'front.png');
-  assert.equal(portable.boxTextures?.back?.assetPath, undefined);
-  assert.equal(portable.boxTextures?.back?.dataUrl, 'data:image/png;base64,YmFjaw==');
-  assert.equal(portable.extrudedTextures?.side?.assetPath, undefined);
-  assert.equal(portable.extrudedTextures?.side?.fileName, 'side.png');
+  assert.equal(loadedUrls.length, 0);
+  assert.deepEqual(portable, sourceProp);
+  assert.notEqual(portable, sourceProp);
 });
