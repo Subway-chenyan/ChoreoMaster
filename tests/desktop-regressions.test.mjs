@@ -469,18 +469,21 @@ test('2D export direction arrows default toward the stage front', async () => {
   assert.match(app, /ctx\.lineTo\(0, arrowSize \* 0\.38\)/);
   assert.match(app, /ctx\.moveTo\(0, arrowSize \* 0\.55\)/);
   assert.match(app, /if \(showDirectionArrows\) \{\s*drawDirectionArrow/);
-  assert.match(app, /ctx\.rotate\(isRehearsalView \? -rot : rot\)/);
+  assert.match(app, /ctx\.rotate\(isRehearsalView \? rot \+ Math\.PI : rot\)/);
   assert.doesNotMatch(app, /ctx\.rotate\(-rot\)/);
 });
 
-test('export modal offers rehearsal-oriented 2D output with stage front on top', async () => {
+test('export modal offers rehearsal-oriented 2D output rotated into the performer viewpoint', async () => {
   const app = await read('App.tsx');
 
   assert.match(app, /type Export2DView = 'audience' \| 'rehearsal'/);
   assert.match(app, /const \[export2DView, setExport2DView\] = useState<Export2DView>\('audience'\)/);
   assert.match(app, /<span className="mb-2 block">2D 视角<\/span>/);
   assert.match(app, /<option value="rehearsal">演员排练视角<\/option>/);
+  assert.match(app, /const mapStageXRatio = \(ratio: number\) => renderX \+ \(isRehearsalView \? 1 - ratio : ratio\) \* renderW/);
   assert.match(app, /const mapStageYRatio = \(ratio: number\) => renderY \+ \(isRehearsalView \? 1 - ratio : ratio\) \* renderH/);
+  assert.match(app, /ctx\.translate\(renderX \* 2 \+ renderW, renderY \* 2 \+ renderH\)/);
+  assert.match(app, /ctx\.scale\(-1, -1\)/);
   assert.match(app, /const rulerY = isRehearsalView \? renderY : renderY \+ renderH - rulerHeight/);
   assert.match(app, /ctx\.fillText\('舞台前沿', Math\.floor\(renderX \+ renderW \/ 2\), isRehearsalView \? rulerY \+ rulerHeight - 2 \* scale : renderY \+ renderH - 2 \* scale\)/);
   assert.match(app, /`CosStage-export-\$\{export2DView\}-\$\{Math\.round\(inPointMs\)\}-\$\{Math\.round\(outPointMs\)\}`/);

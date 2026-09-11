@@ -876,11 +876,11 @@ const App: React.FC = () => {
         image.src = assetUrl;
       });
       return {
-        draw: async (ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, _timeMs: number, flipY?: boolean) => {
+        draw: async (ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, _timeMs: number, rotate180?: boolean) => {
           ctx.save();
-          if (flipY) {
-            ctx.translate(0, y * 2 + height);
-            ctx.scale(1, -1);
+          if (rotate180) {
+            ctx.translate(x * 2 + width, y * 2 + height);
+            ctx.scale(-1, -1);
           }
           ctx.drawImage(image, x, y, width, height);
           ctx.restore();
@@ -911,7 +911,7 @@ const App: React.FC = () => {
       });
 
       return {
-        draw: async (ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, timeMs: number, flipY?: boolean) => {
+        draw: async (ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, timeMs: number, rotate180?: boolean) => {
           if (video.readyState < HTMLMediaElement.HAVE_METADATA) return;
           const desired = getExportVideoTime(video, timeMs / 1000, video.loop);
           if (Math.abs(video.currentTime - desired) > 0.03) {
@@ -934,9 +934,9 @@ const App: React.FC = () => {
           }
           if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
             ctx.save();
-            if (flipY) {
-              ctx.translate(0, y * 2 + height);
-              ctx.scale(1, -1);
+            if (rotate180) {
+              ctx.translate(x * 2 + width, y * 2 + height);
+              ctx.scale(-1, -1);
             }
             ctx.drawImage(video, x, y, width, height);
             ctx.restore();
@@ -3652,7 +3652,7 @@ const App: React.FC = () => {
       bgColor?: string;
       stageBackgroundImage?: HTMLImageElement | null;
       modelFloorplanImages?: Record<string, HTMLImageElement>;
-      ledRenderer?: { draw: (ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, timeMs: number, flipY?: boolean) => Promise<void> | void } | null;
+      ledRenderer?: { draw: (ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, timeMs: number, rotate180?: boolean) => Promise<void> | void } | null;
       view?: Export2DView;
     }
   ) => {
@@ -3677,8 +3677,12 @@ const App: React.FC = () => {
     }
     const renderX = (w - renderW) / 2;
     const renderY = (h - renderH) / 2;
-    const leftMainEdge = renderX + stageXToViewPercent(0, stageConfig) / 100 * renderW;
-    const rightMainEdge = renderX + stageXToViewPercent(100, stageConfig) / 100 * renderW;
+    const mapStageXRatio = (ratio: number) => renderX + (isRehearsalView ? 1 - ratio : ratio) * renderW;
+    const mapStageXPercent = (percent: number) => mapStageXRatio(percent / 100);
+    const mainEdgeA = mapStageXPercent(stageXToViewPercent(0, stageConfig));
+    const mainEdgeB = mapStageXPercent(stageXToViewPercent(100, stageConfig));
+    const leftMainEdge = Math.min(mainEdgeA, mainEdgeB);
+    const rightMainEdge = Math.max(mainEdgeA, mainEdgeB);
     const mapStageYRatio = (ratio: number) => renderY + (isRehearsalView ? 1 - ratio : ratio) * renderH;
     const mapStageYPercent = (percent: number) => mapStageYRatio(percent / 100);
 
@@ -3690,8 +3694,8 @@ const App: React.FC = () => {
       ctx.save();
       ctx.globalAlpha = stageConfig.background?.opacity ?? 0.5;
       if (isRehearsalView) {
-        ctx.translate(0, renderY * 2 + renderH);
-        ctx.scale(1, -1);
+        ctx.translate(renderX * 2 + renderW, renderY * 2 + renderH);
+        ctx.scale(-1, -1);
       }
       ctx.drawImage(opts.stageBackgroundImage, renderX, renderY, renderW, renderH);
       ctx.restore();
@@ -3709,7 +3713,7 @@ const App: React.FC = () => {
       ctx.strokeStyle = '#94a3b8';
       ctx.lineWidth = scale;
       gridMarks.forEach((mark) => {
-        const gx = renderX + mark.positionRatio * renderW;
+        const gx = mapStageXRatio(mark.positionRatio);
         ctx.globalAlpha = mark.offsetMeters === 0 ? 0.55 : 0.2;
         ctx.lineWidth = (mark.offsetMeters === 0 ? 1.5 : 1) * scale;
         ctx.beginPath(); ctx.moveTo(gx, renderY); ctx.lineTo(gx, renderY + renderH); ctx.stroke();
@@ -3768,16 +3772,13 @@ const App: React.FC = () => {
       ctx.font = `${Math.round(11 * scale)}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
-      ctx.fillText('左备场区', renderX + (leftMainEdge - renderX) / 2, renderY + 10 * scale);
-      ctx.fillText('右备场区', rightMainEdge + (renderX + renderW - rightMainEdge) / 2, renderY + 10 * scale);
+      ctx.fillText('左备场区', mapStageXRatio((stageXToViewPercent(0, stageConfig) / 100) / 2), renderY + 10 * scale);
+      ctx.fillText('右备场区', mapStageXRatio((1 + stageXToViewPercent(100, stageConfig) / 100) / 2), renderY + 10 * scale);
     }
 
     const drawDirectionArrow = (size: number) => {
       const arrowSize = size * 1.35;
       ctx.save();
-      if (isRehearsalView) {
-        ctx.scale(1, -1);
-      }
       ctx.strokeStyle = '#ffffff';
       ctx.fillStyle = '#ffffff';
       ctx.lineWidth = Math.max(4, 3 * scale);
@@ -3813,7 +3814,7 @@ const App: React.FC = () => {
       const renderPosition = p.type === 'prop'
         ? getPropCenterFromAnchor(pos, rotation, p, stageConfig)
         : pos;
-      const cx = renderX + (stageXToViewPercent(renderPosition.x, stageConfig) / 100) * renderW;
+      const cx = mapStageXPercent(stageXToViewPercent(renderPosition.x, stageConfig));
       const cy = mapStageYPercent(renderPosition.y);
       const dimensions = getPerformerDimensions(p);
       const labelFontSize = getStageLabelFontSize(
@@ -3832,7 +3833,7 @@ const App: React.FC = () => {
 
         ctx.save();
         ctx.translate(cx, cy);
-        ctx.rotate(isRehearsalView ? -rot : rot);
+        ctx.rotate(isRehearsalView ? rot + Math.PI : rot);
 
         const assetFootprint = floorplanImage ? undefined : modelAsset?.footprints[0];
         if (assetFootprint && assetFootprint.length >= 3) {
@@ -3891,7 +3892,7 @@ const App: React.FC = () => {
         const performerD = Math.max(dimensions.depth / stageD * renderH, 18 * scale);
         ctx.save();
         ctx.translate(cx, cy);
-        ctx.rotate(isRehearsalView ? -rot : rot);
+        ctx.rotate(isRehearsalView ? rot + Math.PI : rot);
         ctx.fillStyle = p.color;
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 2 * scale;
@@ -3938,7 +3939,7 @@ const App: React.FC = () => {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
     gridMarks.forEach((mark) => {
-      const x = renderX + mark.positionRatio * renderW;
+      const x = mapStageXRatio(mark.positionRatio);
       ctx.beginPath();
       ctx.moveTo(x, rulerY);
       ctx.lineTo(x, rulerY + 7 * scale);
