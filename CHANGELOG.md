@@ -1,5 +1,11 @@
 # CosStage 变更记录
 
+## 1.3.1
+
+### Patch Changes
+
+- fcd7d60: 修复演员排练视角的舞台坐标转换，使其按真实视角同时翻转左右和前后。
+
 ## 1.3.0
 
 ### Minor Changes
