@@ -1,12 +1,14 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Performer, Frame, PerformerShape, PerformerGroup, PerformerType, PropCategory, AIConfig, AIChoreoPlan, ModelAssetManifest, ModelAssetSummary, ProjectModelAsset, ProjectTemplateData } from '../types';
+import { Performer, Frame, PerformerShape, PerformerGroup, PerformerType, AIConfig, AIChoreoPlan, ModelAssetManifest, ModelAssetSummary, ProjectModelAsset, ProjectTemplateData } from '../types';
 import { Plus, Users, Trash2, Download, Grid, Music, Sparkles, Wand2, Film, Copy, Search, Settings, Scaling, Upload, FilePlus, Circle, Square, Triangle, UserCheck, UserX, Eye, EyeOff, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreVertical, Palette, Edit2, Box, Library, Save, StickyNote, Lock, Unlock } from 'lucide-react';
 import { PRESET_SHAPES, DEFAULT_COLORS } from '../constants';
 import { StageConfig } from '../types';
 import { ProjectBrowser } from './ProjectBrowser';
 import ModelAssetSidebar from './model-assets/ModelAssetSidebar';
+import PropEditorModal from './PropEditorModal';
+import PerformerEditorModal from './PerformerEditorModal';
 import { ChoreoAgentModal } from './ChoreoAgentModal';
 import { EditableNumberInput, SelectField, StepperNumberField } from './FormControls';
 import { validateAgentAccess } from '../services/choreoAgentService';
@@ -270,12 +272,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const [newPerformerWidth, setNewPerformerWidth] = useState<number>(DEFAULT_PERFORMER_WIDTH);
     const [newPerformerDepth, setNewPerformerDepth] = useState<number>(DEFAULT_PERFORMER_DEPTH);
     const [newPerformerHeight, setNewPerformerHeight] = useState<number>(DEFAULT_PERFORMER_HEIGHT);
-    // Prop State (长 length, 宽 width, 高 height)
-    const [newPropWidth, setNewPropWidth] = useState<number>(0.5); // Default 0.5m (宽)
-    const [newPropDepth, setNewPropDepth] = useState<number>(0.5); // Default 0.5m (长)
-    const [newPropHeight, setNewPropHeight] = useState<number>(0.5); // Default 0.5m (高)
-    const [newPropCategory, setNewPropCategory] = useState<PropCategory>('prop');
-
     // Preset State
     const [presetScale, setPresetScale] = useState(0.8); // Default 80% size to be safe
 
@@ -287,6 +283,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
     // Group State
     const [showAddForm, setShowAddForm] = useState(false);
     const [showNewGroupForm, setShowNewGroupForm] = useState(false);
+    const [assetLibraryOpen, setAssetLibraryOpen] = useState(false);
+    const [propEditorState, setPropEditorState] = useState<{
+        mode: 'create' | 'edit';
+        performerId?: string;
+    } | null>(null);
+    const [batchEditorGroupId, setBatchEditorGroupId] = useState<string | null>(null);
     const [newGroupName, setNewGroupName] = useState('');
     const [newGroupColor, setNewGroupColor] = useState(DEFAULT_COLORS[0]);
     const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
@@ -315,8 +317,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
     // Ref for context menu click outside detection
     const contextMenuRef = useRef<HTMLDivElement>(null);
-    const useSingleColumnPropFields = isCompactLayout || widthPx < 360;
-
     const filteredPerformers = useMemo(() => {
         let list = performers;
         if (activeTab === 'performers') {
@@ -374,6 +374,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const contextMenuGroup = contextMenuState.groupId
         ? performerGroups.find((group) => group.id === contextMenuState.groupId)
         : undefined;
+    const batchEditorGroup = batchEditorGroupId
+        ? performerGroups.find((group) => group.id === batchEditorGroupId)
+        : undefined;
+    const batchEditorPerformers = useMemo(() => (
+        batchEditorGroup
+            ? performers.filter((performer) => (
+                performer.groupId === batchEditorGroup.id
+                && performer.type !== 'prop'
+                && !performer.locked
+            ))
+            : []
+    ), [batchEditorGroup, performers]);
 
     const handleAdd = () => {
         if (newPerformerName.trim()) {
@@ -382,23 +394,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 depth: newPerformerDepth,
                 height: newPerformerHeight,
                 rotation: 0,
-            });
-            setNewPerformerName('');
-            setShowAddForm(false);
-            const nextColorIndex = (DEFAULT_COLORS.indexOf(newPerformerColor) + 1) % DEFAULT_COLORS.length;
-            setNewPerformerColor(DEFAULT_COLORS[nextColorIndex]);
-        }
-    };
-
-    const handleAddProp = () => {
-        if (newPerformerName.trim()) {
-            onAddPerformer(newPerformerName, newPerformerColor, 'square', {
-                type: 'prop',
-                width: newPropWidth,
-                depth: newPropDepth,
-                height: newPropHeight,
-                rotation: 0,
-                propCategory: newPropCategory,
             });
             setNewPerformerName('');
             setShowAddForm(false);
@@ -451,9 +446,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
         if (newGroupName.trim()) {
             const type = activeTab === 'props' ? 'prop' : 'performer';
             const groupId = onAddGroup(newGroupName.trim(), newGroupColor, type);
-            // If performers are selected, add them to the new group
-            if (selectedPerformerIds.length > 0) {
-                onAddPerformersToGroup(selectedPerformerIds, groupId);
+            const compatibleSelectedIds = selectedPerformerIds.filter((performerId) => {
+                const performer = performers.find((candidate) => candidate.id === performerId);
+                if (!performer) return false;
+                return type === 'prop' ? performer.type === 'prop' : performer.type !== 'prop';
+            });
+            if (compatibleSelectedIds.length > 0) {
+                onAddPerformersToGroup(compatibleSelectedIds, groupId);
             }
             setNewGroupName('');
             setShowNewGroupForm(false);
@@ -662,7 +661,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     )}
                     {!isEffectivelyLocked && (
                         <>
-                    {onOpenNoteDrawer && (() => {
+                    {p.type !== 'prop' && onOpenNoteDrawer && (() => {
                         const noteCount = performerNotes.filter(n => n.performerId === p.id).length;
                         return (
                             <button
@@ -679,6 +678,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             </button>
                         );
                     })()}
+                    {p.type === 'prop' && (
+                        <button
+                            type="button"
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                setPropEditorState({ mode: 'edit', performerId: p.id });
+                            }}
+                            className="p-1 rounded text-slate-500 hover:bg-slate-700 hover:text-blue-300"
+                            title="编辑道具参数"
+                            aria-label={`编辑道具${p.name}`}
+                        >
+                            <Edit2 size={14} />
+                        </button>
+                    )}
                     <button
                         onClick={(e) => { e.stopPropagation(); onTogglePerformerInFrame(p.id); }}
                         className={`p-1 rounded ${inFrame ? 'text-blue-400 hover:text-white hover:bg-blue-600' : 'text-slate-600 hover:text-white hover:bg-green-600'}`}
@@ -1169,30 +1182,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     </div>
                 )}
 
-                {activeTab === 'props' && (
-                    <ModelAssetSidebar
-                        performers={performers}
-                        projectAssets={modelAssets}
-                        selectedIds={selectedPerformerIds}
-                        currentProjectId={currentProjectId}
-                        stageWidth={(stageConfig?.width ?? 20) + 2 * (stageConfig?.wingWidth ?? 0)}
-                        stageDepth={stageConfig?.depth ?? 11.25}
-                        onSelectionChange={onSelectionChange}
-                        onRemovePerformer={onRemovePerformer}
-                        onUpdatePerformer={onUpdatePerformer}
-                        onPlaceAsset={(asset, fitToStage) => onPlaceModelAsset?.(asset, fitToStage)}
-                        onOpenModeler={(asset) => onOpenModeler?.(asset)}
-                        onUpdateAssetVersion={onUpdateModelAssetVersion}
-                    />
-                )}
-
-                {/* PERFORMERS TAB */}
-                {(['performers'] as Tab[]).includes(activeTab) && (
+                {/* PERFORMERS / PROPS TAB */}
+                {(['performers', 'props'] as Tab[]).includes(activeTab) && (
                     <div className="h-full min-h-0 flex flex-col p-4 pb-3">
                         <div className="flex items-center justify-between mb-3">
                             <h2 className="text-sm font-bold text-slate-400 uppercase">{activeTab === 'props' ? '道具列表' : '演员列表'}</h2>
                             <span className="text-xs text-slate-500">{filteredPerformers.length} {activeTab === 'props' ? '个' : '人'}</span>
                         </div>
+
+                        {activeTab === 'props' && (
+                            <button
+                                type="button"
+                                onClick={() => setAssetLibraryOpen(true)}
+                                className="mb-3 flex w-full items-center justify-center gap-2 rounded-lg border border-blue-500/40 bg-blue-600/15 px-3 py-2.5 text-sm font-medium text-blue-200 transition-colors hover:bg-blue-600/25 hover:text-white"
+                            >
+                                <Library size={15} /> 打开 3D 资产库
+                            </button>
+                        )}
 
                         {/* Search */}
                         <div className="relative mb-3">
@@ -1209,18 +1215,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         <div className="grid grid-cols-2 gap-2 mb-3">
                             <button
                                 onClick={() => {
-                                    setShowAddForm((visible) => !visible);
+                                    if (activeTab === 'props') {
+                                        setPropEditorState({ mode: 'create' });
+                                    } else {
+                                        setShowAddForm((visible) => !visible);
+                                    }
                                     setShowNewGroupForm(false);
                                 }}
                                 className={`flex items-center justify-center gap-2 px-3 py-2 rounded border text-xs transition-colors ${
-                                    showAddForm
+                                    showAddForm && activeTab === 'performers'
                                         ? 'bg-blue-600/20 border-blue-500 text-blue-200'
                                         : 'bg-slate-800/50 hover:bg-slate-700/60 border-slate-700 text-slate-300'
                                 }`}
                             >
                                 <Plus size={14} />
-                                {showAddForm ? '收起添加' : activeTab === 'props' ? '添加道具' : '添加演员'}
-                                <ChevronDown size={13} className={`transition-transform ${showAddForm ? 'rotate-180' : ''}`} />
+                                {activeTab === 'props' ? '添加道具' : showAddForm ? '收起添加' : '添加演员'}
+                                {activeTab === 'performers' && <ChevronDown size={13} className={`transition-transform ${showAddForm ? 'rotate-180' : ''}`} />}
                             </button>
                             <button
                                 onClick={() => {
@@ -1238,60 +1248,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             </button>
                         </div>
 
-                        {/* Add New Performer / Prop */}
-                        {showAddForm && (activeTab === 'props' ? (
-                            <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700 mb-3">
-                                <div className="flex flex-col gap-3">
-                                    <input
-                                        type="text"
-                                        placeholder="道具名称"
-                                        className="w-full rounded-xl border border-slate-600 bg-slate-950/70 px-3 py-2.5 text-sm text-white outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                                        value={newPerformerName}
-                                        onChange={(e) => setNewPerformerName(e.target.value)}
-                                        onKeyDown={(e) => e.key === 'Enter' && handleAddProp()}
-                                    />
-                                    <div className={`grid gap-2 ${useSingleColumnPropFields ? 'grid-cols-1' : 'grid-cols-2'}`}>
-                                        <StepperNumberField label="长度" value={newPropWidth} min={0.1} step={0.1} onChange={setNewPropWidth} />
-                                        <StepperNumberField label="宽度" value={newPropDepth} min={0.1} step={0.1} onChange={setNewPropDepth} />
-                                        <StepperNumberField label="高度" value={newPropHeight} min={0.1} step={0.1} onChange={setNewPropHeight} />
-                                        <div className="rounded-xl border border-slate-700 bg-slate-900/80 p-3 shadow-sm shadow-slate-950/20">
-                                            <label className="mb-2 block text-[11px] font-medium tracking-wide text-slate-400">
-                                                颜色
-                                            </label>
-                                            <div className="flex items-center justify-center rounded-lg border border-slate-600 bg-slate-950/70 px-3 py-3">
-                                                <input
-                                                    type="color"
-                                                    value={newPerformerColor}
-                                                    onChange={(e) => setNewPerformerColor(e.target.value)}
-                                                    className="h-14 w-20 cursor-pointer rounded-lg border border-slate-500 bg-transparent p-1"
-                                                    title="道具颜色"
-                                                />
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className="grid grid-cols-1 gap-2">
-                                        <SelectField<PropCategory>
-                                            label="类型"
-                                            value={newPropCategory}
-                                            onChange={setNewPropCategory}
-                                            options={[
-                                                { value: 'prop', label: '道具' },
-                                                { value: 'platform', label: '高台' },
-                                            ]}
-                                            helperText={
-                                                newPropCategory === 'platform'
-                                                    ? `演员与高台占地碰撞时，将按当前道具高度 ${newPropHeight.toFixed(1)}m 抬升`
-                                                    : '普通道具不抬升演员高度'
-                                            }
-                                            helperTone={newPropCategory === 'platform' ? 'accent' : 'default'}
-                                        />
-                                    </div>
-                                    <button onClick={handleAddProp} className="w-full rounded-xl bg-blue-600 py-2.5 text-white flex items-center justify-center gap-2 text-sm font-semibold transition-all hover:bg-blue-500 active:scale-[0.99] shadow-lg shadow-blue-900/20">
-                                        <Plus size={14} /> 添加道具
-                                    </button>
-                                </div>
-                            </div>
-                        ) : (
+                        {/* Add New Performer */}
+                        {showAddForm && activeTab === 'performers' && (
                             <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700 mb-3">
                                 <div className="flex flex-col gap-3">
                                     <div className="flex gap-2 min-w-0 items-stretch">
@@ -1338,7 +1296,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                     </div>
                                 </div>
                             </div>
-                        ))}
+                        )}
 
                         {/* Add New Group Button */}
                         <div className={showNewGroupForm ? 'mb-3' : ''}>
@@ -1473,7 +1431,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                             <div className="ml-4 mt-1 space-y-1 border-l-2 border-slate-700 pl-2">
                                                 {groupPerformers.map(p => renderPerformerItem(p))}
                                                 {groupPerformers.length === 0 && (
-                                                    <div className="text-slate-600 text-xs py-2 italic text-center">拖动演员到此处</div>
+                                                    <div className="text-slate-600 text-xs py-2 italic text-center">拖动{activeTab === 'props' ? '道具' : '演员'}到此处</div>
                                                 )}
                                             </div>
                                         )}
@@ -1492,7 +1450,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                             : 'border-transparent text-slate-500'
                                             }`}
                                     >
-                                        <Users size={12} /> {dragState?.overUngrouped
+                                        {activeTab === 'props' ? <Box size={12} /> : <Users size={12} />} {dragState?.overUngrouped
                                             ? <>拖入 {dragState.performerIds.length} 项</>
                                             : <>未分组 ({performersByGroup.ungrouped.length})</>}
                                     </div>
@@ -1502,10 +1460,60 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 </div>
                             )}
 
-                            {performers.length === 0 && <div className="text-slate-600 text-center text-sm py-10 italic">尚未添加演员</div>}
+                            {filteredPerformers.length === 0 && (
+                                <div className="text-slate-600 text-center text-sm py-10 italic">
+                                    {searchQuery ? '没有匹配的结果' : activeTab === 'props' ? '尚未添加道具' : '尚未添加演员'}
+                                </div>
+                            )}
                         </div>
                     </div>
                 )}
+
+                <ModelAssetSidebar
+                    isOpen={assetLibraryOpen}
+                    currentProjectId={currentProjectId}
+                    stageWidth={(stageConfig?.width ?? 20) + 2 * (stageConfig?.wingWidth ?? 0)}
+                    stageDepth={stageConfig?.depth ?? 11.25}
+                    onClose={() => setAssetLibraryOpen(false)}
+                    onPlaceAsset={(asset, fitToStage) => onPlaceModelAsset?.(asset, fitToStage)}
+                    onOpenModeler={(asset) => onOpenModeler?.(asset)}
+                />
+
+                <PropEditorModal
+                    isOpen={propEditorState !== null}
+                    performer={propEditorState?.mode === 'edit' && propEditorState.performerId
+                        ? performers.find((performer) => performer.id === propEditorState.performerId) ?? null
+                        : null}
+                    asset={(() => {
+                        if (propEditorState?.mode !== 'edit' || !propEditorState.performerId) return undefined;
+                        const performer = performers.find((candidate) => candidate.id === propEditorState.performerId);
+                        return performer?.modelAssetId ? modelAssets[performer.modelAssetId] : undefined;
+                    })()}
+                    defaultColor={newPerformerColor}
+                    onClose={() => setPropEditorState(null)}
+                    onUpdateAssetVersion={propEditorState?.mode === 'edit' && propEditorState.performerId && onUpdateModelAssetVersion
+                        ? () => {
+                            const performerId = propEditorState.performerId;
+                            if (performerId) onUpdateModelAssetVersion(performerId);
+                        }
+                        : undefined}
+                    onSave={(updates) => {
+                        if (propEditorState?.mode === 'edit' && propEditorState.performerId) {
+                            onUpdatePerformer(propEditorState.performerId, updates);
+                        } else {
+                            const name = updates.name?.trim();
+                            if (!name) return;
+                            onAddPerformer(name, updates.color ?? newPerformerColor, 'square', {
+                                ...updates,
+                                type: 'prop',
+                                rotation: 0,
+                            });
+                            const nextColorIndex = (DEFAULT_COLORS.indexOf(newPerformerColor) + 1) % DEFAULT_COLORS.length;
+                            setNewPerformerColor(DEFAULT_COLORS[nextColorIndex]);
+                        }
+                        setPropEditorState(null);
+                    }}
+                />
 
                 {/* Context Menu */}
                 {contextMenuState.show && createPortal(
@@ -1610,18 +1618,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 )}
                                 {(() => {
                                     const targetPerformerId = contextMenuState.performerIds[0];
-                                    if (contextMenuState.performerIds.length === 1 && contextMenuState.performerType === 'performer') {
+                                    if (contextMenuState.performerIds.length === 1 && contextMenuState.performerType) {
                                         return (
                                             <>
                                                 <div className="h-px bg-slate-700 my-1"></div>
                                                 <button
                                                     onClick={() => {
-                                                        onOpenPerformerEditor(targetPerformerId);
+                                                        if (contextMenuState.performerType === 'prop') {
+                                                            setPropEditorState({ mode: 'edit', performerId: targetPerformerId });
+                                                        } else {
+                                                            onOpenPerformerEditor(targetPerformerId);
+                                                        }
                                                         closeContextMenu();
                                                     }}
                                                     className="w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 flex items-center gap-2"
                                                 >
-                                                    <Edit2 size={12} /> 编辑演员
+                                                    <Edit2 size={12} /> {contextMenuState.performerType === 'prop' ? '编辑道具参数' : '编辑演员'}
                                                 </button>
                                             </>
                                         );
@@ -1668,24 +1680,37 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 >
                                     <Edit2 size={12} /> 重命名
                                 </button>
-                                <button
-                                    onClick={() => {
-                                        if (contextMenuState.groupId) {
-                                            const group = performerGroups.find(g => g.id === contextMenuState.groupId);
-                                            if (group) {
-                                                setColorPickerState({
-                                                    show: true,
-                                                    groupId: group.id,
-                                                    color: group.color
-                                                });
-                                            }
-                                        }
-                                        closeContextMenu();
-                                    }}
-                                    className="w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 flex items-center gap-2"
-                                >
-                                    <Palette size={12} /> 更改颜色
-                                </button>
+                                {contextMenuGroup?.type === 'prop' ? (
+                                    <button
+                                        onClick={() => {
+                                            setColorPickerState({
+                                                show: true,
+                                                groupId: contextMenuGroup.id,
+                                                color: contextMenuGroup.color,
+                                            });
+                                            closeContextMenu();
+                                        }}
+                                        className="w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 flex items-center gap-2"
+                                    >
+                                        <Palette size={12} /> 更改颜色
+                                    </button>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        disabled={!contextMenuGroup || !performers.some((performer) => (
+                                            performer.groupId === contextMenuGroup.id
+                                            && performer.type !== 'prop'
+                                            && !performer.locked
+                                        ))}
+                                        onClick={() => {
+                                            if (contextMenuGroup) setBatchEditorGroupId(contextMenuGroup.id);
+                                            closeContextMenu();
+                                        }}
+                                        className="w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 disabled:cursor-not-allowed disabled:text-slate-600 disabled:hover:bg-transparent flex items-center gap-2"
+                                    >
+                                        <Edit2 size={12} /> 批量编辑
+                                    </button>
+                                )}
                                 <button
                                     onClick={() => {
                                         if (contextMenuState.groupId) onShowGroupInAllFrames(contextMenuState.groupId);
@@ -1833,6 +1858,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     onApplyPlan={onApplyAIPlan}
                 />
             </div>
+
+            <PerformerEditorModal
+                isOpen={Boolean(batchEditorGroup && batchEditorPerformers.length > 0)}
+                mode="batch"
+                performer={batchEditorPerformers[0] ?? null}
+                batchTitle={batchEditorGroup?.name}
+                batchCount={batchEditorPerformers.length}
+                onSave={(updates) => {
+                    if (!batchEditorGroup) return;
+                    onUpdateGroupPerformers(batchEditorGroup.id, updates);
+                    if (updates.color) onUpdateGroup(batchEditorGroup.id, { color: updates.color });
+                    setBatchEditorGroupId(null);
+                }}
+                onClose={() => setBatchEditorGroupId(null)}
+            />
 
             {/* Custom Color Picker Modal */}
             {colorPickerState.show && createPortal(

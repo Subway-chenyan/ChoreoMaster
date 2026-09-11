@@ -1,0 +1,7 @@
+{"path":".trellis/spec/frontend/react-pitfalls.md","reason":"React 状态与弹窗生命周期约束"}
+{"path":".trellis/spec/frontend/components.md","reason":"可滚动弹窗、空状态和语义化控件规范"}
+{"path":".trellis/spec/frontend/css-design.md","reason":"侧栏和弹窗视觉一致性"}
+{"path":".trellis/spec/frontend/type-safety.md","reason":"组件 props 与共享道具类型约束"}
+{"path":".trellis/spec/shared/code-quality.md","reason":"通用代码质量规则"}
+{"path":".trellis/spec/guides/pre-implementation-checklist.md","reason":"复用现有分组逻辑并避免重复实现"}
+{"path":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"演员与道具管理共用列表模式"}

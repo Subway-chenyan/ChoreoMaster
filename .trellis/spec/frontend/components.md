@@ -317,6 +317,32 @@ Pure utility tests must cover selected, unselected, missing, and mixed-type
 initiators; a renderer regression must assert that both context-menu and drop
 paths call the batch callbacks.
 
+### Performer Group Batch Appearance Editing
+
+Actor-group context menus expose `批量编辑` through the shared performer editor.
+Batch mode applies `color`, `shape`, `width`, `depth`, and `height` to every
+editable actor in the group while preserving each actor's `name` and `label`.
+The chosen color also updates the group color so the folder marker matches its
+members. Prop groups retain their prop-specific editing flow.
+
+Directly locked actors must be filtered from both the displayed batch count and
+the update path. A locked group, an empty group, or a group containing only
+locked actors must not open the editor. Initialize the shared form from the
+first editable actor and clearly state that saving normalizes all displayed
+appearance fields across the editable batch.
+
+```tsx
+// Good: reuse one editor and keep identity fields unchanged.
+<PerformerEditorModal mode="batch" performer={editableActors[0]} onSave={applyAppearance} />
+
+// Bad: reuse single-actor save data without filtering identity or locks.
+actors.forEach((actor) => update(actor.id, { ...form, name: form.name }));
+```
+
+Renderer regressions must assert the `批量编辑` entry, shared-editor batch mode,
+locked-actor filtering, identity preservation, group-color synchronization, and
+disabled behavior when no editable actor exists.
+
 ## Scenario: Sidebar Visibility and Reversible Deletion
 
 ### 1. Scope / Trigger

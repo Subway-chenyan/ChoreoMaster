@@ -1,0 +1,7 @@
+{
+  "title": "重构道具管理界面",
+  "status": "in_progress",
+  "scope": "frontend",
+  "createdAt": "2026-09-11",
+  "notes": "本机 uv 与 Python 运行时不可用，按 Trellis 契约手工管理任务。道具管理与演员分组批量编辑均已实现并通过类型、回归、构建和浏览器验收；等待用户确认提交。"
+}

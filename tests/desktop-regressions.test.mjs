@@ -413,6 +413,53 @@ test('performer editor keeps stepper controls contained and allows viewport scro
   assert.doesNotMatch(modal, /rotation,\s*\}\)/);
 });
 
+test('performer groups open the shared editor in batch mode', async () => {
+  const [sidebar, modal] = await Promise.all([
+    read('components/Sidebar.tsx'),
+    read('components/PerformerEditorModal.tsx'),
+  ]);
+
+  assert.match(sidebar, /<Edit2 size=\{12\} \/> 批量编辑/);
+  assert.match(sidebar, /mode="batch"/);
+  assert.match(sidebar, /onUpdateGroupPerformers\(batchEditorGroup\.id, updates\)/);
+  assert.match(sidebar, /if \(updates\.color\) onUpdateGroup\(batchEditorGroup\.id, \{ color: updates\.color \}\)/);
+  assert.match(sidebar, /performer\.type !== 'prop'[\s\S]{0,120}!performer\.locked/);
+  assert.match(modal, /const isBatchMode = mode === 'batch'/);
+  assert.match(modal, /应用到 \$\{batchCount\} 名演员/);
+  assert.match(modal, /if \(!isBatchMode\) updates\.name/);
+});
+
+test('prop management reuses grouped lists and moves detailed editing into dialogs', async () => {
+  const [sidebar, propModal, assetLibrary] = await Promise.all([
+    read('components/Sidebar.tsx'),
+    read('components/PropEditorModal.tsx'),
+    read('components/model-assets/ModelAssetSidebar.tsx'),
+  ]);
+
+  assert.match(sidebar, /\['performers', 'props'\]/);
+  assert.match(sidebar, /setAssetLibraryOpen\(true\)/);
+  assert.match(sidebar, /setPropEditorState\(\{ mode: 'create' \}\)/);
+  assert.match(sidebar, /setPropEditorState\(\{ mode: 'edit', performerId:/);
+  assert.match(sidebar, /activeTab === 'props' \? 'prop' : 'performer'/);
+  assert.match(sidebar, /const compatibleSelectedIds = selectedPerformerIds\.filter/);
+  assert.doesNotMatch(sidebar, /newPropWidth|newPropDepth|newPropHeight/);
+
+  assert.match(propModal, /return createPortal\(/);
+  assert.match(propModal, /StepperNumberField label="长度"/);
+  assert.match(propModal, /StepperNumberField label="宽度"/);
+  assert.match(propModal, /StepperNumberField label="高度"/);
+  assert.match(propModal, /SelectField<PropCategory>/);
+  assert.match(propModal, /SelectField<PropRotationPivot>/);
+  assert.match(propModal, /modelAspectLocked: aspectLocked/);
+  assert.match(propModal, /document\.body,\s*\);/);
+
+  assert.match(assetLibrary, /if \(!isOpen\) return null/);
+  assert.match(assetLibrary, /return createPortal\(/);
+  assert.match(assetLibrary, /<h2[^>]*>3D 资产库<\/h2>/);
+  assert.match(assetLibrary, /onPlaceAsset\(asset, fitToStage\);\s*onClose\(\);/);
+  assert.doesNotMatch(assetLibrary, /当前项目 ·/);
+});
+
 test('2D export direction arrows default toward the stage front', async () => {
   const app = await read('App.tsx');
 
@@ -728,7 +775,7 @@ test('model asset dialogs escape the sidebar stacking context', async () => {
   assert.match(assetSidebar, /deleteAsset && createPortal\(/);
   assert.match(assetSidebar, /metadataEditor && createPortal\(/);
   assert.match(assetSidebar, /z-\[100010\]/);
-  assert.match(assetSidebar, /document\.body\)\}/);
+  assert.match(assetSidebar, /document\.body,\s*\)\}/);
   assert.match(sidebar, /colorPickerState\.show && createPortal\(/);
   assert.match(sidebar, /z-\[100010\]/);
   assert.match(sidebar, /document\.body,\s*\)\}/);

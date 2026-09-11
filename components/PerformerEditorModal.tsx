@@ -11,6 +11,9 @@ import { StepperNumberField } from './FormControls';
 interface PerformerEditorModalProps {
   isOpen: boolean;
   performer?: Performer | null;
+  mode?: 'single' | 'batch';
+  batchTitle?: string;
+  batchCount?: number;
   onSave: (updates: Partial<Performer>) => void;
   onClose: () => void;
 }
@@ -24,6 +27,9 @@ const SHAPE_OPTIONS: { value: PerformerShape; label: string; icon: typeof Circle
 export function PerformerEditorModal({
   isOpen,
   performer,
+  mode = 'single',
+  batchTitle,
+  batchCount = 0,
   onSave,
   onClose,
 }: PerformerEditorModalProps) {
@@ -44,8 +50,31 @@ export function PerformerEditorModal({
 
   if (!isOpen || !performer) return null;
 
+  const isBatchMode = mode === 'batch';
+  const modalTitle = isBatchMode ? '批量编辑演员' : '编辑演员';
+  const previewLabel = isBatchMode
+    ? `${batchTitle || '当前分组'} · ${batchCount} 人`
+    : name.trim() || '演员名称';
+
+  const handleSave = () => {
+    const updates: Partial<Performer> = {
+      color,
+      shape,
+      width: size,
+      depth: size,
+      height,
+    };
+    if (!isBatchMode) updates.name = name.trim() || performer.name;
+    onSave(updates);
+  };
+
   return createPortal(
-    <div className="fixed inset-0 z-[2147483000] overflow-y-auto bg-black/60 backdrop-blur-sm">
+    <div
+      className="fixed inset-0 z-[2147483000] overflow-y-auto bg-black/60 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="performer-editor-title"
+    >
       <div className="flex min-h-full items-start justify-center p-4 sm:p-6">
       <div className="w-full max-w-5xl overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
         <div className="flex items-center justify-between border-b border-slate-700 bg-slate-800/60 px-5 py-4">
@@ -54,15 +83,19 @@ export function PerformerEditorModal({
               <UserRound size={18} />
             </div>
             <div>
-              <h2 className="text-base font-semibold text-white">编辑演员</h2>
-              <p className="text-xs text-slate-400">修改名称、外观、尺寸和高度</p>
+              <h2 id="performer-editor-title" className="text-base font-semibold text-white">{modalTitle}</h2>
+              <p className="text-xs text-slate-400">
+                {isBatchMode
+                  ? `统一调整“${batchTitle || '当前分组'}”中 ${batchCount} 名演员的外观和尺寸`
+                  : '修改名称、外观、尺寸和高度'}
+              </p>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
             className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-700 hover:text-white"
-            aria-label="关闭演员编辑面板"
+            aria-label={`关闭${modalTitle}面板`}
           >
             <X size={18} />
           </button>
@@ -70,16 +103,18 @@ export function PerformerEditorModal({
 
         <div className="grid gap-4 px-5 py-5 lg:grid-cols-[1.1fr_1fr]">
           <div className="space-y-4">
-            <div className="rounded-xl border border-slate-700 bg-slate-800/60 p-4">
-              <label className="mb-2 block text-xs font-medium tracking-wide text-slate-400">名称</label>
-              <input
-                type="text"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                className="w-full rounded-lg border border-slate-600 bg-slate-950/70 px-3 py-2.5 text-sm text-white outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                placeholder="输入演员名称"
-              />
-            </div>
+            {!isBatchMode && (
+              <div className="rounded-xl border border-slate-700 bg-slate-800/60 p-4">
+                <label className="mb-2 block text-xs font-medium tracking-wide text-slate-400">名称</label>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  className="w-full rounded-lg border border-slate-600 bg-slate-950/70 px-3 py-2.5 text-sm text-white outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                  placeholder="输入演员名称"
+                />
+              </div>
+            )}
 
             <div className="rounded-xl border border-slate-700 bg-slate-800/60 p-4">
               <div className="mb-3 text-xs font-medium tracking-wide text-slate-400">形状</div>
@@ -166,12 +201,14 @@ export function PerformerEditorModal({
                     />
                   )}
                   <div className="pointer-events-none absolute left-1/2 top-full mt-4 -translate-x-1/2 whitespace-nowrap rounded bg-slate-900/90 px-3 py-1 text-sm font-medium text-white shadow-lg">
-                    {name.trim() || '演员名称'}
+                    {previewLabel}
                   </div>
                 </div>
               </div>
               <p className="mt-3 text-xs leading-5 text-slate-400">
-                尺寸会等比例调整演员在舞台上的占地显示，高度会影响 3D 视图中的人物高度与标签位置。
+                {isBatchMode
+                  ? `保存后会将当前形状、颜色、尺寸和高度应用到 ${batchCount} 名可编辑演员，名称保持不变。`
+                  : '尺寸会等比例调整演员在舞台上的占地显示，高度会影响 3D 视图中的人物高度与标签位置。'}
               </p>
             </div>
           </div>
@@ -187,17 +224,10 @@ export function PerformerEditorModal({
           </button>
           <button
             type="button"
-            onClick={() => onSave({
-              name: name.trim() || performer.name,
-              color,
-              shape,
-              width: size,
-              depth: size,
-              height,
-            })}
+            onClick={handleSave}
             className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-500"
           >
-            保存
+            {isBatchMode ? `应用到 ${batchCount} 名演员` : '保存'}
           </button>
         </div>
       </div>
