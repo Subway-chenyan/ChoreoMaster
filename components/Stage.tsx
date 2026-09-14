@@ -19,6 +19,7 @@ import {
 } from '../utils/stage-grid';
 import { getLedStageYPercent, resolveStageBackgroundUrl } from '../utils/stage-config';
 import { getModelTopPreviewScale } from '../utils/model-preview-layout';
+import { getModelAssetDefaultColor } from '../utils/model-runtime';
 import { getPerformerDimensions, getStageLabelFontSize } from '../electron/stage-defaults';
 
 interface StageProps {
@@ -1056,6 +1057,11 @@ export const Stage: React.FC<StageProps> = ({
               ? modelFloorplanPreviewUrls[modelAsset.id]
                 ?? (modelAsset.floorplanVersion === 1 ? modelAsset.floorplan?.runtimeUrl : undefined)
               : undefined;
+            // 道具颜色被用户改过时，用颜色覆盖俯视图轮廓，保持颜色可见。
+            const assetDefaultColor = modelAsset ? getModelAssetDefaultColor(modelAsset) : undefined;
+            const isColorOverridden = !!assetDefaultColor
+              && assetDefaultColor.toLowerCase() !== (performer.color || '').toLowerCase();
+            const floorplanMaskSize = getAssetFloorplanBackgroundSize(modelAsset);
             const labelFontSize = getStageLabelFontSize(
               performer,
               stageConfig.performerLabelFontSize,
@@ -1104,6 +1110,23 @@ export const Stage: React.FC<StageProps> = ({
                   zIndex: isPlatform ? (isOccupiedPlatform ? 12 : 10) : propLift > 0 ? 13 : 11,
                 }}
               >
+                {isColorOverridden && floorplanUrl && (
+                  <div
+                    aria-hidden
+                    className="pointer-events-none absolute inset-0"
+                    style={{
+                      backgroundColor: performer.color,
+                      WebkitMaskImage: `url(${floorplanUrl})`,
+                      maskImage: `url(${floorplanUrl})`,
+                      WebkitMaskSize: floorplanMaskSize,
+                      maskSize: floorplanMaskSize,
+                      WebkitMaskPosition: 'center',
+                      maskPosition: 'center',
+                      WebkitMaskRepeat: 'no-repeat',
+                      maskRepeat: 'no-repeat',
+                    }}
+                  />
+                )}
                 {isSelected && <AssetFootprintOverlay asset={modelAsset} />}
                 {/* Prop Label (Optional, maybe small text inside or standard label above) */}
                 <div

@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Box, Copy, Edit3, Library, Plus, Search, Trash2, Upload, X } from 'lucide-react';
 import type { GlbImportSession, ModelAssetManifest, ModelAssetSummary } from '../../types';
 import GlbImportDialog from './GlbImportDialog';
-import { generateModelAssetPreviews } from '../../utils/model-thumbnail';
+import { generateModelAssetPreviews, type ModelPreviewImages } from '../../utils/model-thumbnail';
 
 interface ModelAssetSidebarProps {
   isOpen: boolean;
@@ -16,6 +16,11 @@ interface ModelAssetSidebarProps {
   onLibraryChanged?: () => void;
 }
 
+// 预设资产是只读内置数据，无法落盘预览图；生成结果按内容缓存，本次会话内复用。
+const builtinPreviewCache = new Map<string, ModelPreviewImages>();
+
+const previewCacheKey = (asset: ModelAssetSummary): string => `${asset.id}:${asset.contentHash}`;
+
 const ModelAssetSidebar: React.FC<ModelAssetSidebarProps> = ({
   isOpen,
   currentProjectId,
@@ -27,6 +32,7 @@ const ModelAssetSidebar: React.FC<ModelAssetSidebarProps> = ({
   onLibraryChanged,
 }) => {
   const [assets, setAssets] = useState<ModelAssetSummary[]>([]);
+  const [runtimePreviews, setRuntimePreviews] = useState<Record<string, ModelPreviewImages>>({});
   const [query, setQuery] = useState('');
   const [origin, setOrigin] = useState<'all' | 'builtin' | 'user'>('all');
   const [tag, setTag] = useState('all');
@@ -41,6 +47,7 @@ const ModelAssetSidebar: React.FC<ModelAssetSidebarProps> = ({
     usage: 'prop' | 'platform';
   } | null>(null);
   const previewUpgradeAttempted = useRef(new Set<string>());
+  const builtinPreviewAttempted = useRef(new Set<string>());
 
   const refresh = useCallback(async () => {
     if (!window.electronAPI?.isElectron) return;
@@ -48,6 +55,15 @@ const ModelAssetSidebar: React.FC<ModelAssetSidebarProps> = ({
     try {
       let nextAssets = await window.electronAPI.modelAssets.list();
       setAssets(nextAssets);
+      // 回填会话内已经生成过的预设预览图
+      const cachedPreviews: Record<string, ModelPreviewImages> = {};
+      for (const asset of nextAssets) {
+        const cached = builtinPreviewCache.get(previewCacheKey(asset));
+        if (cached) cachedPreviews[asset.id] = cached;
+      }
+      if (Object.keys(cachedPreviews).length > 0) {
+        setRuntimePreviews((current) => ({ ...current, ...cachedPreviews }));
+      }
       const legacyPreviews = nextAssets.filter((asset) => (
         asset.origin === 'user'
         && (asset.thumbnailVersion !== 1 || asset.floorplanVersion !== 1)
@@ -71,6 +87,26 @@ const ModelAssetSidebar: React.FC<ModelAssetSidebarProps> = ({
         nextAssets = await window.electronAPI.modelAssets.list();
         setAssets(nextAssets);
       }
+      // 预设资产没有落盘的预览图，后台逐张生成，避免阻塞资产列表展示
+      void (async () => {
+        const builtinWithoutPreview = nextAssets.filter((asset) => (
+          asset.origin === 'builtin'
+          && !asset.thumbnailUrl
+          && !builtinPreviewCache.has(previewCacheKey(asset))
+          && !builtinPreviewAttempted.current.has(asset.id)
+        ));
+        for (const asset of builtinWithoutPreview) {
+          builtinPreviewAttempted.current.add(asset.id);
+          try {
+            const manifest = await window.electronAPI.modelAssets.get(asset.id);
+            const previewImages = await generateModelAssetPreviews(manifest);
+            builtinPreviewCache.set(previewCacheKey(asset), previewImages);
+            setRuntimePreviews((current) => ({ ...current, [asset.id]: previewImages }));
+          } catch (error) {
+            console.warn(`预设资产“${asset.name}”的预览图生成失败：`, error);
+          }
+        }
+      })();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '资产库加载失败');
     } finally {
@@ -221,30 +257,33 @@ const ModelAssetSidebar: React.FC<ModelAssetSidebarProps> = ({
                   </div>
                 )}
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                  {filtered.map((asset) => (
-                    <div key={asset.id} className="group overflow-hidden rounded-xl border border-slate-700 bg-slate-800/70 transition hover:border-slate-600">
-                      <button type="button" onClick={() => placeAsset(asset, false)} className="block w-full text-left">
-                        <div className="relative grid aspect-[4/3] place-items-center bg-gradient-to-br from-slate-800 to-slate-950">
-                          {asset.thumbnailUrl ? <img src={asset.thumbnailUrl} alt="" className="h-full w-full object-contain" /> : <Box size={34} className="text-slate-500" />}
-                          <span className="absolute left-2 top-2 rounded bg-black/60 px-2 py-0.5 text-[10px] text-slate-300">{asset.origin === 'builtin' ? '预设' : `我的 v${asset.revision}`}</span>
-                        </div>
-                        <div className="p-3">
-                          <div className="truncate text-sm font-medium text-white">{asset.name}</div>
-                          <div className="mt-1 text-[11px] text-slate-500">{asset.intrinsicSize.width.toFixed(2)} × {asset.intrinsicSize.depth.toFixed(2)} × {asset.intrinsicSize.height.toFixed(2)} m</div>
-                        </div>
-                      </button>
-                      {needsFit(asset) && (
-                        <button type="button" onClick={() => placeAsset(asset, true)} className="mx-3 mb-3 w-[calc(100%-1.5rem)] rounded-lg bg-amber-900/60 py-1.5 text-[11px] text-amber-200 hover:bg-amber-800/70">
-                          超出舞台 · 等比适配后放置
+                  {filtered.map((asset) => {
+                    const thumbnailSrc = runtimePreviews[asset.id]?.thumbnailDataUrl ?? asset.thumbnailUrl;
+                    return (
+                      <div key={asset.id} className="group overflow-hidden rounded-xl border border-slate-700 bg-slate-800/70 transition hover:border-slate-600">
+                        <button type="button" onClick={() => placeAsset(asset, false)} className="block w-full text-left">
+                          <div className="relative grid aspect-[4/3] place-items-center bg-gradient-to-br from-slate-800 to-slate-950">
+                            {thumbnailSrc ? <img src={thumbnailSrc} alt="" className="h-full w-full object-contain" /> : <Box size={34} className="text-slate-500" />}
+                            <span className="absolute left-2 top-2 rounded bg-black/60 px-2 py-0.5 text-[10px] text-slate-300">{asset.origin === 'builtin' ? '预设' : `我的 v${asset.revision}`}</span>
+                          </div>
+                          <div className="p-3">
+                            <div className="truncate text-sm font-medium text-white">{asset.name}</div>
+                            <div className="mt-1 text-[11px] text-slate-500">{asset.intrinsicSize.width.toFixed(2)} × {asset.intrinsicSize.depth.toFixed(2)} × {asset.intrinsicSize.height.toFixed(2)} m</div>
+                          </div>
                         </button>
-                      )}
-                      <div className="flex border-t border-slate-700">
-                        <button type="button" onClick={() => void duplicate(asset)} className="flex-1 p-2 text-slate-400 hover:bg-slate-700 hover:text-white" title="复制"><Copy size={14} className="mx-auto" /></button>
-                        <button type="button" onClick={() => void edit(asset)} className="flex-1 p-2 text-slate-400 hover:bg-slate-700 hover:text-white" title="编辑"><Edit3 size={14} className="mx-auto" /></button>
-                        {asset.origin === 'user' && <button type="button" onClick={() => setDeleteAsset(asset)} className="flex-1 p-2 text-slate-400 hover:bg-red-950 hover:text-red-300" title="删除"><Trash2 size={14} className="mx-auto" /></button>}
+                        {needsFit(asset) && (
+                          <button type="button" onClick={() => placeAsset(asset, true)} className="mx-3 mb-3 w-[calc(100%-1.5rem)] rounded-lg bg-amber-900/60 py-1.5 text-[11px] text-amber-200 hover:bg-amber-800/70">
+                            超出舞台 · 等比适配后放置
+                          </button>
+                        )}
+                        <div className="flex border-t border-slate-700">
+                          <button type="button" onClick={() => void duplicate(asset)} className="flex-1 p-2 text-slate-400 hover:bg-slate-700 hover:text-white" title="复制"><Copy size={14} className="mx-auto" /></button>
+                          <button type="button" onClick={() => void edit(asset)} className="flex-1 p-2 text-slate-400 hover:bg-slate-700 hover:text-white" title="编辑"><Edit3 size={14} className="mx-auto" /></button>
+                          {asset.origin === 'user' && <button type="button" onClick={() => setDeleteAsset(asset)} className="flex-1 p-2 text-slate-400 hover:bg-red-950 hover:text-red-300" title="删除"><Trash2 size={14} className="mx-auto" /></button>}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             </>

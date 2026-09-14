@@ -389,7 +389,10 @@ test('2D stage and export render model assets from their real top view', async (
   assert.match(app, /generateModelAssetTopThumbnail\(asset\)/);
   assert.match(app, /const create2DExportModelFloorplans = useCallback/);
   assert.match(app, /const floorplanImage = modelAsset \? opts\?\.modelFloorplanImages\?\.\[modelAsset\.id\]/);
-  assert.match(app, /ctx\.drawImage\(\s*floorplanImage,/);
+  assert.match(app, /const drawnImage = isColorOverridden/);
+  assert.match(app, /getTintedModelFloorplan\(modelAsset, floorplanImage, p\.color\)/);
+  assert.match(app, /ctx\.drawImage\(\s*drawnImage,/);
+  assert.match(stage, /maskImage: `url\(\$\{floorplanUrl\}\)`/);
   assert.equal((app.match(/modelFloorplanImages,/g) || []).length, 2);
 });
 

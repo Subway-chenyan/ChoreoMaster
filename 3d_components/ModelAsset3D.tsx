@@ -7,6 +7,7 @@ import {
   createMissingModelPlaceholder,
   createModelAssetInstance,
   releaseModelAssetInstance,
+  tintModelObject,
 } from '../utils/model-runtime';
 
 interface ModelAsset3DProps {
@@ -15,10 +16,11 @@ interface ModelAsset3DProps {
   height: number;
   depth: number;
   selected?: boolean;
+  tintColor?: string;
   onLoaded?: (size: { width: number; height: number; depth: number }) => void;
 }
 
-const ModelAsset3D: React.FC<ModelAsset3DProps> = ({ asset, width, height, depth, selected = false, onLoaded }) => {
+const ModelAsset3D: React.FC<ModelAsset3DProps> = ({ asset, width, height, depth, selected = false, tintColor, onLoaded }) => {
   const { gl } = useThree();
   const [instance, setInstance] = useState<THREE.Group | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -52,6 +54,15 @@ const ModelAsset3D: React.FC<ModelAsset3DProps> = ({ asset, width, height, depth
       setInstance(null);
     };
   }, [asset, attempt, gl, onLoaded]);
+
+  // 实例与缓存源共享材质，着色用克隆材质，卸载时只 dispose 克隆出来的部分。
+  useEffect(() => {
+    if (!instance || !tintColor) return;
+    const tintedMaterials = tintModelObject(instance, tintColor);
+    return () => {
+      tintedMaterials.forEach((material) => material.dispose());
+    };
+  }, [instance, tintColor]);
 
   const placeholder = useMemo(
     () => createMissingModelPlaceholder(width, height, depth),

@@ -281,6 +281,37 @@ export function getModelAssetCacheStats(): { sources: number; consumers: number 
   };
 }
 
+export function getModelAssetDefaultColor(asset: ProjectModelAsset): string | undefined {
+  return asset.payload.kind === 'parametric'
+    ? asset.payload.recipe.parts[0]?.material.color
+    : undefined;
+}
+
+/**
+ * 把道具颜色应用到一个模型实例上：克隆无纹理的标准材质并改成目标色。
+ * SkeletonUtils.clone 出的实例共享缓存源材质，必须克隆后修改，否则会同资产的所有实例一起变色。
+ * 返回新克隆的材质，由调用方负责在不使用时 dispose。
+ */
+export function tintModelObject(root: THREE.Object3D, color: string): THREE.Material[] {
+  const tinted: THREE.Material[] = [];
+  root.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) return;
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    let cloned = false;
+    const next = materials.map((material) => {
+      if (!(material instanceof THREE.MeshStandardMaterial) || material.map) return material;
+      const clone = material.clone();
+      clone.color.set(color);
+      tinted.push(clone);
+      cloned = true;
+      return clone;
+    });
+    if (!cloned) return;
+    object.material = Array.isArray(object.material) ? next : next[0];
+  });
+  return tinted;
+}
+
 export function createMissingModelPlaceholder(width: number, height: number, depth: number): THREE.Group {
   const group = new THREE.Group();
   const geometry = new THREE.BoxGeometry(width, height, depth);

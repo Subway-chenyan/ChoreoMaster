@@ -99,6 +99,7 @@ import { createThrottledProgressReporter } from './utils/export-progress';
 import { showPerformersInAllFrames } from './utils/performer-visibility';
 import ModelerWorkspace from './components/model-assets/ModelerWorkspace';
 import { calculateModelStageFitScale, createForwardFrameUpdates } from './utils/model-placement';
+import { getModelAssetDefaultColor } from './utils/model-runtime';
 import { generateModelAssetTopThumbnail } from './utils/model-thumbnail';
 
 const DEFAULT_FRAME: Frame = {
@@ -163,6 +164,31 @@ function loadImageDimensions(url: string): Promise<{ width: number; height: numb
     image.onerror = () => reject(new Error('无法读取图片'));
     image.src = url;
   });
+}
+
+const tintedFloorplanCache = new Map<string, HTMLCanvasElement>();
+
+/** 道具颜色被修改后，2D 导出用同色覆盖模型俯视图轮廓（source-in 只保留轮廓像素）。 */
+function getTintedModelFloorplan(
+  asset: ProjectModelAsset,
+  image: HTMLImageElement,
+  color: string,
+): HTMLCanvasElement {
+  const key = `${asset.id}:${asset.contentHash}:${color.toLowerCase()}`;
+  const cached = tintedFloorplanCache.get(key);
+  if (cached) return cached;
+  const canvas = document.createElement('canvas');
+  canvas.width = image.naturalWidth || image.width || 1;
+  canvas.height = image.naturalHeight || image.height || 1;
+  const context = canvas.getContext('2d');
+  if (context) {
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    context.globalCompositeOperation = 'source-in';
+    context.fillStyle = color;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+  }
+  tintedFloorplanCache.set(key, canvas);
+  return canvas;
 }
 
 function readBlobAsDataUrl(blob: Blob): Promise<string> {
@@ -3854,10 +3880,16 @@ const App: React.FC = () => {
           );
           const imageWidth = propW * previewScale.width;
           const imageHeight = propD * previewScale.height;
+          const defaultColor = getModelAssetDefaultColor(modelAsset);
+          const isColorOverridden = !!defaultColor
+            && defaultColor.toLowerCase() !== (p.color || '').toLowerCase();
+          const drawnImage = isColorOverridden
+            ? getTintedModelFloorplan(modelAsset, floorplanImage, p.color)
+            : floorplanImage;
           ctx.save();
           if (isRehearsalView) ctx.scale(1, -1);
           ctx.drawImage(
-            floorplanImage,
+            drawnImage,
             -imageWidth / 2,
             -imageHeight / 2,
             imageWidth,

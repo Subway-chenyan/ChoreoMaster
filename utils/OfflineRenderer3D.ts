@@ -16,6 +16,7 @@ import {
   createPreloadedModelAssetInstance,
   preloadModelAssets,
   releaseModelAssetInstance,
+  tintModelObject,
 } from './model-runtime';
 
 export type CameraAngle = 'judge' | 'overhead' | 'rear-overhead';
@@ -279,6 +280,8 @@ function createPropMesh(
       );
       instance.position.y = -dims.height / 2;
       instance.userData.offlineModelAssetInstance = true;
+      // 克隆材质以应用道具颜色，克隆出的材质在 dispose 中单独释放。
+      instance.userData.tintedModelMaterials = tintModelObject(instance, performer.color);
       group.add(instance);
     } catch {
       group.add(createMissingModelPlaceholder(dims.width, dims.height, dims.depth));
@@ -679,7 +682,14 @@ export async function createOfflineScene(
     meshMap.forEach(mesh => {
       mesh.children
         .filter((child): child is THREE.Group => child instanceof THREE.Group && child.userData.offlineModelAssetInstance === true)
-        .forEach(releaseModelAssetInstance);
+        .forEach(child => {
+          const tintedMaterials = child.userData.tintedModelMaterials;
+          if (Array.isArray(tintedMaterials)) {
+            tintedMaterials.forEach(mat => mat.dispose());
+            child.userData.tintedModelMaterials = undefined;
+          }
+          releaseModelAssetInstance(child);
+        });
       mesh.traverse(child => {
         if (child instanceof THREE.Mesh && child.userData.sharedModelAssetResource !== true) {
           child.geometry.dispose();

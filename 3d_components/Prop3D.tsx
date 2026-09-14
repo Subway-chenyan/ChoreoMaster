@@ -291,6 +291,7 @@ const Prop3D: React.FC<Prop3DProps> = ({
           height={dims.height}
           depth={dims.depth}
           selected={isSelected}
+          tintColor={performer.color}
         />
       ) : (
         <mesh castShadow receiveShadow>

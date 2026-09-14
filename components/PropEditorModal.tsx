@@ -136,6 +136,11 @@ export function PropEditorModal({
                     className="min-w-0 flex-1 rounded-lg border border-slate-600 bg-slate-950/70 px-3 py-2.5 text-sm font-mono text-white outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                   />
                 </div>
+                {asset && (
+                  <p className="mt-2 text-[11px] leading-4 text-slate-500">
+                    修改后会用该颜色覆盖模型的无纹理部分，带贴图的部分保持原样。
+                  </p>
+                )}
               </div>
 
               {asset && (
