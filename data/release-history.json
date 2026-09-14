@@ -1,7 +1,26 @@
 {
   "schemaVersion": 1,
-  "currentVersion": "1.3.1",
+  "currentVersion": "1.3.2",
   "releases": [
+    {
+      "version": "1.3.2",
+      "date": "2026-09-14",
+      "kind": "patch",
+      "title": "CosStage 1.3.2",
+      "summary": "修复 3D 资产库预设资产不显示预览图的问题；修复模型资产道具修改颜色不生效的问题，颜色变更在 3D 视图、2D 舞台与导出视频中同步生效。",
+      "changes": [
+        {
+          "kind": "patch",
+          "text": "修复 3D 资产库预设资产不显示预览图的问题。"
+        },
+        {
+          "kind": "patch",
+          "text": "修复模型资产道具修改颜色不生效的问题，颜色变更在 3D 视图、2D 舞台与导出视频中同步生效。"
+        }
+      ],
+      "breakingChanges": [],
+      "migrationSteps": []
+    },
     {
       "version": "1.3.1",
       "date": "2026-09-11",
