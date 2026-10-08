@@ -1267,6 +1267,46 @@ const App: React.FC = () => {
     )));
   };
 
+  // 演员与道具互转：仅切换 type，保留 id，所有队形位置/转场动画自动继承。
+  const handleConvertPerformersType = (performerIds: string[], targetType: PerformerType) => {
+    const groupById = new Map(performerGroups.map((group) => [group.id, group]));
+    const targets = performers.filter((performer) => {
+      if (!performerIds.includes(performer.id)) return false;
+      if (effectivelyLockedPerformerIds.has(performer.id)) return false;
+      return (performer.type === 'prop' ? 'prop' : 'performer') !== targetType;
+    });
+    if (targets.length === 0) return;
+    const skippedLocked = performerIds.some((id) => effectivelyLockedPerformerIds.has(id));
+    const targetIdSet = new Set(targets.map((performer) => performer.id));
+    setPerformers((previous) => previous.map((performer) => {
+      if (!targetIdSet.has(performer.id)) return performer;
+      const group = performer.groupId ? groupById.get(performer.groupId) : undefined;
+      const keepGroup = group
+        && (group.type === 'prop' ? 'prop' : 'performer') === targetType;
+      if (targetType === 'prop') {
+        return {
+          ...performer,
+          type: 'prop',
+          propCategory: 'prop',
+          rotationPivot: 'center',
+          ...(!keepGroup ? { groupId: undefined } : {}),
+        };
+      }
+      return {
+        ...performer,
+        type: 'performer',
+        propCategory: undefined,
+        rotationPivot: undefined,
+        boundToId: undefined,
+        ...(!keepGroup ? { groupId: undefined } : {}),
+      };
+    }));
+    const kindLabel = targetType === 'prop' ? '道具' : '演员';
+    const sourceLabel = targetType === 'prop' ? '演员' : '道具';
+    const lockHint = skippedLocked ? '，已跳过锁定的对象' : '';
+    setProjectMessages([`已将 ${targets.length} 个${sourceLabel}转换为${kindLabel}，队形编排保持不变${lockHint}`]);
+  };
+
   // --- Performer Notes ---
   const handleAddNote = (performerId: string, frameId?: string) => {
     const now = Date.now();
@@ -5334,6 +5374,7 @@ const App: React.FC = () => {
             onRemovePerformers={requestDeletePerformers}
             onShowPerformersInAllFrames={handleShowPerformersInAllFrames}
             onSetPerformersLocked={handleSetPerformersLocked}
+            onConvertPerformersType={handleConvertPerformersType}
             onUpdatePerformer={handleUpdatePerformer}
             onTogglePerformerInFrame={handleTogglePerformerInFrame}
             onDuplicateSelected={handleDuplicateSelected}

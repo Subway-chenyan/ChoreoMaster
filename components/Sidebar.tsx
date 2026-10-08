@@ -32,6 +32,7 @@ interface SidebarProps {
     onRemovePerformers: (ids: string[]) => void;
     onShowPerformersInAllFrames: (ids: string[]) => void;
     onSetPerformersLocked: (ids: string[], locked: boolean) => void;
+    onConvertPerformersType?: (ids: string[], targetType: PerformerType) => void;
     onUpdatePerformer: (id: string, updates: Partial<Performer>) => void;
     onTogglePerformerInFrame: (id: string) => void;
     onDuplicateSelected: () => void;
@@ -194,6 +195,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     onRemovePerformers,
     onShowPerformersInAllFrames,
     onSetPerformersLocked,
+    onConvertPerformersType,
     onUpdatePerformer,
     onTogglePerformerInFrame,
     onDuplicateSelected,
@@ -1592,6 +1594,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 >
                                     移出分组
                                 </button>
+                                {onConvertPerformersType && (() => {
+                                    const performerType = contextMenuState.performerType;
+                                    if (!performerType) return null;
+                                    const targetType: PerformerType = performerType === 'prop' ? 'performer' : 'prop';
+                                    const count = contextMenuState.performerIds.length;
+                                    return (
+                                        <>
+                                            <div className="h-px bg-slate-700 my-1"></div>
+                                            <button
+                                                onClick={() => {
+                                                    onConvertPerformersType(contextMenuState.performerIds, targetType);
+                                                    closeContextMenu();
+                                                }}
+                                                className="w-full px-3 py-2 text-left text-sm text-emerald-300 hover:bg-slate-700 flex items-center gap-2"
+                                                title="仅切换类型，队形位置与转场保持不变"
+                                            >
+                                                {targetType === 'prop' ? <Box size={12} /> : <UserCheck size={12} />}
+                                                转换为{targetType === 'prop' ? '道具' : '演员'}{count > 1 ? `（${count} 个）` : ''}
+                                            </button>
+                                        </>
+                                    );
+                                })()}
                                 <div className="h-px bg-slate-700 my-1"></div>
                                 <button
                                     onClick={() => {
