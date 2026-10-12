@@ -24,6 +24,7 @@ module.exports = {
     'dist-electron/model-asset-service.js',
     'dist-electron/builtin-model-assets.js',
     'dist-electron/project-service.js',
+    'dist-electron/project-document.js',
     'dist-electron/stage-defaults.js',
     'dist-electron/project-template-service.js',
     'dist/**/*',

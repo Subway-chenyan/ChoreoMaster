@@ -1,4 +1,5 @@
 
+import { pinchViewport, type Point, type StageViewport } from '../mobile/gestures';
 import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { Performer, Position, SelectionBox, ToolMode, PerformerGroup, ProjectModelAsset, StageConfig, TransitionPathDisplay } from '../types';
 import {
@@ -23,6 +24,9 @@ import { getModelAssetDefaultColor } from '../utils/model-runtime';
 import { getPerformerDimensions, getStageLabelFontSize } from '../electron/stage-defaults';
 
 interface StageProps {
+  touchMode?: 'select' | 'multi' | 'pan';
+  viewResetKey?: number;
+  onDragCancel?: () => void;
   performers: Performer[];
   performerGroups?: PerformerGroup[];
   lockedPerformerIds?: string[];
@@ -172,6 +176,9 @@ const AssetFootprintOverlay: React.FC<{ asset: ProjectModelAsset | undefined }> 
 
 export const Stage: React.FC<StageProps> = ({
   performers,
+  touchMode,
+  viewResetKey = 0,
+  onDragCancel,
   performerGroups = [],
   lockedPerformerIds = [],
   hiddenGroupIds = [],
@@ -216,6 +223,52 @@ export const Stage: React.FC<StageProps> = ({
   const [availableSize, setAvailableSize] = useState({ width: 0, height: 0 });
   const [viewportScale, setViewportScale] = useState(1);
   const [viewportOffset, setViewportOffset] = useState({ x: 0, y: 0 });
+  const touchPointers = useRef(new Map<number, Point>());
+  const pinch = useRef<{ viewport: StageViewport; points: [Point, Point] } | null>(null);
+  const suppressTouch = useRef(false);
+  useEffect(() => {
+    setViewportScale(1);
+    setViewportOffset({ x: 0, y: 0 });
+  }, [viewResetKey]);
+  const touchPoint = (event: React.PointerEvent): Point => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    return { x: event.clientX - (rect ? rect.left + rect.width / 2 : 0), y: event.clientY - (rect ? rect.top + rect.height / 2 : 0) };
+  };
+  const beginTouch = (event: React.PointerEvent) => {
+    if (!touchMode || event.pointerType !== 'touch') return;
+    touchPointers.current.set(event.pointerId, touchPoint(event));
+    if (touchPointers.current.size < 2) return;
+    event.preventDefault(); event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    suppressTouch.current = true;
+    setDragState(null); setSelectionBox(null); setPanState(null); setResizeState(null);
+    setRotationDragState(null); setControlPointDragIndex(null); setStartPointDragState(null);
+    onDragCancel?.();
+    const points = [...touchPointers.current.values()];
+    pinch.current = { viewport: { scale: viewportScale, offset: viewportOffset }, points: [points[0], points[1]] };
+  };
+  const moveTouch = (event: React.PointerEvent) => {
+    if (!touchMode || !touchPointers.current.has(event.pointerId)) return;
+    touchPointers.current.set(event.pointerId, touchPoint(event));
+    if (!suppressTouch.current) return;
+    event.preventDefault(); event.stopPropagation();
+    const points = [...touchPointers.current.values()];
+    if (pinch.current && points.length >= 2) {
+      const next = pinchViewport(pinch.current.viewport, pinch.current.points, [points[0], points[1]]);
+      setViewportScale(next.scale); setViewportOffset(next.offset);
+    }
+  };
+  const endTouch = (event: React.PointerEvent) => {
+    if (!touchMode || event.pointerType !== 'touch') return;
+    touchPointers.current.delete(event.pointerId);
+    if (suppressTouch.current || event.type === 'pointercancel') {
+      event.stopPropagation();
+      setDragState(null); setSelectionBox(null); setPanState(null);
+      onDragCancel?.();
+      pinch.current = null;
+      if (touchPointers.current.size === 0) suppressTouch.current = false;
+    }
+  };
   const stageXBounds = useMemo(() => getStageXBounds(stageConfig), [stageConfig]);
   const lockedPerformerIdSet = useMemo(() => new Set(lockedPerformerIds), [lockedPerformerIds]);
   const wingWidth = getWingWidth(stageConfig);
@@ -481,7 +534,7 @@ export const Stage: React.FC<StageProps> = ({
 }
       return;
     }
-    if (e.button === 2 && e.ctrlKey) {
+    if ((e.button === 2 && e.ctrlKey) || touchMode === 'pan') {
       e.preventDefault();
       e.currentTarget.setPointerCapture(e.pointerId);
       setPanState({
@@ -506,7 +559,7 @@ export const Stage: React.FC<StageProps> = ({
       });
 
       // If no modifier key, clear selection
-      if (!e.ctrlKey && !e.metaKey && !e.shiftKey) {
+      if (!e.ctrlKey && !e.metaKey && !e.shiftKey && touchMode !== 'multi') {
         onSelectionChange([]);
       }
     }
@@ -650,7 +703,7 @@ export const Stage: React.FC<StageProps> = ({
 
       if (boxSelectedIds.length > 0) {
         // If modifier held, merge with existing
-        if (e.ctrlKey || e.metaKey || e.shiftKey) {
+        if (e.ctrlKey || e.metaKey || e.shiftKey || touchMode === 'multi') {
           const merged = Array.from(new Set([...selectedPerformerIds, ...boxSelectedIds]));
           onSelectionChange(merged);
         } else {
@@ -661,6 +714,12 @@ export const Stage: React.FC<StageProps> = ({
   };
 
   const handlePerformerPointerDown = (e: React.PointerEvent, id: string) => {
+    if (touchMode === 'pan') return;
+    if (touchMode === 'multi' && !readonly) {
+      e.stopPropagation();
+      onSelectionChange(selectedPerformerIds.includes(id) ? selectedPerformerIds.filter((value) => value !== id) : [...selectedPerformerIds, id]);
+      return;
+    }
     if (e.button === 2 && e.ctrlKey) {
       return;
     }
@@ -848,6 +907,14 @@ export const Stage: React.FC<StageProps> = ({
   return (
     <div
       ref={containerRef}
+      onPointerDownCapture={beginTouch}
+      onPointerMoveCapture={moveTouch}
+      onPointerUpCapture={endTouch}
+      onPointerCancelCapture={endTouch}
+      onPointerDown={(event) => { if (touchMode === 'pan' && event.target === event.currentTarget) handlePointerDown(event); }}
+      onPointerMove={(event) => { if (event.target === event.currentTarget) handlePointerMove(event); }}
+      onPointerUp={(event) => { if (event.target === event.currentTarget) handlePointerUp(event); }}
+      style={touchMode ? { touchAction: 'none' } : undefined}
       className="flex-1 min-h-0 bg-slate-900 flex items-center justify-center p-2 sm:p-4 lg:p-8 overflow-hidden select-none"
     >
       {/* Stage Container */}
@@ -1138,7 +1205,7 @@ export const Stage: React.FC<StageProps> = ({
                 {showDirectionArrows && <DirectionArrow />}
 
                 {/* Resize Handles */}
-                {isSelected && !readonly && !lockedPerformerIdSet.has(performer.id) && (
+                {isSelected && !readonly && !touchMode && !lockedPerformerIdSet.has(performer.id) && (
                   <>
                     {!isPlatform && (
                       <button
@@ -1180,13 +1247,13 @@ export const Stage: React.FC<StageProps> = ({
               style={{
                 left: `${stageXToViewPercent(pos.x, stageConfig)}%`,
                 top: `${pos.y}%`,
-                width: `max(${widthPct}%, 32px)`,
-                height: `max(${heightPct}%, 32px)`,
+                width: `max(${widthPct}%, ${touchMode ? 44 : 32}px)`,
+                height: `max(${heightPct}%, ${touchMode ? 44 : 32}px)`,
                 zIndex: (platformOccupancy.entityLiftById[performer.id] ?? 0) > 0 ? 14 : 10,
               }}
             >
-              <div className="relative h-full w-full" style={{ transform: `rotate(${rotation}deg)` }}>
-                {isSelected && !readonly && !lockedPerformerIdSet.has(performer.id) && (
+              <div className="relative h-full w-full" style={{ transform: `rotate(${rotation}deg)`, ...(touchMode ? { width: '65%', height: '65%' } : {}) }}>
+                {isSelected && !readonly && !touchMode && !lockedPerformerIdSet.has(performer.id) && (
                   <button
                     type="button"
                     className="absolute bottom-[-34px] left-1/2 z-30 h-5 w-5 -translate-x-1/2 rounded-full border-2 border-white bg-amber-500 shadow-lg cursor-grab active:cursor-grabbing"
@@ -1235,7 +1302,7 @@ export const Stage: React.FC<StageProps> = ({
                     `}
               style={{
                 left: `${stageXToViewPercent(pos.x, stageConfig)}%`,
-                top: `${Math.min(98, pos.y + labelOffsetPercent)}%`,
+                top: touchMode && performer.type !== 'prop' ? `calc(${pos.y}% + 22px)` : `${Math.min(98, pos.y + labelOffsetPercent)}%`,
               }}
             >
               <div

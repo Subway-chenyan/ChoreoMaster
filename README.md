@@ -2,6 +2,10 @@
 
 CosStage 是面向舞台表演的桌面队形编排工具，提供时间轴、2D/3D 舞台预览、演员与道具编排、项目管理以及视频导出。前端使用 React + Vite，后端使用 FastAPI，桌面端由 Electron 封装。
 
+## Android 随身舞台
+
+新增独立手机编辑界面：触屏站位、双指缩放、队形序列、音乐排练、离线自动保存，通过完整项目包与桌面互通。运行 `npm run dev:mobile` 预览，配置 Android 开发环境后用 `npm run android:build` 生成调试 APK。[功能、构建及验证说明](docs/mobile/README.md)。
+
 ## 环境要求
 
 - Node.js 22（CI 使用的版本）与 npm

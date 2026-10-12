@@ -32,6 +32,10 @@
 
 ---
 
+## Mobile Application
+
+See [mobile-editor.md](./mobile-editor.md) for touch gestures, offline persistence, shared project packages, and Android build/validation contracts.
+
 ## Quick Navigation by Task
 
 ### Before Starting Development

@@ -137,12 +137,15 @@ test('sandboxed Electron loads the preload bridge as CommonJS', async () => {
 });
 
 test('packaged Electron includes local main-process modules required at startup', async () => {
-  const [builder, projectService] = await Promise.all([
+  const [builder, projectService, projectDocument] = await Promise.all([
     read('electron-builder.config.cjs'),
     read('electron/project-service.ts'),
+    read('electron/project-document.ts'),
   ]);
 
-  assert.match(projectService, /from '\.\/stage-defaults\.js'/);
+  assert.match(projectService, /from '\.\/project-document\.js'/);
+  assert.match(projectDocument, /from '\.\/stage-defaults\.js'/);
+  assert.match(builder, /'dist-electron\/project-document\.js'/);
   assert.match(builder, /'dist-electron\/stage-defaults\.js'/);
 });
 

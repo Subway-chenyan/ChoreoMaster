@@ -49,7 +49,7 @@ test('root test script runs the release suite without recursion', async () => {
 
   assert.equal(
     pkg.scripts.test,
-    'npm run typecheck && npm run test:release && npm run test:backend && npm run test:project && npm run test:desktop && npm run build',
+    'npm run typecheck && npm run test:release && npm run test:backend && npm run test:project && npm run test:desktop && npm run test:mobile && npm run build',
   );
   assert.doesNotMatch(pkg.scripts['test:release'], /npm (?:run )?test(?:\s|$)/);
   assert.equal(pkg.devDependencies['js-yaml'], '4.3.0');

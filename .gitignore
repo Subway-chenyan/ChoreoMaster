@@ -34,3 +34,7 @@ __pycache__/
 *.njsproj
 *.sln
 *.sw?
+
+# Mobile browser validation artifacts
+playwright-report/
+test-results/

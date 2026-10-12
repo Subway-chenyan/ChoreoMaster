@@ -1,0 +1,78 @@
+# CosStage 随身舞台（Android 首版）
+
+手机编辑舞台站位，电脑继续精修。手机与桌面共用 schema 4.0 项目文档、坐标系、模型定义和转场计算。
+
+## 已实现
+
+- 本机项目库：新建、导入、打开、删除，IndexedDB 离线自动保存，写入失败提示、重试及阻止离开项目。
+- 舞台：单指拖动、多选整体移动、锁定演员、网格吸附、双指缩放/平移、重置视角。
+- 双指操作会取消尚未提交的演员拖动；视角变化不写入站位。切换横竖屏保持项目和编辑状态。
+- 底部队形缩略图：切换、复制、改名、保持时长、备注、删除；40 步撤销/重做。
+- 演员：新增、姓名、颜色、形状、朝向、锁定、删除；支持选择桌面已有分组。
+- 音乐导入与排练播放，播放位置拖动，复用桌面贝塞尔转场。暂停后点选队形回到编辑。
+- Android 系统文件选择和分享；返回键关闭面板、保存并回项目库，再次返回将应用移到后台。
+- 中文触控界面、横屏布局、安全区域适配。
+
+界面实测截图：[竖屏](mobile-portrait.png) · [横屏](mobile-landscape.png)。
+
+## 本地预览
+
+```bash
+npm ci
+npm run dev:mobile
+```
+
+浏览器打开 `http://localhost:5173/?mobile=1`，开发工具选择手机尺寸。局域网手机可访问开发机的 5173 端口；浏览器预览需要开发服务器在线加载页面，**Android 安装包内置页面，可以离线冷启动**。浏览器和 Android 各自存储本机项目，不共享 IndexedDB。
+
+桌面 Electron 仍进入原编辑器；手机触屏浏览器自动进入移动界面。应用启动时选定界面，旋转屏幕不会卸载编辑器。
+
+## 双向互通
+
+1. 电脑项目管理选择导出完整项目包 `.zip`，传到手机。
+2. 手机项目库 → 导入项目，选择文件。每次导入建立新项目，不覆盖旧版。
+3. 手机修改后 → 顶部更多 → 分享完整项目包，发送到电脑或保存到文件。
+4. 电脑导入完整项目包，继续编辑。
+
+音乐、舞台背景、LED 图片/视频、模型和其他包内素材随文件传递。手机暂未提供编辑入口的高级字段仍保留。纯 `.json` 仅带编排数据，缺少的素材会提示。**当前是文件互传，不是云同步，也不自动合并两端修改。**
+
+移动端项目包上限 64 MiB，解压上限 128 MiB，最多 500 个文件；单次音乐导入上限 40 MiB。导入会检查路径、压缩方法、文件大小和 CRC；不支持加密或分卷 ZIP。更大项目可继续在桌面使用，或先精简素材。
+
+卸载应用、清除应用数据/浏览器站点数据会删除本机项目，请先导出备份。
+
+## 生成 Android APK
+
+开发工具：Node.js 22+、JDK 21、Android SDK Platform 36 / Build Tools 36.0.0，设置 `JAVA_HOME` 和 `ANDROID_HOME`。也可使用 Android Studio 打开 `android/`。
+
+```bash
+npm ci
+npm run android:build
+# 或：同步后在 Android Studio 调试
+npm run android:sync
+npm run android:open
+```
+
+调试 APK：`android/app/build/outputs/apk/debug/app-debug.apk`。
+
+```bash
+adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+应用 ID `com.cosstage.mobile`，最低 Android 7 / API 24；建议使用更新的 Android System WebView。Gradle wrapper 已提交。调试包供验证使用，商店发布还需独立配置签名及发布版本号，不要将签名密钥提交进仓库。
+
+GitHub Actions 的 **Android preview** 工作流支持手动执行及相关 PR 构建，完成后下载 `CosStage-android-debug` artifact。本次没有推送代码或触发远程构建。
+
+## 验证与限制
+
+具体测试结果与待真机检查项见 [验证记录](VALIDATION.md)。
+
+```bash
+npm test                      # 既有回归 + 移动核心测试 + 生产构建
+npx playwright install chromium
+npm run test:mobile:ui         # 触屏/横屏/离线/音乐/错误恢复/导入导出
+```
+
+使用已有 Chromium 时可设置 `PLAYWRIGHT_CHROMIUM_EXECUTABLE=/path/to/chrome`。
+
+本轮本机是 Linux ARM64，未安装 JDK/Android SDK，也没有连接 Android 设备。原生工程可以同步；执行 Gradle 在缺少 JAVA_HOME 处失败，因此**尚未生成 APK、完成真机安装或验证原生分享/返回键**。浏览器自动化不能替代这些真机检查。
+
+首版聚焦二维编排；3D 高级模型编辑、视频导出、AI 后端、云账户同步与多人合并仍由桌面端或后续迭代提供。ArrangeUs 分析用于理解功能结构，本实现未包含其专有代码、品牌或提取的美术资源。
