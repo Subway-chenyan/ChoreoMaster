@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 8
+- **Total Sessions**: 9
 - **Last Active**: 2026-10-13
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~272 | Active |
+| `journal-1.md` | ~305 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 9 | 2026-10-13 | 团员只读排练模式 | `ed227ab` | `main` |
 | 8 | 2026-10-13 | 手机横屏工作台与精确触控优化 | `427d85a` | `main` |
 | 7 | 2026-10-12 | Android mobile editor and desktop project interchange | `12f5362` | `main` |
 | 6 | 2026-07-21 | 演员道具与分组全局锁定 | `f6dd029` | `main` |

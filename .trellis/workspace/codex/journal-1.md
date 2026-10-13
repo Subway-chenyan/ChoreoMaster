@@ -270,3 +270,36 @@ Implemented offline mobile project library, touch stage gestures, formation/acto
 ### Next Steps
 
 - None - task complete
+
+
+## Session 9: 团员只读排练模式
+
+**Date**: 2026-10-13
+**Task**: 团员只读排练模式
+**Branch**: `main`
+
+### Summary
+
+新增独立团员排练导入与只读查看器，仅过滤解压并保存 JSON 引用音乐，保留完整 JSON；大舞台、右侧队形跳转、上下切换、进度和同步音乐、队形备注及离线重开。修复过期播放 Promise 干扰新播放。类型检查、移动核心 8 项、浏览器全套 10 项及最终排练专项 3 项通过（共 11 个场景），生产构建和 Android 同步通过。截图和契约文档已更新；APK/真机尚未验证。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ed227ab` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
