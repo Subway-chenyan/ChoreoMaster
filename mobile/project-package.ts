@@ -4,6 +4,7 @@ import { PROJECT_SCHEMA_VERSION } from '../electron/model-asset-contract';
 import type { ProjectDocument } from '../types';
 
 export interface PortableProject {
+  mode?: 'rehearsal';
   document: ProjectDocument;
   assets: Record<string, Blob>;
   warnings: string[];
@@ -208,6 +209,44 @@ export async function readProjectPackage(file: Blob, name = '导入的编排'): 
     assets[path] = new Blob([Uint8Array.from(content).buffer], { type: assetMime(path) });
   }
   return { document, assets, warnings: getMissingAssets(document, assets) };
+}
+
+// 排练导入只解压所需文件；图片和模型不进入内存中的解压结果或本机素材库。
+export async function readRehearsalPackage(file: Blob, name = '团员排练'): Promise<PortableProject> {
+  if (file.size > MAX_MOBILE_PACKAGE_BYTES) throw new Error('移动端项目包不能超过 64 MB');
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const entries = inspectPackage(bytes);
+  const extract = async (path: string) => {
+    const expected = entries.get(path);
+    if (!expected) return undefined;
+    const files = await new Promise<Record<string, Uint8Array>>((resolve, reject) =>
+      unzip(bytes, { filter: (entry) => entry.name === path }, (error, result) =>
+        error ? reject(error) : resolve(result)
+      )
+    );
+    const content = files[path];
+    if (!content || content.byteLength !== expected.size || checksum(content) !== expected.crc)
+      throw new Error(`项目包文件校验失败：${path}`);
+    return content;
+  };
+  const json = await extract('project.json');
+  if (!json) throw new Error('项目包缺少 project.json');
+  const document = parseMobileDocument(JSON.parse(strFromU8(json)), name);
+  const assets: Record<string, Blob> = Object.create(null);
+  if (document.musicAsset) {
+    const music = await extract(document.musicAsset);
+    if (music)
+      assets[document.musicAsset] = new Blob([Uint8Array.from(music).buffer], {
+        type: assetMime(document.musicAsset),
+      });
+  }
+  return { document, assets, mode: 'rehearsal', warnings: rehearsalWarnings(document, assets) };
+}
+
+export function rehearsalWarnings(document: ProjectDocument, assets: Record<string, Blob>): string[] {
+  return document.musicAsset && !Object.hasOwn(assets, document.musicAsset)
+    ? ['未找到编排引用的音乐，可静音查看队形。请重新导入包含音乐的编排包。']
+    : [];
 }
 
 export async function writeProjectPackage(

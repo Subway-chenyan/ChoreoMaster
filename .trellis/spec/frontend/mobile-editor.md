@@ -119,3 +119,47 @@ nudgeActors(document: ProjectDocument, frameId: string, ids: string[], dxMeters:
 `tests/mobile-core.test.ts` asserts meter conversion, Z/lock retention, group boundary behavior and no-op references. `tests/mobile-ui/landscape.spec.ts` covers 640x360, 812x375, 915x412, portrait return, collapsed playback/history, long lists, preview-to-edit, side-drawer focus, precision undo and tap/jitter without snapping. Keep the existing mobile gesture and desktop regressions.
 
 Wrong: snap every `pointerup` after a performer `pointerdown`. Correct: distinguish a selection tap from an actual drag before invoking `onPositionChange` / `onDragEnd`.
+
+## Read-only member rehearsal (2026-10-13)
+
+### Scope and signatures
+
+Applies to `MobileRehearsal`, `useRehearsalPlayback`, package import and local project routing.
+
+```ts
+readRehearsalPackage(file: Blob, name?: string): Promise<PortableProject>
+rehearsalWarnings(document: ProjectDocument, assets: Record<string, Blob>): string[]
+saveMobileProject(id: string, document: ProjectDocument, assets?: Record<string, Blob>, mode?: 'rehearsal'): Promise<void>
+```
+
+### Contracts
+
+- `PortableProject` and IndexedDB project records have optional `mode: 'rehearsal'`; absent mode preserves existing editing behavior. This additive record field requires no object-store/version migration. Mode is local metadata, never part of the portable choreography schema.
+- Rehearsal import inspects the ZIP directory using existing size/path/header limits, then uses `fflate` filtering to extract and CRC-check `project.json` and the referenced `musicAsset` only. Skipped files are neither decompressed nor stored. Whole-archive limits (64 MiB compressed / 128 MiB declared extracted / 500 entries) still apply; this is not a large-archive bypass.
+- Stored JSON remains intact; the read-only render copy clears stage background and LED media, and does not resolve model assets. Missing visual assets are expected and do not generate rehearsal warnings.
+- Route rehearsal records to a separate viewer with no edit reducer, autosave hook, export action or actor mutations. Playback, pan/zoom, collapsing the rail and navigation do not write project data.
+- Current formation/notes follow the last formation whose start time is <= playback time, with the first formation as fallback. Clicking or stepping to a formation pauses and seeks audio and stage to its start. Notes preserve line breaks and reset scroll on formation changes.
+- Music is the playback clock while running; monotonic time continues after audio ends. Playback restarts from zero at the end, pauses on hidden/exit, and invalidates pending play promises on seek/exit. Codec/play failure pauses with a message and permits subsequent silent playback.
+
+### Validation and error matrix
+
+| Case | Result |
+| --- | --- |
+| Missing referenced music | Warning, silent rehearsal remains usable |
+| Corrupt JSON or selected music CRC | Reject before local storage mutation |
+| Corrupt skipped model bytes | No extraction; full editor import still rejects CRC failure |
+| Old record without mode | Original mobile editor |
+| Reopen rehearsal record | Viewer, retained music only, no missing-model warnings |
+| Empty formations | Empty-stage message and disabled playback/navigation |
+
+### Good / base / bad cases
+
+Good: ZIP with JSON/music/models -> only music bytes stored -> reopen offline -> read-only animated rehearsal. Base: JSON-only choreography plays silently. Bad: implementing rehearsal by importing all assets and hiding editor buttons leaves unnecessary decompression and mutation paths.
+
+### Tests required
+
+Core: filtering, preserved frames, music byte identity, mode round-trip, missing music and retained-byte CRC errors. Browser: notes/formation navigation, music clock, automatic active formation, collapsing/rotation, attempted actor movement leaves storage unchanged, editor controls absent, offline reopen, missing-music fallback. Device audio interruptions and native back remain manual checks.
+
+### Wrong vs correct
+
+Wrong: `readProjectPackage` followed by dropping image/model Blobs. Correct: filter ZIP extraction before decompression, and select the dedicated viewer from persisted local metadata.

@@ -1,7 +1,8 @@
 import type { ProjectDocument } from '../types';
-import { getMissingAssets, type PortableProject } from './project-package';
+import { getMissingAssets, rehearsalWarnings, type PortableProject } from './project-package';
 
 export interface MobileProjectMeta {
+  mode?: 'rehearsal';
   id: string;
   name: string;
   updatedAt: number;
@@ -54,12 +55,14 @@ export function newId(): string {
 export async function saveMobileProject(
   id: string,
   document: ProjectDocument,
-  assets?: Record<string, Blob>
+  assets?: Record<string, Blob>,
+  mode?: 'rehearsal'
 ): Promise<void> {
   const db = await database();
   const transaction = db.transaction(assets ? ['projects', 'assets'] : ['projects'], 'readwrite');
   const done = completed(transaction);
   const value: StoredProject = {
+    ...(mode ? { mode } : {}),
     id,
     name: document.name,
     updatedAt: Date.now(),
@@ -91,9 +94,13 @@ export async function loadMobileProject(id: string): Promise<PortableProject> {
   ]);
   if (!entry) throw new Error('找不到此项目');
   return {
+    mode: entry.mode,
     document: entry.document,
     assets: assets ?? {},
-    warnings: getMissingAssets(entry.document, assets ?? {}),
+    warnings: (entry.mode === 'rehearsal' ? rehearsalWarnings : getMissingAssets)(
+      entry.document,
+      assets ?? {}
+    ),
   };
 }
 export async function deleteMobileProject(id: string): Promise<void> {

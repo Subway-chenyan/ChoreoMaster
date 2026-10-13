@@ -20,6 +20,8 @@ import {
 } from '../../mobile/project-store';
 import {
   getMissingAssets,
+  readRehearsalPackage,
+  rehearsalWarnings,
   parseMobileDocument,
   readProjectPackage,
   type PortableProject,
@@ -28,6 +30,7 @@ import {
 import { onAndroidBack, minimizeAndroidApp } from '../../mobile/native';
 import { MobileSheet } from './MobileSheet';
 import './mobile.css';
+const MobileRehearsal = lazy(() => import('./MobileRehearsal'));
 const MobileEditor = lazy(() => import('./MobileEditor'));
 export const ACTOR_COLORS = ['#38bdf8', '#f472b6', '#a78bfa', '#34d399', '#fbbf24', '#fb923c'];
 
@@ -40,6 +43,7 @@ export default function MobileApp() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [name, setName] = useState('新的编排');
   const [actorCount, setActorCount] = useState(8);
+  const rehearsalInput = useRef<HTMLInputElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const refresh = async () => {
     try {
@@ -100,7 +104,7 @@ export default function MobileApp() {
       setActive({ id, project: { document, assets: {}, warnings: [] } });
       void navigator.storage?.persist?.().catch(() => undefined);
     });
-  const importFile = (file?: File) =>
+  const importFile = (file?: File, rehearsal = false) =>
     run(async () => {
       if (!file) return;
       if (file.size > MAX_MOBILE_PACKAGE_BYTES) throw new Error('移动端导入文件不能超过 64 MB');
@@ -115,23 +119,41 @@ export default function MobileApp() {
           assets: {},
           warnings: ['已导入编排 JSON。音乐和素材需要完整项目包。', ...getMissingAssets(document, {})],
         };
-      } else project = await readProjectPackage(file, file.name.replace(/\.(zip|choreo)$/i, ''));
+      } else
+        project = await (rehearsal ? readRehearsalPackage : readProjectPackage)(
+          file,
+          file.name.replace(/\.(zip|choreo)$/i, '')
+        );
+      if (rehearsal) {
+        project.mode = 'rehearsal';
+        project.warnings = rehearsalWarnings(project.document, project.assets);
+      }
       const id = newId();
-      await saveMobileProject(id, project.document, project.assets);
+      await saveMobileProject(id, project.document, project.assets, project.mode);
       setActive({ id, project });
     });
   if (active)
     return (
       <Suspense fallback={<div className="mobile-loading">正在打开舞台…</div>}>
-        <MobileEditor
-          key={active.id}
-          id={active.id}
-          initial={active.project}
-          onExit={() => {
-            setActive(null);
-            void refresh();
-          }}
-        />
+        {active.project.mode === 'rehearsal' ? (
+          <MobileRehearsal
+            project={active.project}
+            onExit={() => {
+              setActive(null);
+              void refresh();
+            }}
+          />
+        ) : (
+          <MobileEditor
+            key={active.id}
+            id={active.id}
+            initial={active.project}
+            onExit={() => {
+              setActive(null);
+              void refresh();
+            }}
+          />
+        )}
       </Suspense>
     );
   return (
@@ -162,6 +184,29 @@ export default function MobileApp() {
           <ArrowDownToLine size={20} /> 导入项目
         </button>
       </div>
+      <button
+        className="mobile-rehearsal-import mobile-secondary"
+        disabled={busy}
+        onClick={() => rehearsalInput.current?.click()}
+      >
+        <Smartphone size={20} />
+        <span>
+          <strong>团员排练 · 导入编排包</strong>
+          <small>只读查看队形与备注，仅载入编排和音乐</small>
+        </span>
+        <ChevronRight size={20} />
+      </button>
+      <input
+        ref={rehearsalInput}
+        className="sr-only"
+        type="file"
+        accept=".zip,.choreo,.json,application/zip,application/json"
+        aria-label="导入团员排练包"
+        onChange={(event) => {
+          void importFile(event.target.files?.[0], true);
+          event.target.value = '';
+        }}
+      />
       <input
         ref={input}
         className="sr-only"
@@ -216,6 +261,7 @@ export default function MobileApp() {
               <span className="mobile-project-card__info">
                 <strong>{project.name}</strong>
                 <span>
+                  {project.mode === 'rehearsal' ? '只读排练 · ' : ''}
                   {project.actors} 位演员 · {project.formations} 个队形
                 </span>
                 <small>

@@ -17,6 +17,7 @@ import {
 } from '../mobile/editor-model';
 import {
   readProjectPackage,
+  readRehearsalPackage,
   writeProjectPackage,
   parseMobileDocument,
   inspectPackage,
@@ -289,4 +290,42 @@ test('meter nudges preserve locks, elevation and group spacing at a boundary', (
   const edge = nudgeActors(doc, 'f1', ['p1', 'p3'], 100, 0);
   assert.ok(Math.abs(edge.frames[0].positions.p3.x - (100 + (2 / 14) * 100)) < 1e-10);
   assert.equal(edge.frames[0].positions.p3.x - edge.frames[0].positions.p1.x, 20);
+});
+
+test('rehearsal imports only JSON and music, persists read-only mode and validates retained bytes', async () => {
+  const doc = fixture();
+  const json = strToU8(JSON.stringify(doc));
+  const music = new Uint8Array([1, 2, 3, 4]);
+  const files = {
+    'project.json': json,
+    [doc.musicAsset as string]: music,
+    'assets/unused.glb': new Uint8Array([99, 98, 97]),
+  };
+  const archive = zipSync(files, { level: 0 });
+  // 故意破坏被跳过模型的 CRC；排练不解压它，完整编辑导入仍会拒绝。
+  const modelOffset = Buffer.from(archive).indexOf(Buffer.from([99, 98, 97]));
+  assert.ok(modelOffset > 0);
+  archive[modelOffset] = 96;
+  const blob = new Blob([archive]);
+  const rehearsal = await readRehearsalPackage(blob);
+  assert.deepEqual(Object.keys(rehearsal.assets), [doc.musicAsset]);
+  assert.deepEqual(rehearsal.document.frames, parseMobileDocument(doc).frames);
+  assert.deepEqual(rehearsal.warnings, []);
+  await assert.rejects(readProjectPackage(blob), /校验失败/);
+  await saveMobileProject('rehearsal-only', rehearsal.document, rehearsal.assets, rehearsal.mode);
+  const restored = await loadMobileProject('rehearsal-only');
+  assert.equal(restored.mode, 'rehearsal');
+  assert.deepEqual(restored.warnings, []);
+  assert.deepEqual(Object.keys(restored.assets), [doc.musicAsset]);
+  assert.deepEqual(new Uint8Array(await restored.assets[doc.musicAsset as string].arrayBuffer()), music);
+  assert.equal((await listMobileProjects()).find((p) => p.id === 'rehearsal-only')?.mode, 'rehearsal');
+  const missing = await readRehearsalPackage(new Blob([zipSync({ 'project.json': json })]));
+  assert.equal(missing.warnings.length, 1);
+  assert.match(missing.warnings[0], /音乐/);
+  const corrupt = zipSync(files, { level: 0 });
+  const audioOffset = Buffer.from(corrupt).indexOf(Buffer.from(music));
+  assert.ok(audioOffset > 0);
+  corrupt[audioOffset] = 77;
+  await assert.rejects(readRehearsalPackage(new Blob([corrupt])), /校验失败/);
+  await deleteMobileProject('rehearsal-only');
 });
