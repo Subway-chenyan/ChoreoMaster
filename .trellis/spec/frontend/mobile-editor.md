@@ -81,3 +81,41 @@ await completion;
 ```
 
 Do not set `previousAssets = assets` before persistence succeeds. Do not implement a second independent schema migrator in the mobile shell.
+
+## Landscape workspace and precision editing (2026-10-13)
+
+### Scope and signatures
+
+`MobileSequence`, `MobileTools` and `MobileSelectionBar` own the reusable controls. CSS imports in `mobile.css` are ordered base -> editor -> landscape, so base modal styles cannot override landscape drawers.
+
+```ts
+nudgeActors(document: ProjectDocument, frameId: string, ids: string[], dxMeters: number, dyMeters: number): ProjectDocument
+```
+
+### Contracts
+
+- Landscape workspace uses `(orientation: landscape) and (min-width: 600px) and (max-height: 600px)`. Width guard prevents a portrait phone's keyboard from causing the landscape layout. No React editor remount or schema change.
+- Layout: compact header, left tool rail, central stage, right formation rail. Collapsing the formation rail retains previous/play/next controls and only changes UI state. Portrait always exposes the filmstrip regardless of this preference.
+- Formation list scrolls its own `scrollTop`/`scrollLeft` to reveal the active card; a ResizeObserver handles rotation and expansion. Do not use global `scrollIntoView`, which can move the entire editor. Playback/scrubbing highlights the displayed formation; “编辑当前队形” selects its start position before editing.
+- Landscape sheets remain modal with focus trap/restore, now presented as right drawers. Content scrolls independently of their close header. They do not allow editing the stage behind the modal.
+- Selection/status footers have equal 48px minimum height to avoid moving the stage under the pointer on selection. Snap remains available in the stage header even with actors selected.
+- In touch-enabled Stage only, displacement below 6 CSS pixels is a tap: no position preview, no snapping and no history commit. Once a drag crosses the threshold it remains a drag even if it returns to the origin. Pointer cancellation/pinch still discards the preview. Desktop pointer behavior remains unchanged.
+- Precision steps are 0.1 / 0.5 / 1 meter, independent of snap preference. Convert X by main-stage width and Y by depth, retain Z, skip effectively locked actors (including group locks), and constrain the common delta against stage/wing bounds so movable members preserve their spacing. No-op returns the original document and creates no history entry.
+- Android back closes a panel, then clears active selection, then flushes and leaves the editor. Hardware behavior remains a pending device check.
+
+### Validation and cases
+
+| Case | Required result |
+| --- | --- |
+| Tap or 3px jitter while snapping is on | Actor coordinates/history unchanged |
+| Move 0.14m on a 14m-wide stage | X increases by 1 percentage point |
+| Group member reaches stage/wing boundary | All movable members stop with the same delta |
+| Only locked/missing actors, zero delta, non-finite meter input | Same document reference |
+| Collapse and portrait/landscape rotation | Project, history and selection retained; playback reachable |
+| More formations than the rail can display | Active formation fully visible inside its own scroll container |
+
+### Verification
+
+`tests/mobile-core.test.ts` asserts meter conversion, Z/lock retention, group boundary behavior and no-op references. `tests/mobile-ui/landscape.spec.ts` covers 640x360, 812x375, 915x412, portrait return, collapsed playback/history, long lists, preview-to-edit, side-drawer focus, precision undo and tap/jitter without snapping. Keep the existing mobile gesture and desktop regressions.
+
+Wrong: snap every `pointerup` after a performer `pointerdown`. Correct: distinguish a selection tap from an actual drag before invoking `onPositionChange` / `onDragEnd`.

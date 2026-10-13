@@ -1,4 +1,5 @@
 import type { Frame, Performer, Position, ProjectDocument } from '../types';
+import { getStageXBounds } from '../utils/coordinates';
 import { PROJECT_SCHEMA_VERSION } from '../electron/model-asset-contract';
 import { getEffectivelyLockedPerformerIds } from '../utils/performer-locking';
 
@@ -164,4 +165,56 @@ export function editHistory(state: EditHistory, action: HistoryAction): EditHist
   return next
     ? { past: [...state.past, state.present], present: next, future: state.future.slice(1) }
     : state;
+}
+
+// 微调按物理米数换算，一起约束整组位移，避免触边后队形被压扁。
+export function nudgeActors(
+  document: ProjectDocument,
+  frameId: string,
+  ids: string[],
+  dxMeters: number,
+  dyMeters: number
+): ProjectDocument {
+  const frame = document.frames.find((item) => item.id === frameId);
+  const { width, depth } = document.stageConfig;
+  if (!frame || ![dxMeters, dyMeters, width, depth].every(Number.isFinite) || width <= 0 || depth <= 0)
+    return document;
+  const locked = new Set(getEffectivelyLockedPerformerIds(document.performers, document.performerGroups));
+  const selected = new Set(ids);
+  const movable = document.performers.filter(
+    (actor) => selected.has(actor.id) && !locked.has(actor.id) && frame.positions[actor.id]
+  );
+  if (!movable.length) return document;
+  const bounds = getStageXBounds(document.stageConfig);
+  const constrain = (delta: number, values: number[], min: number, max: number) => {
+    // 已在边界外的旧项目只允许向舞台内移动，不做额外跳跃修复。
+    return delta > 0
+      ? Math.min(delta, Math.max(0, max - Math.max(...values)))
+      : Math.max(delta, Math.min(0, min - Math.min(...values)));
+  };
+  const dx = constrain(
+    (dxMeters / width) * 100,
+    movable.map((actor) => frame.positions[actor.id].x),
+    bounds.min,
+    bounds.max
+  );
+  const dy = constrain(
+    (dyMeters / depth) * 100,
+    movable.map((actor) => frame.positions[actor.id].y),
+    0,
+    100
+  );
+  if (dx === 0 && dy === 0) return document;
+  return moveActors(
+    document,
+    frameId,
+    movable.map((actor) => ({
+      id: actor.id,
+      pos: {
+        ...frame.positions[actor.id],
+        x: frame.positions[actor.id].x + dx,
+        y: frame.positions[actor.id].y + dy,
+      },
+    }))
+  );
 }

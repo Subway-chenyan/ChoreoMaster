@@ -9,6 +9,7 @@ import {
   createMobileDocument,
   addActor,
   moveActors,
+  nudgeActors,
   removeActors,
   duplicateFormation,
   changeFormationDuration,
@@ -255,4 +256,37 @@ test('asset write failure aborts the document write in the same transaction', as
   }
   assert.equal((await loadMobileProject('atomic')).document.name, doc.name);
   await deleteMobileProject('atomic');
+});
+
+test('meter nudges preserve locks, elevation and group spacing at a boundary', () => {
+  let doc = fixture();
+  doc = addActor(doc, {
+    id: 'p3',
+    name: '群舞',
+    label: 'C',
+    color: '#fff',
+    shape: 'circle',
+    type: 'performer',
+  });
+  doc.frames[0].positions.p3 = { x: 40, y: 99, z: 3 };
+  const moved = nudgeActors(doc, 'f1', ['p1', 'p2', 'p3'], 0.14, 0.8);
+  assert.equal(moved.frames[0].positions.p1.x, 21); // 0.14m / 14m = 1%
+  assert.equal(moved.frames[0].positions.p3.x, 41);
+  assert.equal(moved.frames[0].positions.p1.y, 31); // Group stops together when p3 reaches 100%.
+  assert.equal(moved.frames[0].positions.p3.y, 100);
+  assert.equal(moved.frames[0].positions.p1.z, 2);
+  assert.equal(moved.frames[0].positions.p3.z, 3);
+  assert.deepEqual(moved.frames[0].positions.p2, doc.frames[0].positions.p2);
+  assert.equal(nudgeActors(moved, 'f1', ['p1', 'p3'], 0, 0.1), moved);
+  assert.equal(nudgeActors(doc, 'f1', ['p2'], 0.1, 0), doc);
+  assert.equal(nudgeActors(doc, 'f1', ['missing'], 0.1, 0), doc);
+  assert.equal(nudgeActors(doc, 'f1', ['p1'], NaN, 0), doc);
+  const withGroupLock = {
+    ...doc,
+    performerGroups: doc.performerGroups.map((group) => ({ ...group, locked: true })),
+  };
+  assert.equal(nudgeActors(withGroupLock, 'f1', ['p1'], 0.1, 0), withGroupLock);
+  const edge = nudgeActors(doc, 'f1', ['p1', 'p3'], 100, 0);
+  assert.ok(Math.abs(edge.frames[0].positions.p3.x - (100 + (2 / 14) * 100)) < 1e-10);
+  assert.equal(edge.frames[0].positions.p3.x - edge.frames[0].positions.p1.x, 20);
 });

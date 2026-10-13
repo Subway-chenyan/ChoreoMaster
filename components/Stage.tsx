@@ -217,6 +217,7 @@ export const Stage: React.FC<StageProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
+  const dragMoved = useRef(false);
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
   const [panState, setPanState] = useState<PanState | null>(null);
   const [placementPosition, setPlacementPosition] = useState<Position>({ x: 50, y: 50 });
@@ -642,6 +643,8 @@ export const Stage: React.FC<StageProps> = ({
     }
 
     if (dragState && stageRef.current) {
+      if (touchMode && !dragMoved.current && Math.hypot(e.clientX - dragState.startX, e.clientY - dragState.startY) < 6) return;
+      dragMoved.current = true;
       const updates = getDragUpdates(e.clientX, e.clientY, dragState);
 
       if (updates.length > 0) {
@@ -660,6 +663,12 @@ export const Stage: React.FC<StageProps> = ({
     }
 
     if (readonly) return;
+    // 轻点只选择演员，手指抖动不能触发网格吸附或写入历史。
+    if (touchMode && dragState && !dragMoved.current && Math.hypot(e.clientX - dragState.startX, e.clientY - dragState.startY) < 6) {
+      setDragState(null);
+      onDragCancel?.();
+      return;
+    }
     const finalDragUpdates = dragState ? getDragUpdates(e.clientX, e.clientY, dragState) : [];
     const committedDragUpdates = snapToGrid
       ? finalDragUpdates.map((update) => ({
@@ -773,6 +782,7 @@ export const Stage: React.FC<StageProps> = ({
     });
 
     if (Object.keys(initialPositions).length > 0) {
+      dragMoved.current = false;
       setDragState({
         startX: e.clientX,
         startY: e.clientY,

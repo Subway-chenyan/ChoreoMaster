@@ -1,39 +1,35 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   Check,
-  ChevronLeft,
-  ChevronRight,
-  Copy,
-  Hand,
-  Layers,
   Magnet,
   Maximize,
   MoreHorizontal,
-  MousePointer2,
+  PanelRightClose,
+  PanelRightOpen,
   Music2,
-  Pause,
-  Play,
   Plus,
   Redo2,
   RotateCcw,
   Save,
   Share2,
-  SlidersHorizontal,
   Trash2,
   Undo2,
-  Users,
   X,
 } from 'lucide-react';
 import { Stage } from '../Stage';
 import { MobileSheet } from './MobileSheet';
 import { MobileNumberInput } from './MobileNumberInput';
+import { MobileSequence } from './MobileSequence';
+import { MobileTools } from './MobileTools';
+import { MobileSelectionBar } from './MobileSelectionBar';
 import { useProjectEditor } from '../../mobile/use-project-editor';
 import {
   addActor,
   changeFormationDuration,
   duplicateFormation,
   moveActors,
+  nudgeActors,
   removeActors,
   removeFormation,
 } from '../../mobile/editor-model';
@@ -46,34 +42,6 @@ import type { Frame, Performer, Position, ProjectDocument } from '../../types';
 
 const COLORS = ['#38bdf8', '#f472b6', '#a78bfa', '#34d399', '#fbbf24', '#fb923c'];
 type Sheet = 'actors' | 'formation' | 'stage' | 'project' | 'delete-actors' | 'delete-frame' | null;
-const timeLabel = (ms: number) =>
-  `${Math.floor(ms / 60000)
-    .toString()
-    .padStart(2, '0')}:${Math.floor((ms / 1000) % 60)
-    .toString()
-    .padStart(2, '0')}.${Math.floor((ms % 1000) / 100)}`;
-
-function FormationPreview({ frame, document }: { frame: Frame; document: ProjectDocument }) {
-  return (
-    <svg viewBox="0 0 100 60" aria-hidden="true">
-      <rect x="1" y="1" width="98" height="58" rx="4" fill="#19273b" stroke="#334155" />
-      <path d="M50 1v58M1 30h98" stroke="#334155" strokeDasharray="2 3" />
-      {document.performers.slice(0, 120).map((p) => {
-        const pos = frame.positions[p.id];
-        return pos ? (
-          <circle
-            key={p.id}
-            cx={Math.max(3, Math.min(97, pos.x))}
-            cy={Math.max(3, Math.min(57, pos.y * 0.6))}
-            r="2.5"
-            fill={p.color}
-          />
-        ) : null;
-      })}
-    </svg>
-  );
-}
-
 export default function MobileEditor({
   id,
   initial,
@@ -89,6 +57,8 @@ export default function MobileEditor({
   const [selected, setSelected] = useState<string[]>([]);
   const [sheet, setSheet] = useState<Sheet>(null);
   const [mode, setMode] = useState<'select' | 'multi' | 'pan'>('select');
+  const [sequenceCollapsed, setSequenceCollapsed] = useState(false);
+  const [nudgeStep, setNudgeStep] = useState(0.1);
   const [snap, setSnap] = useState(true);
   const [labels, setLabels] = useState(true);
   const [resetView, setResetView] = useState(0);
@@ -104,8 +74,10 @@ export default function MobileEditor({
   const musicInput = useRef<HTMLInputElement>(null);
   const mounted = useRef(true);
   const sorted = useMemo(() => getSortedFrames(doc.frames), [doc.frames]);
-  const frame = sorted.find((item) => item.id === selectedFrameId) ?? sorted[0];
-  const frameIndex = sorted.findIndex((item) => item.id === frame?.id);
+  const frame =
+    sorted.find((item) => item.id === selectedFrameId) ??
+    sorted.filter((item) => item.startTime <= time).at(-1) ??
+    sorted[0];
   const locked = useMemo(
     () => [...getEffectivelyLockedPerformerIds(doc.performers, doc.performerGroups)],
     [doc.performers, doc.performerGroups]
@@ -113,6 +85,11 @@ export default function MobileEditor({
   const selectedActor = doc.performers.find((actor) => actor.id === selected[0]);
   const duration = Math.max(...sorted.map((f) => f.startTime + f.duration), audioDuration, 1000);
   const previewing = playing || Math.abs(time - (frame?.startTime ?? 0)) > 1;
+  const displayFrame = previewing ? sorted.filter((item) => item.startTime <= time).at(-1) ?? frame : frame;
+  const displayFrameIndex = sorted.findIndex((item) => item.id === displayFrame?.id);
+  const visibleSelection = selected.filter(
+    (actorId) => doc.performers.some((actor) => actor.id === actorId) && frame?.positions[actorId]
+  );
   const scene = useMemo(
     () => evaluateSceneStateAtTime(time, doc.frames, doc.performers, doc.transitions ?? []),
     [time, doc.frames, doc.performers, doc.transitions]
@@ -181,6 +158,7 @@ export default function MobileEditor({
   backAction.current = () => {
     if (busy) return;
     if (sheet) setSheet(null);
+    else if (visibleSelection.length) setSelected([]);
     else void run(leave);
   };
   useEffect(() => {
@@ -302,7 +280,9 @@ export default function MobileEditor({
       setMessage('已交给系统分享或下载。请在接收端确认文件保存完成。');
     });
   return (
-    <main className="mobile-app mobile-editor">
+    <main
+      className={`mobile-app mobile-editor ${sequenceCollapsed ? 'mobile-editor--sequence-collapsed' : ''}`}
+    >
       <header className="mobile-editor__header">
         <button
           className="mobile-icon"
@@ -339,6 +319,15 @@ export default function MobileEditor({
         >
           <Redo2 size={20} />
         </button>
+        <button
+          className="mobile-icon mobile-landscape-only"
+          aria-label={sequenceCollapsed ? '展开队形栏' : '收起队形栏'}
+          aria-expanded={!sequenceCollapsed}
+          aria-controls="mobile-sequence"
+          onClick={() => setSequenceCollapsed((value) => !value)}
+        >
+          {sequenceCollapsed ? <PanelRightOpen size={21} /> : <PanelRightClose size={21} />}
+        </button>
         <button className="mobile-icon" aria-label="项目与分享" onClick={() => openSheet('project')}>
           <MoreHorizontal size={22} />
         </button>
@@ -356,19 +345,35 @@ export default function MobileEditor({
                 {previewing ? '排练预览 · 点选队形继续编辑' : '正在编辑'}
               </span>
               <strong>
-                {frame?.name ?? '空舞台'}{' '}
+                {displayFrame?.name ?? '空舞台'}{' '}
                 <small>
-                  {frameIndex + 1} / {sorted.length}
+                  {displayFrameIndex + 1} / {sorted.length}
                 </small>
               </strong>
             </div>
-            <button
-              className="mobile-icon"
-              aria-label="重置舞台视角"
-              onClick={() => setResetView((value) => value + 1)}
-            >
-              <Maximize size={20} />
-            </button>
+            <div className="mobile-stage-heading__actions">
+              {previewing && displayFrame && (
+                <button className="mobile-return-edit" onClick={() => selectFrame(displayFrame)}>
+                  编辑当前队形
+                </button>
+              )}
+              <button
+                className={`mobile-icon ${snap ? 'active' : ''}`}
+                aria-label="吸附到网格"
+                aria-pressed={snap}
+                title={snap ? '关闭网格吸附' : '开启网格吸附'}
+                onClick={() => setSnap((value) => !value)}
+              >
+                <Magnet size={19} />
+              </button>
+              <button
+                className="mobile-icon"
+                aria-label="重置舞台视角"
+                onClick={() => setResetView((value) => value + 1)}
+              >
+                <Maximize size={20} />
+              </button>
+            </div>
           </div>
           {frame ? (
             <Stage
@@ -431,21 +436,30 @@ export default function MobileEditor({
               </button>
             </div>
           )}
-          <div className="mobile-stage-caption">
-            <span>
-              {selected.length
-                ? `已选 ${selected.length} 人`
-                : `${doc.stageConfig.width} × ${doc.stageConfig.depth} m · ${doc.performers.length} 位演员`}
-            </span>
-            <button
-              aria-label="吸附到网格"
-              aria-pressed={snap}
-              className={snap ? 'active' : ''}
-              onClick={() => setSnap((value) => !value)}
-            >
-              <Magnet size={15} /> {snap ? '吸附已开' : '自由移动'}
-            </button>
-          </div>
+          {visibleSelection.length > 0 && !previewing ? (
+            <MobileSelectionBar
+              count={visibleSelection.length}
+              movable={visibleSelection.some((actorId) => !locked.includes(actorId))}
+              mode={mode}
+              step={nudgeStep}
+              onStep={() => setNudgeStep((value) => (value === 0.1 ? 0.5 : value === 0.5 ? 1 : 0.1))}
+              onClear={() => setSelected([])}
+              onEdit={() => openSheet('actors')}
+              onMove={() => setMode('select')}
+              onNudge={(x, y) => {
+                if (frame) commit(nudgeActors(doc, frame.id, visibleSelection, x, y));
+              }}
+            />
+          ) : (
+            <div className="mobile-stage-caption">
+              <span>
+                {selected.length
+                  ? `已选 ${selected.length} 人`
+                  : `${doc.stageConfig.width} × ${doc.stageConfig.depth} m · ${doc.performers.length} 位演员`}
+              </span>
+              <span>{snap ? '吸附已开' : '自由移动'}</span>
+            </div>
+          )}
           <p className="mobile-gesture-hint">
             {mode === 'pan'
               ? '单指平移视角 · 双指缩放'
@@ -454,131 +468,45 @@ export default function MobileEditor({
               : '拖动演员调整站位 · 双指缩放 / 平移'}
           </p>
         </section>
-        <section className="mobile-editor__sequence" aria-label="队形与播放">
-          <div className="mobile-playback">
-            <button
-              className="mobile-icon"
-              aria-label="上一队形"
-              disabled={frameIndex <= 0}
-              onClick={() => selectFrame(sorted[frameIndex - 1])}
-            >
-              <ChevronLeft size={22} />
-            </button>
-            <button
-              className="mobile-play"
-              aria-label={playing ? '暂停排练' : '播放排练'}
-              onClick={() => void togglePlayback()}
-            >
-              {playing ? <Pause size={23} fill="currentColor" /> : <Play size={23} fill="currentColor" />}
-            </button>
-            <button
-              className="mobile-icon"
-              aria-label="下一队形"
-              disabled={frameIndex >= sorted.length - 1}
-              onClick={() => selectFrame(sorted[frameIndex + 1])}
-            >
-              <ChevronRight size={22} />
-            </button>
-            <span className="mobile-clock">
-              {timeLabel(time)} <small>/ {timeLabel(duration)}</small>
-            </span>
-            <button className="mobile-icon" aria-label="导入音乐" onClick={() => musicInput.current?.click()}>
-              <Music2 size={20} />
-            </button>
-          </div>
-          <input
-            className="mobile-scrubber"
-            aria-label="播放位置"
-            type="range"
-            min={0}
-            max={duration}
-            step={50}
-            value={time}
-            onChange={(event) => {
-              setPlaying(false);
-              const next = Number(event.target.value);
-              setTime(next);
-              if (audio.current) audio.current.currentTime = next / 1000;
-            }}
-          />
-          <div className="mobile-sequence-heading">
-            <span>
-              <Layers size={15} /> 队形序列
-            </span>
-            <button onClick={() => openSheet('formation')} disabled={!frame}>
-              编辑时长与备注 <ChevronRight size={14} />
-            </button>
-          </div>
-          <div className="mobile-filmstrip">
-            {sorted.map((item, index) => (
-              <button
-                key={item.id}
-                className={`mobile-frame ${item.id === frame?.id ? 'mobile-frame--active' : ''}`}
-                aria-label={`队形 ${index + 1} ${item.name}`}
-                aria-pressed={item.id === frame?.id}
-                onClick={() => selectFrame(item)}
-              >
-                <FormationPreview frame={item} document={doc} />
-                <span>
-                  <b>{String(index + 1).padStart(2, '0')}</b> {item.name}
-                </span>
-                <small>{(item.duration / 1000).toFixed(1)} 秒</small>
-              </button>
-            ))}
-            <button
-              className="mobile-frame-add"
-              aria-label="复制当前队形"
-              disabled={!frame || playing}
-              onClick={() => {
-                if (!frame) return;
-                const nextId = newId();
-                const next = duplicateFormation(doc, frame.id, nextId);
-                commit(next);
-                const added = next.frames.find((f) => f.id === nextId);
-                if (added) selectFrame(added);
-              }}
-            >
-              <Plus size={23} />
-              <span>复制队形</span>
-            </button>
-          </div>
-        </section>
+        <MobileSequence
+          document={doc}
+          frames={sorted}
+          frameIndex={displayFrameIndex}
+          playing={playing}
+          previewing={previewing}
+          time={time}
+          duration={duration}
+          collapsed={sequenceCollapsed}
+          onSelect={selectFrame}
+          onPlay={() => void togglePlayback()}
+          onMusic={() => musicInput.current?.click()}
+          onSeek={(next) => {
+            setPlaying(false);
+            setTime(next);
+            if (audio.current) audio.current.currentTime = next / 1000;
+          }}
+          onEdit={() => {
+            if (displayFrame) {
+              selectFrame(displayFrame);
+              setSheet('formation');
+            }
+          }}
+          onDuplicate={() => {
+            if (!frame) return;
+            const nextId = newId();
+            const next = duplicateFormation(doc, frame.id, nextId);
+            commit(next);
+            const added = next.frames.find((item) => item.id === nextId);
+            if (added) selectFrame(added);
+          }}
+        />
       </div>
-      <nav className="mobile-tools" aria-label="舞台工具">
-        <button
-          aria-pressed={mode === 'select'}
-          className={mode === 'select' ? 'active' : ''}
-          onClick={() => setMode('select')}
-        >
-          <MousePointer2 size={20} />
-          <span>移动</span>
-        </button>
-        <button
-          aria-pressed={mode === 'multi'}
-          className={mode === 'multi' ? 'active' : ''}
-          onClick={() => setMode('multi')}
-        >
-          <Copy size={20} />
-          <span>多选</span>
-        </button>
-        <button
-          aria-pressed={mode === 'pan'}
-          className={mode === 'pan' ? 'active' : ''}
-          onClick={() => setMode('pan')}
-        >
-          <Hand size={20} />
-          <span>平移</span>
-        </button>
-        <i />
-        <button onClick={() => openSheet('actors')}>
-          <Users size={20} />
-          <span>演员</span>
-        </button>
-        <button onClick={() => openSheet('stage')}>
-          <SlidersHorizontal size={20} />
-          <span>舞台</span>
-        </button>
-      </nav>
+      <MobileTools
+        mode={mode}
+        onMode={setMode}
+        onActors={() => openSheet('actors')}
+        onStage={() => openSheet('stage')}
+      />
       <input
         ref={musicInput}
         className="sr-only"
