@@ -237,3 +237,36 @@ Implemented offline mobile project library, touch stage gestures, formation/acto
 ### Next Steps
 
 - None - task complete
+
+
+## Session 8: 手机横屏工作台与精确触控优化
+
+**Date**: 2026-10-13
+**Task**: 手机横屏工作台与精确触控优化
+**Branch**: `main`
+
+### Summary
+
+实现横屏左工具栏、可收起队形栏、右侧属性抽屉和选择快捷操作；新增按米微调与整组边界约束，修复轻点或抖动触发网格吸附。类型检查、7 项移动核心、149 项桌面回归、8 项浏览器交互、生产构建及 Android 资源同步通过。已更新截图和文档；APK 与真机行为未验证。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `427d85a` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
