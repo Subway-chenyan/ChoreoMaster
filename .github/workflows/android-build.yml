@@ -34,6 +34,10 @@ jobs:
       - run: npm run typecheck && npm run test:mobile
       - run: npx playwright install --with-deps chromium
       - run: npm run test:mobile:ui
+      - name: Set up Android SDK tools
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools
       - name: Install Android SDK components
         run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
       - name: Prepare fixed release signing
