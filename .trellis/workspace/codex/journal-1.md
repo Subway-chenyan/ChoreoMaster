@@ -401,3 +401,34 @@ Implemented offline mobile project library, touch stage gestures, formation/acto
 ### Next Steps
 
 - 真机确认演员视角、显示设置与收起态的触控体验
+
+
+## Session 13: 1.5.0 发布替换手机下载入口
+
+**Date**: 2026-10-14
+**Task**: 移动端排练显示优化（10-14-mobile-rehearsal-display）
+**Branch**: `main`
+
+### Summary
+
+为让网页/Windows 下载入口提供带新功能的手机包，走正式发布链路：新增 changeset（minor），合并版本 PR #22（1.4.0→1.5.0，GITHUB_TOKEN 创建的 PR 需 owner 批准 workflow 后检查通过），Desktop Release 全绿。stable 固定签名 APK（含演员视角/显示设置/收起布局）发布至 COS 不可变目录并更新 latest.json 指针与 CosStage-Android.apk 别名。实站验证：别名=版本化 APK=sidecar=指针 sha256 一致（c2a15130…），签名块在，Windows 安装包指针同步 1.5.0，网页入口显示"下载 Android · v1.5.0"并指向不可变地址，GitHub Release v1.5.0 四项资产齐全。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ce7d8cd` | chore(changeset): rehearsal display settings and performer view |
+| `d23e9c8` | chore: version packages (#22)（发布提交，tag v1.5.0） |
+
+### Testing
+
+- [OK] 发布回归 115/2 跳过；PR #22 检查 build/apk 4m43s、quality 1m30s 通过
+- [OK] Desktop Release v1.5.0 全绿；线上 sha256 三方一致、网页入口实测 v1.5.0
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 真机从下载入口安装 1.5.0 验证新功能与升级路径
