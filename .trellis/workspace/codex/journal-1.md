@@ -370,3 +370,34 @@ Implemented offline mobile project library, touch stage gestures, formation/acto
 ### Next Steps
 
 - 真机安装与升级验证（与 preview 包共存）由用户完成
+
+
+## Session 12: 移动端排练显示优化与演员视角
+
+**Date**: 2026-10-14
+**Task**: 移动端排练显示优化（10-14-mobile-rehearsal-display）
+**Branch**: `main`
+
+### Summary
+
+团员排练只读视图新增显示设置（人物缩放 50–200%、名字字体缩放 60–200%、名字显隐开关，localStorage 持久化）与演员视角/导演视角切换（默认演员视角，参考 2D 导出排练视角的 180° 点镜像，Stage 新增 flippedView，rotate 追加在 pan/zoom 变换链尾、文字用原生 rotate 属性反向保持正向）。收起态改为舞台近全屏 + 右侧悬浮胶囊仅留展开/播放/上下切换，Android 返回键收起态先展开；展开布局紧凑化（顶栏 42px、备注上限 15%）。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| (see git log) | feat(mobile): add rehearsal display settings and performer view |
+
+### Testing
+
+- [OK] mobile-core 11 通过（新增设置持久化/钳制/缩放/字号 3 项）；mobile-ui 14 通过（排练新增设置与视角持久化用例）
+- [OK] 桌面回归 150 通过；typecheck、生产构建、Android 同步通过
+- [OK] 视觉验收：旋转后文字全部正向、镜像正确、收起胶囊完整；缩小+隐藏名字有效缓解密集拥挤
+
+### Status
+
+[OK] **Completed**（待真机验证 APK 表现）
+
+### Next Steps
+
+- 真机确认演员视角、显示设置与收起态的触控体验

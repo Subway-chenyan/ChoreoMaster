@@ -30,7 +30,18 @@ import {
   deleteMobileProject,
 } from '../mobile/project-store';
 import { createLegacyUnitBoxAsset } from '../electron/model-asset-contract';
+import { DEFAULT_PERFORMER_LABEL_FONT_SIZE } from '../electron/stage-defaults';
 import { pinchViewport } from '../mobile/gestures';
+import {
+  DEFAULT_REHEARSAL_DISPLAY,
+  MAX_PERFORMER_SCALE,
+  MIN_LABEL_SCALE,
+  applyRehearsalLabelScale,
+  loadRehearsalDisplay,
+  saveRehearsalDisplay,
+  scaleRehearsalPerformers,
+} from '../mobile/rehearsal-display';
+import type { StageConfig } from '../types';
 import {
   createManagedProject,
   saveManagedProject,
@@ -328,4 +339,55 @@ test('rehearsal imports only JSON and music, persists read-only mode and validat
   corrupt[audioOffset] = 77;
   await assert.rejects(readRehearsalPackage(new Blob([corrupt])), /校验失败/);
   await deleteMobileProject('rehearsal-only');
+});
+
+test('rehearsal display settings persist, clamp and fall back per field', () => {
+  assert.deepEqual(loadRehearsalDisplay(null), DEFAULT_REHEARSAL_DISPLAY);
+  assert.deepEqual(loadRehearsalDisplay('not json'), DEFAULT_REHEARSAL_DISPLAY);
+  assert.deepEqual(loadRehearsalDisplay('42'), DEFAULT_REHEARSAL_DISPLAY);
+  assert.deepEqual(
+    loadRehearsalDisplay(JSON.stringify({ showNames: false, performerScale: 9, labelScale: -3, performerView: false })),
+    { showNames: false, performerScale: MAX_PERFORMER_SCALE, labelScale: MIN_LABEL_SCALE, performerView: false }
+  );
+  assert.deepEqual(
+    loadRehearsalDisplay(JSON.stringify({ performerScale: 'big', showNames: 'yes' })),
+    { ...DEFAULT_REHEARSAL_DISPLAY, showNames: DEFAULT_REHEARSAL_DISPLAY.showNames }
+  );
+  const saved = JSON.parse(
+    saveRehearsalDisplay({ showNames: true, performerScale: 42, labelScale: 0.1, performerView: true })
+  );
+  assert.equal(saved.performerScale, MAX_PERFORMER_SCALE);
+  assert.equal(saved.labelScale, MIN_LABEL_SCALE);
+  assert.deepEqual(loadRehearsalDisplay(JSON.stringify(saved)), {
+    showNames: true,
+    performerScale: MAX_PERFORMER_SCALE,
+    labelScale: MIN_LABEL_SCALE,
+    performerView: true,
+  });
+});
+
+test('performer scaling only touches performers and keeps default sizes overridable', () => {
+  const performers = [
+    { id: 'a', name: '甲', color: '#fff', label: 'A', shape: 'circle' as const, width: 1, depth: 0.8 },
+    { id: 'b', name: '乙', color: '#fff', label: 'B', shape: 'circle' as const, type: 'performer' as const },
+    { id: 'c', name: '平台', color: '#fff', label: 'C', shape: 'square' as const, type: 'prop' as const, width: 4, depth: 2 },
+  ];
+  assert.equal(scaleRehearsalPerformers(performers, 1), performers);
+  const scaled = scaleRehearsalPerformers(performers, 1.5);
+  assert.equal(scaled[0].width, 1.5);
+  assert.ok(Math.abs((scaled[0].depth ?? 0) - 1.2) < 1e-9);
+  assert.equal(scaled[1].width, undefined);
+  assert.equal(scaled[1].depth, undefined);
+  assert.equal(scaled[2].width, 4);
+  assert.equal(scaled[2].depth, 2);
+});
+
+test('label scaling builds on the project stage config with the shared default fallback', () => {
+  const base = { performerLabelFontSize: 14 } as StageConfig;
+  assert.equal(applyRehearsalLabelScale(base, 1), base);
+  assert.equal(applyRehearsalLabelScale(base, 1.5).performerLabelFontSize, 21);
+  assert.equal(
+    applyRehearsalLabelScale({} as StageConfig, 2).performerLabelFontSize,
+    DEFAULT_PERFORMER_LABEL_FONT_SIZE * 2
+  );
 });

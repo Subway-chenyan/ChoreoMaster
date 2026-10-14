@@ -50,6 +50,8 @@ interface StageProps {
   mode?: ToolMode;
   showLabels?: boolean;
   showDirectionArrows?: boolean;
+  /** 演员视角：整个平面 180° 点镜像（文字保持正向），与 2D 导出的排练视角同语义 */
+  flippedView?: boolean;
   gridScale?: number;
   snapToGrid?: boolean;
   onZoom?: (delta: number) => void;
@@ -201,6 +203,7 @@ export const Stage: React.FC<StageProps> = ({
   mode = ToolMode.SELECT,
   showLabels = true,
   showDirectionArrows = true,
+  flippedView = false,
   gridScale = 1,
   snapToGrid = false,
   onZoom,
@@ -936,7 +939,8 @@ export const Stage: React.FC<StageProps> = ({
           height: fittedSize.height > 0 ? `${fittedSize.height}px` : 'auto',
           aspectRatio: `${visualAspectRatio}`,
           cursor: placementPreview ? 'crosshair' : panState ? 'grabbing' : mode === ToolMode.SELECT ? 'default' : 'crosshair',
-          transform: `translate(${viewportOffset.x}px, ${viewportOffset.y}px) scale(${viewportScale})`,
+          // rotate 放在变换链尾（最先应用），平移与缩放仍按屏幕方向生效
+          transform: `translate(${viewportOffset.x}px, ${viewportOffset.y}px) scale(${viewportScale})${flippedView ? ' rotate(180deg)' : ''}`,
           transformOrigin: 'center center',
           transition: panState ? 'none' : 'transform 75ms ease-out',
         }}
@@ -1079,20 +1083,20 @@ export const Stage: React.FC<StageProps> = ({
 
         {wingWidth > 0 && (
           <>
-            <div className="absolute left-0 top-2 pointer-events-none text-[10px] font-medium tracking-widest text-amber-300/80" style={{ width: `${leftMainEdge}%`, textAlign: 'center' }}>左备场区</div>
-            <div className="absolute right-0 top-2 pointer-events-none text-[10px] font-medium tracking-widest text-amber-300/80" style={{ width: `${100 - rightMainEdge}%`, textAlign: 'center' }}>右备场区</div>
+            <div className="absolute left-0 top-2 pointer-events-none text-[10px] font-medium tracking-widest text-amber-300/80" style={{ width: `${leftMainEdge}%`, textAlign: 'center', rotate: flippedView ? '180deg' : undefined }}>左备场区</div>
+            <div className="absolute right-0 top-2 pointer-events-none text-[10px] font-medium tracking-widest text-amber-300/80" style={{ width: `${100 - rightMainEdge}%`, textAlign: 'center', rotate: flippedView ? '180deg' : undefined }}>右备场区</div>
           </>
         )}
         <div
           className="absolute top-2 pointer-events-none text-center text-[10px] font-medium tracking-wide text-slate-300/75"
-          style={{ left: `${leftMainEdge}%`, width: `${rightMainEdge - leftMainEdge}%` }}
+          style={{ left: `${leftMainEdge}%`, width: `${rightMainEdge - leftMainEdge}%`, rotate: flippedView ? '180deg' : undefined }}
         >
           主舞台 {Number(stageConfig.width.toFixed(2))}m × {Number(stageConfig.depth.toFixed(2))}m
         </div>
 
         {/* Stage Front Ruler */}
         <div className="absolute left-0 right-0 top-full z-20 h-7 border-t border-slate-400/70 bg-slate-950/75 pointer-events-none">
-          <div className="absolute inset-x-0 bottom-0 text-center text-[8px] tracking-[0.2em] text-slate-400">舞台前沿</div>
+          <div className="absolute inset-x-0 bottom-0 text-center text-[8px] tracking-[0.2em] text-slate-400" style={{ rotate: flippedView ? '180deg' : undefined }}>舞台前沿</div>
           {gridMarks.map((mark) => (
             <div
               key={`ruler-${mark.offsetMeters}`}
@@ -1100,7 +1104,7 @@ export const Stage: React.FC<StageProps> = ({
               style={{ left: `${mark.positionRatio * 100}%` }}
             >
               <span className="mx-auto block h-1.5 w-px bg-slate-200" />
-              {showGridLabels && <span>{formatStageGridLabel(mark.offsetMeters)}</span>}
+              {showGridLabels && <span className="inline-block" style={{ rotate: flippedView ? '180deg' : undefined }}>{formatStageGridLabel(mark.offsetMeters)}</span>}
             </div>
           ))}
         </div>
@@ -1317,7 +1321,7 @@ export const Stage: React.FC<StageProps> = ({
             >
               <div
                 className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 font-medium text-white bg-slate-900/80 px-2 py-0.5 rounded whitespace-nowrap shadow-sm"
-                style={{ fontSize: `${labelFontSize}px` }}
+                style={{ fontSize: `${labelFontSize}px`, rotate: flippedView ? '180deg' : undefined }}
               >
                 {performer.name}
               </div>

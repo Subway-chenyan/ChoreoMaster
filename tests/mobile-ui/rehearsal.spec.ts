@@ -11,6 +11,8 @@ function packageFile(missingMusic = false) {
     shape: 'circle',
     color: '#38bdf8',
     type: 'performer',
+    width: 2,
+    depth: 1,
   });
   doc.frames = Array.from({ length: 8 }, (_, i) => ({
     id: `f${i}`,
@@ -107,7 +109,12 @@ test('read-only rehearsal: selective import, navigation, music, notes, rotation 
   const width = (await page.locator('.rehearsal-stage').boundingBox())?.width ?? 0;
   await page.getByRole('button', { name: '收起队形列表' }).click();
   expect((await page.locator('.rehearsal-stage').boundingBox())?.width).toBeGreaterThan(width + 100);
+  await expect(page.getByRole('region', { name: '当前队形备注' })).not.toBeVisible();
+  await expect(page.locator('.rehearsal-header')).not.toBeVisible();
+  await expect(page.getByRole('button', { name: '展开队形列表' })).toBeInViewport();
   await expect(page.getByRole('button', { name: '播放排练' })).toBeInViewport();
+  await expect(page.getByRole('button', { name: '上一队形' })).toBeInViewport();
+  await expect(page.getByRole('button', { name: '下一队形' })).toBeInViewport();
   await page.getByRole('button', { name: '展开队形列表' }).click();
   await page.screenshot({ path: info.outputPath('rehearsal-landscape.png'), scale: 'css' });
   await page.setViewportSize({ width: 360, height: 640 });
@@ -126,8 +133,57 @@ test('read-only rehearsal: selective import, navigation, music, notes, rotation 
   expect(errors).toEqual([]);
 });
 
-test('missing music still permits silent read-only rehearsal', async ({ page }) => {
+test('display settings and performer perspective persist across reopen', async ({ page }) => {
+  await page.setViewportSize({ width: 915, height: 412 });
   await page.goto('/?mobile=1');
+  await page.getByLabel('导入团员排练包').setInputFiles(packageFile());
+  await expect(page.getByText('团员排练 · 只读', { exact: true })).toBeVisible();
+  // 默认演员视角：平面 180° 点镜像，文字元素保持正向
+  const surface = page.locator('.stage-surface');
+  await expect(surface).toHaveAttribute('style', /rotate\(180deg\)/);
+  const label = page.locator('.stage-surface').getByText('领舞', { exact: true });
+  await expect(label).toBeVisible();
+  const dot = page.locator('[data-performer-id]').first();
+  const setScale = async (percent: number) => {
+    await page.getByRole('button', { name: '显示设置' }).click();
+    const dialog = page.getByRole('dialog', { name: '显示设置' });
+    await expect(dialog).toBeVisible();
+    // React 受控 range 需要走原生 value setter 才会触发 onChange
+    await dialog.getByLabel(/人物大小/).evaluate((element: HTMLInputElement, value: string) => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(element, value);
+      element.dispatchEvent(new Event('input', { bubbles: true }));
+    }, String(percent));
+    await expect(dialog.getByText(`人物大小 ${percent}%`)).toBeVisible();
+    await page.getByRole('button', { name: '关闭显示设置' }).click();
+    await expect(dialog).toHaveCount(0);
+  };
+  await setScale(200);
+  const enlarged = (await dot.boundingBox())?.width ?? 0;
+  await setScale(100);
+  const base = (await dot.boundingBox())?.width ?? 0;
+  expect(base).toBeGreaterThan(0);
+  expect(enlarged).toBeGreaterThan(base * 1.5);
+  await page.getByRole('button', { name: '显示设置' }).click();
+  await page.getByRole('dialog', { name: '显示设置' }).getByRole('switch', { name: '显示名字' }).click();
+  await expect(label).toHaveCount(0);
+  await page.getByRole('button', { name: '关闭显示设置' }).click();
+  await page.getByRole('button', { name: '切换到导演视角' }).click();
+  await expect(surface).not.toHaveAttribute('style', /rotate\(180deg\)/);
+  await page.getByRole('button', { name: '返回项目库' }).click();
+  await page.reload();
+  await page.getByRole('button', { name: /团员练习.*只读排练/ }).click();
+  await expect(page.getByText('团员排练 · 只读', { exact: true })).toBeVisible();
+  await expect(surface).not.toHaveAttribute('style', /rotate\(180deg\)/);
+  await expect(page.locator('.stage-surface').getByText('领舞', { exact: true })).toHaveCount(0);
+  // 重开后设置保留：人物大小回 100%、名字隐藏、导演视角
+  await page.getByRole('button', { name: '显示设置' }).click();
+  const reopened = page.getByRole('dialog', { name: '显示设置' });
+  await expect(reopened.getByText('人物大小 100%')).toBeVisible();
+  await expect(reopened.getByRole('switch', { name: '显示名字' })).toHaveAttribute('aria-checked', 'false');
+});
+
+test('missing music still permits silent read-only rehearsal', async ({ page }) => {  await page.goto('/?mobile=1');
   await page.getByLabel('导入团员排练包').setInputFiles(packageFile(true));
   await expect(page.getByRole('status')).toContainText('未找到编排引用的音乐');
   await page.getByRole('button', { name: '播放排练' }).click();

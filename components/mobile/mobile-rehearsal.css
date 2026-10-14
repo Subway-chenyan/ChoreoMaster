@@ -17,12 +17,13 @@
   margin-top: 5px;
 }
 .rehearsal {
+  position: relative;
   height: 100dvh;
   min-height: 0;
   overflow: hidden;
   display: grid;
   grid-template-columns: minmax(0, 1fr) clamp(150px, 21vw, 210px);
-  grid-template-rows: 48px auto minmax(0, 1fr) minmax(66px, 23%);
+  grid-template-rows: 42px auto minmax(0, 1fr) minmax(46px, 15%);
   grid-template-areas: 'header header' 'warning warning' 'stage rail' 'notes rail';
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
     env(safe-area-inset-left);
@@ -70,6 +71,10 @@
 }
 .rehearsal-stage > .flex-1 {
   padding: 8px 10px 26px;
+}
+/* 演员视角：米数尺翻到舞台上方，预留同步的上下留白 */
+.rehearsal-stage--flipped > .flex-1 {
+  padding: 26px 10px 8px;
 }
 .rehearsal-notes {
   grid-area: notes;
@@ -164,26 +169,121 @@
   border-color: var(--mobile-accent);
   background: #153238;
 }
+/* 收起：舞台占满整屏，右侧仅保留悬浮的展开/播放/上下切换 */
 .rehearsal--collapsed {
-  grid-template-columns: minmax(0, 1fr) 56px;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas: 'warning' 'stage';
+}
+.rehearsal--collapsed .rehearsal-header,
+.rehearsal--collapsed .rehearsal-notes {
+  display: none;
 }
 .rehearsal--collapsed .rehearsal-list,
-.rehearsal--collapsed .rehearsal-scrubber {
+.rehearsal--collapsed .rehearsal-scrubber,
+.rehearsal--collapsed .rehearsal-clock {
   display: none;
+}
+.rehearsal--collapsed .rehearsal-rail {
+  position: absolute;
+  right: calc(8px + env(safe-area-inset-right));
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 40;
+  border: 1px solid #29394f;
+  border-radius: 999px;
+  background: rgba(16, 27, 44, 0.92);
+  box-shadow: 0 8px 24px rgba(2, 8, 20, 0.55);
+  padding: 10px 4px;
+  backdrop-filter: blur(6px);
 }
 .rehearsal--collapsed .rehearsal-controls {
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
-.rehearsal--collapsed .rehearsal-clock {
-  white-space: normal;
-  font-size: 10px;
-  line-height: 1.8;
+
+.rehearsal-settings-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  background: transparent;
+}
+.rehearsal-settings {
+  position: absolute;
+  top: calc(42px + env(safe-area-inset-top));
+  right: calc(6px + env(safe-area-inset-right));
+  z-index: 50;
+  width: min(300px, calc(100vw - 24px));
+  background: #101b2c;
+  border: 1px solid #29394f;
+  border-radius: 12px;
+  padding: 10px 12px 12px;
+  box-shadow: 0 12px 32px rgba(2, 8, 20, 0.6);
+  display: grid;
+  gap: 4px;
+}
+.rehearsal-settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+.rehearsal-settings-head strong {
+  font-size: 13px;
+}
+.rehearsal-settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 40px;
+  font-size: 12px;
+  color: #c6d6e8;
+  text-align: left;
+}
+.rehearsal-settings-row input[type='range'] {
+  flex: 1;
+  max-width: 150px;
+  min-width: 0;
+  accent-color: var(--mobile-accent);
+}
+.rehearsal-settings-reset {
+  justify-self: start;
+  font-size: 11px;
+  color: #8ba3bf;
+  padding: 4px 0;
+}
+.rehearsal-switch {
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  background: #29394f;
+  position: relative;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+.rehearsal-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #8ba3bf;
+  transition: transform 0.15s, background 0.15s;
+}
+.rehearsal-switch[data-on] {
+  background: var(--mobile-accent);
+}
+.rehearsal-switch[data-on]::after {
+  transform: translateX(14px);
+  background: #062a2e;
 }
 @media (max-width: 599px) {
   .rehearsal {
     grid-template-columns: minmax(0, 1fr) 106px;
-    grid-template-rows: 48px auto minmax(0, 1fr) minmax(100px, 27%);
+    grid-template-rows: 42px auto minmax(0, 1fr) minmax(56px, 18%);
   }
   .rehearsal-controls {
     flex-wrap: wrap;
@@ -202,13 +302,13 @@
   .rehearsal-stage > .flex-1 {
     padding-inline: 4px;
   }
+  .rehearsal-stage--flipped > .flex-1 {
+    padding-inline: 4px;
+  }
   .rehearsal-notes {
     padding: 8px;
   }
-  .rehearsal--collapsed {
-    grid-template-columns: minmax(0, 1fr) 56px;
-  }
-  .rehearsal--collapsed .mobile-play {
+  .rehearsal--collapsed .rehearsal-controls .mobile-play {
     order: 0;
     margin: 0;
   }
