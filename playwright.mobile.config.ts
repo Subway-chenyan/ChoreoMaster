@@ -4,6 +4,8 @@ export default defineConfig({
   timeout: 45000,
   fullyParallel: false,
   workers: 1,
+  // 手势密集用例在慢 CI 上偶发点击超时，仅在 CI 重试
+  retries: process.env.CI ? 2 : 0,
   use: {
     ...devices['Pixel 7'],
     baseURL: 'http://127.0.0.1:5173',

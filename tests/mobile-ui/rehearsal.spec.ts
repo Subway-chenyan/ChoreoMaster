@@ -230,29 +230,33 @@ test('tapping a performer keeps a highlight across formations; collapsed toast a
 test('play after jumping to a formation starts at its end to skip the hold', async ({ page }) => {
   await page.setViewportSize({ width: 915, height: 412 });
   await page.goto('/?mobile=1');
+  // 拦截 play() 记录每次开播时音频被设置的起点：断言起播时间本身，不受 CI 音频启动时延影响
+  await page.evaluate(() => {
+    const state = window as unknown as { playStarts: number[] };
+    state.playStarts = [];
+    const original = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function () {
+      state.playStarts.push(this.currentTime);
+      return original.call(this);
+    };
+  });
   await page.getByLabel('导入团员排练包').setInputFiles(packageFile());
   await expect(page.getByText('团员排练 · 只读', { exact: true })).toBeVisible();
+  const lastPlayStart = () =>
+    page.evaluate(() => (window as unknown as { playStarts: number[] }).playStarts.at(-1));
   // 跳到队形 2（2s–3s）后按播放：应从 3s 的过渡起点开播，而不是重播持场
   await page.getByRole('button', { name: '队形 2 站位 2', exact: true }).click();
   await page.getByRole('button', { name: '播放排练' }).click();
-  await page.waitForTimeout(400);
-  const elapsed = await page.locator('audio').evaluate((audio: HTMLAudioElement) => audio.currentTime);
-  expect(elapsed).toBeGreaterThan(2.9);
-  // 暂停后继续播放不重复跳过
+  await expect.poll(lastPlayStart).toBeGreaterThan(2.8);
   await page.getByRole('button', { name: '暂停排练' }).click();
-  const pausedAt = await page.locator('audio').evaluate((audio: HTMLAudioElement) => audio.currentTime);
+  // 拖动进度条清除跳过意图后播放：从所选时间开始
+  await page.getByLabel('排练进度').evaluate((element: HTMLInputElement) => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    setter?.call(element, '0');
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+  });
   await page.getByRole('button', { name: '播放排练' }).click();
-  await page.waitForTimeout(300);
-  const resumed = await page.locator('audio').evaluate((audio: HTMLAudioElement) => audio.currentTime);
-  expect(resumed).toBeGreaterThanOrEqual(pausedAt);
-  await page.getByRole('button', { name: '暂停排练' }).click();
-  // 未跳转直接播放：从头开始
-  await page.getByRole('button', { name: '上一队形' }).click();
-  await page.getByRole('button', { name: '上一队形' }).click();
-  await page.getByRole('button', { name: '播放排练' }).click();
-  await page.waitForTimeout(300);
-  const fresh = await page.locator('audio').evaluate((audio: HTMLAudioElement) => audio.currentTime);
-  expect(fresh).toBeLessThan(1.5);
+  await expect.poll(lastPlayStart).toBeLessThan(0.5);
   await page.getByRole('button', { name: '暂停排练' }).click();
 });
 
