@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { load } from 'js-yaml';
 import { androidVersionCode, artifactContract } from '../scripts/android/release-contract.mjs';
 import { publishAndroid, isMissingCosObject, cosErrorDetails, needsCustomApkDomain, readPublicApk } from '../scripts/android/publish.mjs';
+import { restoreRelease } from '../scripts/android/restore-release.mjs';
 test('APK domain restriction uses custom-domain bytes and never treats CDN errors as missing objects', async () => {
   assert.equal(needsCustomApkDomain('a.apk', { stdout: '403 DownloadForbidden' }), true);
   assert.equal(needsCustomApkDomain('a.json', { stdout: '403 DownloadForbidden' }), false);
@@ -144,4 +147,85 @@ test('Android CI covers mobile changes, isolates PR secrets and gates stable pub
   assert.equal(build.on.workflow_call.inputs.channel.required, true);
   for (const step of build.jobs.apk.steps.filter((s) => s.uses)) assert.match(step.uses, /@[a-f0-9]{40}$/);
   assert.ok(build.jobs.apk.steps.find((s) => s.name === 'Remove signing material' && s.if === 'always()'));
+});
+test('SPA fallback pages from the release CDN count as unpublished releases', async () => {
+  const calls = [];
+  const restored = await restoreRelease({
+    version: '1.4.0',
+    commit: sha,
+    request: async (url) => {
+      calls.push(String(url));
+      return new Response('<!DOCTYPE html><html lang="zh-CN"><title>CosStage</title></html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+      });
+    },
+  });
+  assert.equal(restored, false);
+  assert.deepEqual(calls, ['https://beat.cosdrama.cn/downloads/android/releases/1.4.0/manifest.json']);
+});
+test('matching published manifest restores the immutable APK for rebuild retries', async () => {
+  const apk = Buffer.from('immutable APK restore bytes');
+  const manifest = {
+    ...artifactContract('stable', '1.4.0', sha),
+    size: apk.length,
+    sha256: createHash('sha256').update(apk).digest('hex'),
+  };
+  const dir = await mkdtemp(join(tmpdir(), 'cosstage-restore-'));
+  try {
+    const restored = await restoreRelease({
+      version: '1.4.0',
+      commit: sha,
+      outputDir: dir,
+      request: async (url) =>
+        String(url).endsWith('manifest.json')
+          ? new Response(JSON.stringify(manifest), { status: 200, headers: { 'content-type': 'application/json' } })
+          : new Response(new Uint8Array(apk)),
+    });
+    assert.equal(restored, true);
+    assert.equal((await readFile(join(dir, 'CosStage-1.4.0.apk'))).toString(), 'immutable APK restore bytes');
+    assert.equal(
+      await readFile(join(dir, 'CosStage-1.4.0.apk.sha256'), 'utf8'),
+      `${manifest.sha256}  CosStage-1.4.0.apk\n`
+    );
+    assert.equal(JSON.parse(await readFile(join(dir, 'manifest.json'), 'utf8')).commit, sha);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+test('restore treats corrupt manifests as unpublished but keeps server errors and conflicts loud', async () => {
+  await assert.rejects(
+    restoreRelease({ version: '1.4.0', commit: sha, request: async () => new Response('boom', { status: 503 }) }),
+    /lookup failed: 503/
+  );
+  assert.equal(
+    await restoreRelease({ version: '1.4.0', commit: sha, request: async () => new Response('', { status: 404 }) }),
+    false
+  );
+  assert.equal(
+    await restoreRelease({
+      version: '1.4.0',
+      commit: sha,
+      request: async () => new Response('{broken json', { status: 200, headers: { 'content-type': 'application/json' } }),
+    }),
+    false
+  );
+  const otherCommit = { ...artifactContract('stable', '1.4.0', 'b'.repeat(40)), size: 3, sha256: 'c'.repeat(64) };
+  await assert.rejects(
+    restoreRelease({
+      version: '1.4.0',
+      commit: sha,
+      request: async () => new Response(JSON.stringify(otherCommit), { status: 200, headers: { 'content-type': 'application/json' } }),
+    }),
+    /metadata mismatch: commit/
+  );
+  const badSize = { ...artifactContract('stable', '1.4.0', sha), size: 0, sha256: 'c'.repeat(64) };
+  await assert.rejects(
+    restoreRelease({
+      version: '1.4.0',
+      commit: sha,
+      request: async () => new Response(JSON.stringify(badSize), { status: 200, headers: { 'content-type': 'application/json' } }),
+    }),
+    /Invalid existing APK manifest/
+  );
 });
