@@ -1,7 +1,34 @@
 {
   "schemaVersion": 1,
-  "currentVersion": "1.3.2",
+  "currentVersion": "1.4.0",
   "releases": [
+    {
+      "version": "1.4.0",
+      "date": "2026-10-14",
+      "kind": "minor",
+      "title": "CosStage 1.4.0",
+      "summary": "接入 Android 自动构建、固定签名与 COS 发布；网页和 Windows 客户端新增正式 APK 下载入口，预览包与正式包独立发布。",
+      "changes": [
+        {
+          "kind": "minor",
+          "text": "接入 Android 自动构建、固定签名与 COS 发布；网页和 Windows 客户端新增正式 APK 下载入口，预览包与正式包独立发布。"
+        },
+        {
+          "kind": "minor",
+          "text": "新增手机团员只读排练模式，仅导入编排和音乐，支持大舞台、队形备注、右侧队形跳转和音乐同步播放。"
+        },
+        {
+          "kind": "patch",
+          "text": "优化手机横屏舞台布局、可收起队形栏和右侧属性面板，新增按米微调与多选快捷操作，修复轻点演员意外触发网格吸附的问题。"
+        },
+        {
+          "kind": "minor",
+          "text": "新增 Android 随身舞台：触屏站位编辑、队形序列、音乐排练、离线自动保存及桌面完整项目包双向互通，并保留原桌面编辑入口。"
+        }
+      ],
+      "breakingChanges": [],
+      "migrationSteps": []
+    },
     {
       "version": "1.3.2",
       "date": "2026-09-14",
