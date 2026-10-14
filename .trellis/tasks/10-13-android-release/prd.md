@@ -12,5 +12,5 @@
 - 已生成仓库外固定签名备份，仓库仅存公开指纹；提供 configure-signing.sh 写入四项 GitHub Secrets。
 - 已实现网页/Windows 下载入口及固定 manifest IPC、外链白名单。
 - 发布回归 110 通过、2 跳过；桌面回归 150 通过；下载界面 Playwright 2 通过；typecheck、production build、actionlint 与 shell 语法检查通过。
-- 尚未完成远端启用：现有凭据写入 GitHub Secrets 返回 403，尚未配置签名 Secrets。聊天中收到的令牌未使用，已提醒撤销并在本机配置替代凭据。
+- 2026-10-14 用户在本机执行签名配置，已通过 gh secret list 确认四项 Android Secrets 存在；原写权限障碍已解除，内容由首次正式构建验证。聊天中收到的令牌未使用。
 - 未推送、未触发工作流、未上传生产 APK；本机无 JDK/Android SDK，真实构建、安装与升级需远端和真机验证。保留任务待远端启用。

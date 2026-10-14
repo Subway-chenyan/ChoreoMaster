@@ -45,7 +45,7 @@ gh auth login
 bash scripts/android/configure-signing.sh
 ```
 
-脚本会检查证书指纹并直接把密钥、口令通过 stdin 写入 Secrets，不打印内容。重复执行沿用同一密钥。当前已验证的凭据能读取仓库 Secrets，但写入返回 `403 Resource not accessible by personal access token`，所以本次尚未完成远端签名 Secrets 配置。
+脚本会检查证书指纹并直接把密钥、口令通过 stdin 写入 Secrets，不打印内容。重复执行沿用同一密钥。2026-10-14 用户执行配置后，已通过 GitHub API 确认四项 Secrets 均存在；实际密钥内容由首次正式构建中的证书和 APK 校验验证。
 
 COS 沿用已经存在的 `TENCENT_SECRET_ID` / `TENCENT_SECRET_KEY`，桶 `beat-1317738912`、广州区域和域名 `https://beat.cosdrama.cn/`。发布前要求 COS bucket versioning 为 Closed，与现有发布约束一致。
 
@@ -80,6 +80,6 @@ COS 上传中断后优先选择 **Re-run failed jobs**，保留同一次构建 a
 - `npm run typecheck` / `npm run build`。
 - GitHub Ubuntu runner 安装 JDK 21 / SDK 36，运行移动核心和浏览器测试，Gradle 构建后使用 apksigner 和 aapt 检查真实 APK。
 
-本次本机 Linux ARM64 没有 JDK/SDK，未执行真实 Gradle/APK 构建；代码尚未推送、未触发新工作流、未上传 APK 到生产 COS。本地 mock 发布通过不代表云端已发布。Secrets 配置完成并合并版本 PR 后，首次正式工作流仍需确认 APK 下载、签名安装及覆盖升级。
+本次本机 Linux ARM64 没有 JDK/SDK，未执行真实 Gradle/APK 构建；签名 Secrets 已配置，代码尚未推送、未触发新工作流、未上传 APK 到生产 COS。本地 mock 发布通过不代表云端已发布。推送代码并合并版本 PR 后，首次正式工作流仍需确认 APK 下载、签名安装及覆盖升级。
 
 预览 APK 使用 runner debug 签名，只适合测试，不保证不同构建之间覆盖升级。首次安装正式版后应保持固定签名。Windows 回滚流程不回滚 Android 下载指针；Android 需要修复并发布更高版本，不降低 versionCode。
