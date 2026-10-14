@@ -303,3 +303,36 @@ Implemented offline mobile project library, touch stage gestures, formation/acto
 ### Next Steps
 
 - None - task complete
+
+
+## Session 10: Android 发布实现与本地验证，待远端签名配置
+
+**Date**: 2026-10-14
+**Task**: Android 发布实现与本地验证，待远端签名配置
+**Branch**: `main`
+
+### Summary
+
+接入 Android preview/stable reusable build、固定签名验证、COS 不可变发布和网页/Windows 下载入口。发布回归 110 通过/2 跳过，桌面 150 通过，下载 UI 2 通过，类型检查、构建、actionlint 通过。签名私钥在仓库外；GitHub Secrets 写权限仍返回 403。未推送、未触发真实 APK 构建或生产上传，任务保持进行中等待远端启用。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7b78a3f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
