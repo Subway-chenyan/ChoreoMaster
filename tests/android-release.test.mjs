@@ -4,7 +4,13 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { load } from 'js-yaml';
 import { androidVersionCode, artifactContract } from '../scripts/android/release-contract.mjs';
-import { publishAndroid, isMissingCosObject } from '../scripts/android/publish.mjs';
+import { publishAndroid, isMissingCosObject, cosErrorDetails } from '../scripts/android/publish.mjs';
+test('COS diagnostics redact credentials and signed query strings before truncating', () => {
+  const detail = cosErrorDetails({ code: 'EIO', stderr: 'secret-id secret-key https://example.com/a?signature=private' }, ['secret-id', 'secret-key']);
+  assert.match(detail, /EIO/);
+  assert.doesNotMatch(detail, /secret-id|secret-key|signature|private/);
+  assert.ok(cosErrorDetails({ stdout: 'x'.repeat(4000) }).length <= 2000);
+});
 test('COS missing objects are recognized on either stream without hiding permission or CLI failures', () => {
   assert.equal(isMissingCosObject({ stdout: 'Code: NoSuchKey' }), true);
   assert.equal(isMissingCosObject({ stderr: 'HTTP status: 404' }), true);

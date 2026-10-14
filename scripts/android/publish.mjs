@@ -13,6 +13,11 @@ export function isMissingCosObject(error) {
   const output = `${error.stdout ?? ''}\n${error.stderr ?? ''}`;
   return /\bNoSuchKey\b|HTTP[^0-9\n]*404\b|status[^0-9\n]*404\b|cos object not found:/i.test(output);
 }
+export function cosErrorDetails(error, secrets = []) {
+  let detail = `${error.code ?? 'unknown'} ${error.stderr ?? ''} ${error.stdout ?? ''}`;
+  for (const secret of secrets.filter(Boolean)) detail = detail.split(secret).join('[REDACTED]');
+  return detail.replace(/(https?:\/\/[^\s?]+)\?[^\s]+/g, '$1?[REDACTED]').slice(-2000);
+}
 export async function publishAndroid({ manifest, apk, sidecar, cos, verify, purge }) {
   const expected = artifactContract(
     manifest.channel,
@@ -94,11 +99,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     async read(path) {
       const target = join(temp, String(serial++));
       try {
-        await exec('coscli', ['cp', `cos://production/${path}`, target, ...args]);
+        await exec('coscli', ['cp', `cos://production/${path}`, target, ...args], { maxBuffer: 16 * 1024 * 1024 });
         return await readFile(target);
       } catch (error) {
         if (isMissingCosObject(error)) return null;
-        throw new Error(`COS read failed: ${path}`);
+        throw new Error(`COS read failed: ${path}; ${cosErrorDetails(error, [process.env.TENCENT_SECRET_ID, process.env.TENCENT_SECRET_KEY])}`);
       }
     },
     async put(path, bytes, immutable) {
