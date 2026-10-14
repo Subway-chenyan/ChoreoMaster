@@ -11,15 +11,24 @@ function packageFile(missingMusic = false) {
     shape: 'circle',
     color: '#38bdf8',
     type: 'performer',
-    width: 2,
-    depth: 1,
+  });
+  doc = addActor(doc, {
+    id: 'mate',
+    name: '团员',
+    label: 'B',
+    shape: 'circle',
+    color: '#34d399',
+    type: 'performer',
   });
   doc.frames = Array.from({ length: 8 }, (_, i) => ({
     id: `f${i}`,
     name: `站位 ${i + 1}`,
     startTime: i * 2000,
     duration: 1000,
-    positions: { lead: { x: 20 + i * 8, y: 30 + i * 5 } },
+    positions: {
+      lead: { x: 20 + i * 8, y: 30 + i * 5 },
+      mate: { x: 70 - i * 4, y: 70 - i * 3 },
+    },
     notes: `第 ${i + 1} 段：向舞台右侧移动\n注意与前排保持距离`,
   }));
   doc.musicAsset = 'assets/music.wav';
@@ -181,6 +190,70 @@ test('display settings and performer perspective persist across reopen', async (
   const reopened = page.getByRole('dialog', { name: '显示设置' });
   await expect(reopened.getByText('人物大小 100%')).toBeVisible();
   await expect(reopened.getByRole('switch', { name: '显示名字' })).toHaveAttribute('aria-checked', 'false');
+});
+
+test('tapping a performer keeps a highlight across formations; collapsed toast announces them', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 915, height: 412 });
+  await page.goto('/?mobile=1');
+  await page.getByLabel('导入团员排练包').setInputFiles(packageFile());
+  await expect(page.getByText('团员排练 · 只读', { exact: true })).toBeVisible();
+  const dots = page.locator('[data-performer-id]');
+  const ringOf = (index: number) => dots.nth(index).locator('.animate-pulse');
+  await dots.first().click();
+  await expect(ringOf(0)).toHaveCount(1);
+  // 轻点其他演员切换高亮
+  await dots.nth(1).click();
+  await expect(ringOf(0)).toHaveCount(0);
+  await expect(ringOf(1)).toHaveCount(1);
+  // 高亮跨队形保持
+  await page.getByRole('button', { name: '下一队形' }).click();
+  await expect(page.getByRole('region', { name: '当前队形备注' })).toContainText('第 2 段');
+  await expect(ringOf(1)).toHaveCount(1);
+  // 再点同一演员取消高亮
+  await dots.nth(1).click();
+  await expect(ringOf(1)).toHaveCount(0);
+  // 收起态：队形切换时右上角提示队形名，2 秒后消失
+  await page.getByRole('button', { name: '收起队形列表' }).click();
+  const toast = page.locator('.rehearsal-toast');
+  await expect(toast).toContainText('2. 站位 2');
+  await page.getByRole('button', { name: '下一队形' }).click();
+  await expect(toast).toContainText('3. 站位 3');
+  await page.waitForTimeout(2300);
+  await expect(toast).toHaveCount(0);
+  // 高亮状态不收起后仍在
+  await page.getByRole('button', { name: '展开队形列表' }).click();
+  await expect(ringOf(1)).toHaveCount(0);
+});
+
+test('play after jumping to a formation starts at its end to skip the hold', async ({ page }) => {
+  await page.setViewportSize({ width: 915, height: 412 });
+  await page.goto('/?mobile=1');
+  await page.getByLabel('导入团员排练包').setInputFiles(packageFile());
+  await expect(page.getByText('团员排练 · 只读', { exact: true })).toBeVisible();
+  // 跳到队形 2（2s–3s）后按播放：应从 3s 的过渡起点开播，而不是重播持场
+  await page.getByRole('button', { name: '队形 2 站位 2', exact: true }).click();
+  await page.getByRole('button', { name: '播放排练' }).click();
+  await page.waitForTimeout(400);
+  const elapsed = await page.locator('audio').evaluate((audio: HTMLAudioElement) => audio.currentTime);
+  expect(elapsed).toBeGreaterThan(2.9);
+  // 暂停后继续播放不重复跳过
+  await page.getByRole('button', { name: '暂停排练' }).click();
+  const pausedAt = await page.locator('audio').evaluate((audio: HTMLAudioElement) => audio.currentTime);
+  await page.getByRole('button', { name: '播放排练' }).click();
+  await page.waitForTimeout(300);
+  const resumed = await page.locator('audio').evaluate((audio: HTMLAudioElement) => audio.currentTime);
+  expect(resumed).toBeGreaterThanOrEqual(pausedAt);
+  await page.getByRole('button', { name: '暂停排练' }).click();
+  // 未跳转直接播放：从头开始
+  await page.getByRole('button', { name: '上一队形' }).click();
+  await page.getByRole('button', { name: '上一队形' }).click();
+  await page.getByRole('button', { name: '播放排练' }).click();
+  await page.waitForTimeout(300);
+  const fresh = await page.locator('audio').evaluate((audio: HTMLAudioElement) => audio.currentTime);
+  expect(fresh).toBeLessThan(1.5);
+  await page.getByRole('button', { name: '暂停排练' }).click();
 });
 
 test('missing music still permits silent read-only rehearsal', async ({ page }) => {  await page.goto('/?mobile=1');

@@ -72,6 +72,8 @@ export default function MobileRehearsal({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [reset, setReset] = useState(0);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ seq: number; text: string } | null>(null);
   const performers = useMemo(
     () => scaleRehearsalPerformers(doc.performers, display.performerScale),
     [doc.performers, display.performerScale]
@@ -119,6 +121,57 @@ export default function MobileRehearsal({
   useEffect(() => {
     if (notes.current) notes.current.scrollTop = 0;
   }, [current?.id]);
+  // 收起态没有队形列表：队形切换（含播放自动推进）时右上角短暂提示队形名
+  const toastSeq = useRef(0);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!collapsed || !current) {
+      setToast(null);
+      return;
+    }
+    toastSeq.current += 1;
+    setToast({ seq: toastSeq.current, text: `${index + 1}. ${current.name}` });
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 2000);
+    return () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    };
+  }, [current?.id, collapsed]);
+  // 只读点选高亮：轻点演员切换高亮并在队形间保持。
+  // pan 模式下 Stage 会对 pointerdown preventDefault 并捕获指针（click 被取消、
+  // pointerup 被重定向），因此用 pointerup + elementFromPoint 做几何命中。
+  const tapState = useRef<{ id: number; x: number; y: number; multi: boolean } | null>(null);
+  // 切换队形后按播放：跳过当前队形持场，直接从队形末尾的过渡开始
+  const jumpTarget = useRef<string | null>(null);
+  const jumpTo = (timeMs: number, frameId: string) => {
+    jumpTarget.current = frameId;
+    playback.seek(timeMs);
+  };
+  const togglePlay = () => {
+    const atLast = index < 0 || index >= frames.length - 1;
+    if (!playback.playing && !atLast && current && jumpTarget.current === current.id) {
+      jumpTarget.current = null;
+      void playback.playFrom(current.startTime + current.duration);
+      return;
+    }
+    jumpTarget.current = null;
+    void playback.toggle();
+  };
+  const beginTapTracking = (event: React.PointerEvent) => {
+    tapState.current = tapState.current
+      ? { ...tapState.current, multi: true }
+      : { id: event.pointerId, x: event.clientX, y: event.clientY, multi: false };
+  };
+  const resolveTap = (event: React.PointerEvent) => {
+    const tap = tapState.current;
+    tapState.current = null;
+    if (!tap || tap.multi || event.pointerId !== tap.id) return;
+    if (Math.hypot(event.clientX - tap.x, event.clientY - tap.y) > 10) return;
+    const hit = document.elementFromPoint(event.clientX, event.clientY);
+    const dot = hit?.closest<HTMLElement>('[data-performer-id]');
+    const id = dot?.dataset.performerId;
+    if (id) setHighlightId((prev) => (prev === id ? null : id));
+  };
   useEffect(() => {
     const reveal = () => {
       const container = list.current;
@@ -241,6 +294,11 @@ export default function MobileRehearsal({
       <section
         className={`rehearsal-stage${display.performerView ? ' rehearsal-stage--flipped' : ''}`}
         aria-label="只读排练舞台"
+        onPointerDownCapture={beginTapTracking}
+        onPointerUpCapture={resolveTap}
+        onPointerCancelCapture={() => {
+          tapState.current = null;
+        }}
       >
         {frames.length ? (
           <Stage
@@ -253,7 +311,7 @@ export default function MobileRehearsal({
             rotations={scene.rotations}
             hiddenGroupIds={scene.hiddenGroupIds}
             stageConfig={stage}
-            selectedPerformerIds={[]}
+            selectedPerformerIds={highlightId ? [highlightId] : []}
             onSelectionChange={noChange}
             onPositionChange={noChange}
             showLabels={display.showNames}
@@ -262,6 +320,11 @@ export default function MobileRehearsal({
           />
         ) : (
           <div className="mobile-empty">这个编排还没有队形。</div>
+        )}
+        {toast && collapsed && (
+          <div key={toast.seq} className="rehearsal-toast" role="status">
+            {toast.text}
+          </div>
         )}
       </section>
       <section ref={notes} className="rehearsal-notes" aria-label="当前队形备注">
@@ -279,7 +342,7 @@ export default function MobileRehearsal({
             className="mobile-icon"
             aria-label="上一队形"
             disabled={index <= 0}
-            onClick={() => playback.seek(frames[index - 1].startTime)}
+            onClick={() => jumpTo(frames[index - 1].startTime, frames[index - 1].id)}
           >
             <ChevronUp size={23} />
           </button>
@@ -287,7 +350,7 @@ export default function MobileRehearsal({
             className="mobile-play"
             aria-label={playback.playing ? '暂停排练' : '播放排练'}
             disabled={!frames.length}
-            onClick={() => void playback.toggle()}
+            onClick={togglePlay}
           >
             {playback.playing ? <Pause size={23} /> : <Play size={23} fill="currentColor" />}
           </button>
@@ -295,7 +358,7 @@ export default function MobileRehearsal({
             className="mobile-icon"
             aria-label="下一队形"
             disabled={index < 0 || index >= frames.length - 1}
-            onClick={() => playback.seek(frames[index + 1].startTime)}
+            onClick={() => jumpTo(frames[index + 1].startTime, frames[index + 1].id)}
           >
             <ChevronDown size={23} />
           </button>
@@ -314,7 +377,10 @@ export default function MobileRehearsal({
               step="50"
               value={playback.time}
               disabled={!frames.length}
-              onChange={(event) => playback.seek(Number(event.target.value))}
+              onChange={(event) => {
+                jumpTarget.current = null;
+                playback.seek(Number(event.target.value));
+              }}
             />
             <div className="rehearsal-list" id="rehearsal-list" ref={list} aria-label="队形列表">
               {frames.map((frame, i) => (
@@ -323,7 +389,7 @@ export default function MobileRehearsal({
                   ref={frame.id === current?.id ? selected : undefined}
                   aria-label={`队形 ${i + 1} ${frame.name}`}
                   aria-pressed={frame.id === current?.id}
-                  onClick={() => playback.seek(frame.startTime)}
+                  onClick={() => jumpTo(frame.startTime, frame.id)}
                 >
                   <b>{String(i + 1).padStart(2, '0')}</b>
                   <span>

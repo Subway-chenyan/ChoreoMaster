@@ -30,7 +30,11 @@ import {
   deleteMobileProject,
 } from '../mobile/project-store';
 import { createLegacyUnitBoxAsset } from '../electron/model-asset-contract';
-import { DEFAULT_PERFORMER_LABEL_FONT_SIZE } from '../electron/stage-defaults';
+import {
+  DEFAULT_PERFORMER_DEPTH,
+  DEFAULT_PERFORMER_WIDTH,
+  DEFAULT_PERFORMER_LABEL_FONT_SIZE,
+} from '../electron/stage-defaults';
 import { pinchViewport } from '../mobile/gestures';
 import {
   DEFAULT_REHEARSAL_DISPLAY,
@@ -366,7 +370,7 @@ test('rehearsal display settings persist, clamp and fall back per field', () => 
   });
 });
 
-test('performer scaling only touches performers and keeps default sizes overridable', () => {
+test('performer scaling only touches performers and covers default sizes', () => {
   const performers = [
     { id: 'a', name: '甲', color: '#fff', label: 'A', shape: 'circle' as const, width: 1, depth: 0.8 },
     { id: 'b', name: '乙', color: '#fff', label: 'B', shape: 'circle' as const, type: 'performer' as const },
@@ -376,8 +380,9 @@ test('performer scaling only touches performers and keeps default sizes overrida
   const scaled = scaleRehearsalPerformers(performers, 1.5);
   assert.equal(scaled[0].width, 1.5);
   assert.ok(Math.abs((scaled[0].depth ?? 0) - 1.2) < 1e-9);
-  assert.equal(scaled[1].width, undefined);
-  assert.equal(scaled[1].depth, undefined);
+  // 默认尺寸（1m×1m）的演员同样参与缩放
+  assert.equal(scaled[1].width, DEFAULT_PERFORMER_WIDTH * 1.5);
+  assert.equal(scaled[1].depth, DEFAULT_PERFORMER_DEPTH * 1.5);
   assert.equal(scaled[2].width, 4);
   assert.equal(scaled[2].depth, 2);
 });

@@ -37,13 +37,9 @@ export function useRehearsalPlayback(music: Blob | undefined, choreographyDurati
     setTime(value);
     if (audio.current && !audioFailed) audio.current.currentTime = value / 1000;
   };
-  const toggle = async () => {
-    if (playing) {
-      pause();
-      return;
-    }
+  const startPlayback = async (at: number) => {
     const token = ++request.current;
-    const next = time >= duration - 10 ? 0 : time;
+    const next = Math.max(0, Math.min(duration, at));
     const player = audio.current;
     if (player && source && !audioFailed && (!musicDuration || next < musicDuration)) {
       player.currentTime = next / 1000;
@@ -62,6 +58,21 @@ export function useRehearsalPlayback(music: Blob | undefined, choreographyDurati
     clock.current = { time: next, at: performance.now() };
     setTime(next);
     setPlaying(true);
+  };
+  const toggle = async () => {
+    if (playing) {
+      pause();
+      return;
+    }
+    await startPlayback(time >= duration - 10 ? 0 : time);
+  };
+  // 从指定时间直接开播（跳过当前队形持场等场景），避免依赖异步的 time state。
+  const playFrom = (at: number) => {
+    if (playing) {
+      pause();
+      return;
+    }
+    return startPlayback(at);
   };
   useEffect(() => {
     if (!playing) return;
@@ -94,6 +105,7 @@ export function useRehearsalPlayback(music: Blob | undefined, choreographyDurati
     pause,
     seek,
     toggle,
+    playFrom,
     loaded: () => {
       const seconds = audio.current?.duration;
       if (seconds && Number.isFinite(seconds)) setMusicDuration(seconds * 1000);

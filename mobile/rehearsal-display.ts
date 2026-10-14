@@ -1,4 +1,8 @@
-import { DEFAULT_PERFORMER_LABEL_FONT_SIZE } from '../electron/stage-defaults';
+import {
+  DEFAULT_PERFORMER_DEPTH,
+  DEFAULT_PERFORMER_WIDTH,
+  DEFAULT_PERFORMER_LABEL_FONT_SIZE,
+} from '../electron/stage-defaults';
 import type { Performer, StageConfig } from '../types';
 
 export interface RehearsalDisplaySettings {
@@ -14,7 +18,7 @@ export interface RehearsalDisplaySettings {
 
 export const MIN_PERFORMER_SCALE = 0.5;
 export const MAX_PERFORMER_SCALE = 2;
-export const MIN_LABEL_SCALE = 0.6;
+export const MIN_LABEL_SCALE = 0.4;
 export const MAX_LABEL_SCALE = 2;
 
 export const DEFAULT_REHEARSAL_DISPLAY: RehearsalDisplaySettings = {
@@ -77,18 +81,18 @@ export function saveRehearsalDisplay(settings: RehearsalDisplaySettings): string
 
 /**
  * 只缩放表演者的宽深，道具与平台保持原始尺寸，避免平台占位判定失真。
- * 未设置宽深的表演者保留缺省，让 Stage 继续套用默认尺寸。
+ * 未设置宽深的表演者按 Stage 的默认尺寸（1m×1m）参与缩放，否则滑杆对默认尺寸的队伍无效。
  */
 export function scaleRehearsalPerformers(performers: Performer[], scale: number): Performer[] {
   if (scale === 1) return performers;
-  const scaleSize = (value: number | undefined) =>
-    typeof value === 'number' && Number.isFinite(value) ? value * scale : value;
+  const scaleSize = (value: number | undefined, fallback: number) =>
+    (typeof value === 'number' && Number.isFinite(value) ? value : fallback) * scale;
   return performers.map((performer) => {
     if (performer.type === 'prop') return performer;
     return {
       ...performer,
-      width: scaleSize(performer.width),
-      depth: scaleSize(performer.depth),
+      width: scaleSize(performer.width, DEFAULT_PERFORMER_WIDTH),
+      depth: scaleSize(performer.depth, DEFAULT_PERFORMER_DEPTH),
     };
   });
 }
