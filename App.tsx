@@ -1,3 +1,4 @@
+import { AndroidDownload } from './components/AndroidDownload';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   AudioMarker,
@@ -5319,6 +5320,7 @@ const App: React.FC = () => {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <AndroidDownload compact />
           <button
             type="button"
             onClick={() => setShowProductGuide(true)}

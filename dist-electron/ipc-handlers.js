@@ -1,3 +1,4 @@
+import { ANDROID_MANIFEST_URL, parseAndroidDownload } from './android-download.js';
 import { ipcMain, dialog, app, net, shell } from 'electron';
 import { promises as fs } from 'fs';
 import * as path from 'path';
@@ -170,6 +171,17 @@ export function registerIpcHandlers(mainWindow) {
         await abortBinaryExportSession(sessionId);
     });
     // ==================== Utility Handlers ====================
+    ipcMain.handle('app:getAndroidRelease', async () => {
+        const response = await net.fetch(ANDROID_MANIFEST_URL, { cache: 'no-store', signal: AbortSignal.timeout(8000), redirect: 'error' });
+        if (response.status === 404)
+            return null;
+        if (!response.ok)
+            throw new Error('Android 下载服务暂时不可用');
+        const release = parseAndroidDownload(await response.json());
+        if (!release)
+            throw new Error('Android 下载信息无效');
+        return release;
+    });
     ipcMain.handle('app:getVersion', async () => {
         return app.getVersion();
     });

@@ -25,6 +25,7 @@ import type {
 declare global {
   interface Window {
     electronAPI: {
+      getAndroidRelease?: () => Promise<{ version: string; url: string } | null>;
       // Dialog operations
       saveTextFile: (defaultName: string, content: string, filters?: Electron.FileFilter[]) => Promise<string | null>;
       saveBinaryFile: (defaultName: string, content: Uint8Array, filters?: Electron.FileFilter[]) => Promise<string | null>;

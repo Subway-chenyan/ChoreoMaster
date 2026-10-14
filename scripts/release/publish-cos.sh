@@ -39,7 +39,9 @@ for required_file in \
   "$sidecar_path" \
   "$alias_path" \
   "$latest_path" \
-  "$notes_path"; do
+  "$notes_path" \
+  "android-release/CosStage-$VERSION.apk" \
+  "android-release/CosStage-$VERSION.apk.sha256"; do
   if [ ! -f "$required_file" ] || [ ! -s "$required_file" ]; then
     echo "Required release file is missing or empty: $required_file" >&2
     exit 1
@@ -245,5 +247,7 @@ git push origin "v$VERSION"
 gh release create "v$VERSION" \
   "$installer_path" \
   "$sidecar_path" \
+  "android-release/CosStage-$VERSION.apk" \
+  "android-release/CosStage-$VERSION.apk.sha256" \
   --title "CosStage $VERSION" \
   --notes-file "$notes_path"

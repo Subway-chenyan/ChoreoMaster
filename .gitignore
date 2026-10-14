@@ -38,3 +38,9 @@ __pycache__/
 # Mobile browser validation artifacts
 playwright-report/
 test-results/
+
+# Android release credentials must never be committed
+*.keystore
+*.jks
+*.p12
+android-release/

@@ -1,3 +1,4 @@
+import { AndroidDownload } from './AndroidDownload';
 import React, { useEffect, useRef } from 'react';
 import {
   ArrowLeft,
@@ -185,6 +186,7 @@ export const ProductGuide: React.FC<ProductGuideProps> = ({ onClose }) => {
                   <Download size={17} />
                   下载桌面端
                 </a>
+                <AndroidDownload />
                 <button
                   type="button"
                   onClick={() => scrollToSection('guide')}

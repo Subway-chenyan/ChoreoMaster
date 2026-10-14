@@ -15,6 +15,7 @@ module.exports = {
   },
   files: [
     'dist-electron/main.js',
+    'dist-electron/android-download.js',
     'dist-electron/preload.cjs',
     'dist-electron/ipc-handlers.js',
     'dist-electron/updater.js',

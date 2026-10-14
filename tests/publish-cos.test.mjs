@@ -57,6 +57,7 @@ async function createFixture(t) {
   const tempDir = path.join(workspace, 'temp');
   await Promise.all([
     mkdir(desktop, { recursive: true }),
+    mkdir(path.join(workspace, 'android-release'), { recursive: true }),
     mkdir(releaseScripts, { recursive: true }),
     mkdir(mockBin, { recursive: true }),
     mkdir(path.join(workspace, 'data'), { recursive: true }),
@@ -78,6 +79,8 @@ async function createFixture(t) {
   const sha256 = createHash('sha256').update(installer).digest('hex');
   await Promise.all([
     writeFile(path.join(desktop, installerName), installer),
+    writeFile(path.join(workspace, 'android-release', `CosStage-${version}.apk`), 'apk fixture'),
+    writeFile(path.join(workspace, 'android-release', `CosStage-${version}.apk.sha256`), 'apk hash fixture'),
     writeFile(path.join(desktop, `${installerName}.blockmap`), 'blockmap fixture\n'),
     writeFile(path.join(desktop, `${installerName}.sha256`), `${sha256}  ${installerName}\n`),
     writeFile(path.join(desktop, 'CosStage-Setup-x64.exe'), installer),

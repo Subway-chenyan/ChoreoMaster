@@ -25,6 +25,7 @@ import type {
 } from './model-asset-contract.js';
 
 export interface ElectronAPI {
+  getAndroidRelease: () => Promise<{ version: string; url: string } | null>;
   // Dialog operations
   saveTextFile: (defaultName: string, content: string, filters?: Electron.FileFilter[]) => Promise<string | null>;
   saveBinaryFile: (defaultName: string, content: Uint8Array, filters?: Electron.FileFilter[]) => Promise<string | null>;
@@ -127,6 +128,7 @@ async function invokeModelAsset<T>(channel: string, ...args: unknown[]): Promise
 }
 
 const electronAPI: ElectronAPI = {
+  getAndroidRelease: () => ipcRenderer.invoke('app:getAndroidRelease'),
   // Dialog operations
   saveTextFile: (defaultName: string, content: string, filters?: Electron.FileFilter[]) =>
     ipcRenderer.invoke('dialog:saveTextFile', defaultName, content, filters),

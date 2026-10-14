@@ -257,6 +257,7 @@ test('desktop workflow detects safe modes, builds explicitly unsigned artifacts,
   assert.deepEqual(Object.keys(workflow.jobs), [
     'detect',
     'build-windows',
+    'build-android',
     'publish',
     'repair-release',
     'deploy-web',

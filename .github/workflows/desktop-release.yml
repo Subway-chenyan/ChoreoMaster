@@ -20,6 +20,7 @@ jobs:
     outputs:
       version: ${{ steps.detect.outputs.version }}
       mode: ${{ steps.detect.outputs.mode }}
+      android: ${{ steps.detect.outputs.android }}
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -76,6 +77,14 @@ jobs:
             exit 1
           fi
 
+          release_assets=("CosStage-Setup-$version-x64.exe" "CosStage-Setup-$version-x64.exe.sha256")
+          if git cat-file -e "${tag}:data/android-signing.json" 2>/dev/null; then
+            echo "android=true" >> "$GITHUB_OUTPUT"
+            release_assets+=("CosStage-$version.apk" "CosStage-$version.apk.sha256")
+          else
+            echo "android=false" >> "$GITHUB_OUTPUT"
+          fi
+
           release_json="$(mktemp)"
           release_error="$(mktemp)"
           trap 'rm -f -- "$release_json" "$release_error"' EXIT
@@ -83,8 +92,7 @@ jobs:
             if node -e \
               'const fs=require("node:fs");const release=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));const names=new Set((release.assets||[]).map(asset=>asset.name));process.exit(process.argv.slice(2).every(name=>names.has(name))?0:1)' \
               "$release_json" \
-              "CosStage-Setup-$version-x64.exe" \
-              "CosStage-Setup-$version-x64.exe.sha256"; then
+              "${release_assets[@]}"; then
               echo "mode=skip" >> "$GITHUB_OUTPUT"
             else
               echo "mode=repair-release" >> "$GITHUB_OUTPUT"
@@ -163,8 +171,20 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  build-android:
+    needs: detect
+    if: needs.detect.outputs.mode == 'publish'
+    uses: ./.github/workflows/android-build.yml
+    with:
+      channel: stable
+    secrets:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
   publish:
-    needs: [detect, build-windows]
+    needs: [detect, build-windows, build-android]
     if: needs.detect.outputs.mode == 'publish' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -188,6 +208,12 @@ jobs:
         with:
           name: desktop-${{ needs.detect.outputs.version }}
           path: desktop
+
+      - name: Download Android artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: android-stable
+          path: android-release
 
       - name: Install and configure verified Tencent CLIs
         shell: bash
@@ -242,6 +268,9 @@ jobs:
             exit 1
           fi
 
+      - name: Publish verified Android artifacts
+        run: node scripts/android/publish.mjs
+
       - name: Publish immutable artifacts and pointers
         shell: bash
         run: bash scripts/release/publish-cos.sh
@@ -271,22 +300,33 @@ jobs:
           curl -fsSLo release-notes.md --retry 5 --retry-delay 3 \
             "$base_url/release-notes-$VERSION.md"
           sha256sum --check --strict "$installer.sha256"
+          if [ "${{ needs.detect.outputs.android }}" = true ]; then
+          curl -fsSLo "CosStage-$VERSION.apk" --retry 5 --retry-delay 3 "$base_url/android/releases/$VERSION/CosStage-$VERSION.apk"
+          curl -fsSLo "CosStage-$VERSION.apk.sha256" --retry 5 --retry-delay 3 "$base_url/android/releases/$VERSION/CosStage-$VERSION.apk.sha256"
+          sha256sum --check --strict "CosStage-$VERSION.apk.sha256"
+          fi
 
       - name: Repair GitHub Release only
         shell: bash
         run: |
           set -euo pipefail
           tag="v$VERSION"
+          android_assets=()
+          if [ "${{ needs.detect.outputs.android }}" = true ]; then
+            android_assets=("CosStage-$VERSION.apk" "CosStage-$VERSION.apk.sha256")
+          fi
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" \
               "CosStage-Setup-$VERSION-x64.exe" \
               "CosStage-Setup-$VERSION-x64.exe.sha256" \
+              "${android_assets[@]}" \
               --clobber
             gh release edit "$tag" --title "CosStage $VERSION" --notes-file release-notes.md
           else
             gh release create "$tag" \
               "CosStage-Setup-$VERSION-x64.exe" \
               "CosStage-Setup-$VERSION-x64.exe.sha256" \
+              "${android_assets[@]}" \
               --title "CosStage $VERSION" \
               --notes-file release-notes.md
           fi

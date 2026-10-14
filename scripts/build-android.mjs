@@ -1,7 +1,8 @@
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 const directory = fileURLToPath(new URL('../android/', import.meta.url));
-const result = spawnSync(process.platform === 'win32' ? 'gradlew.bat' : './gradlew', ['assembleDebug'], {
+const task = process.argv.includes('--release') ? 'assembleRelease' : 'assembleDebug';
+const result = spawnSync(process.platform === 'win32' ? 'gradlew.bat' : './gradlew', [task], {
   cwd: directory,
   stdio: 'inherit',
   shell: process.platform === 'win32',

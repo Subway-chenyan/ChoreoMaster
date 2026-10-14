@@ -1,0 +1,91 @@
+name: Build Android APK
+on:
+  workflow_call:
+    inputs:
+      channel:
+        required: true
+        type: string
+    secrets:
+      ANDROID_KEYSTORE_BASE64:
+        required: false
+      ANDROID_KEYSTORE_PASSWORD:
+        required: false
+      ANDROID_KEY_ALIAS:
+        required: false
+      ANDROID_KEY_PASSWORD:
+        required: false
+permissions:
+  contents: read
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: npm ci
+      - run: npm run typecheck && npm run test:mobile
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:mobile:ui
+      - name: Install Android SDK components
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Prepare fixed release signing
+        if: inputs.channel == 'stable'
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${KEYSTORE:?Missing ANDROID_KEYSTORE_BASE64}"
+          : "${STORE_PASSWORD:?Missing ANDROID_KEYSTORE_PASSWORD}"
+          : "${KEY_ALIAS:?Missing ANDROID_KEY_ALIAS}"
+          : "${KEY_PASSWORD:?Missing ANDROID_KEY_PASSWORD}"
+          umask 077
+          printf '%s' "$KEYSTORE" | base64 --decode > "$RUNNER_TEMP/cosstage-release.p12"
+      - name: Restore immutable APK on retry
+        if: inputs.channel == 'stable'
+        run: node scripts/android/restore-release.mjs
+      - name: Build and verify APK
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/cosstage-release.p12
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          case "$CHANNEL" in stable|preview) ;; *) exit 1;; esac
+          if [ ! -f android-release/manifest.json ]; then
+            npm run android:sync
+            if [ "$CHANNEL" = stable ]; then
+              node scripts/build-android.mjs --release
+              apk=android/app/build/outputs/apk/release/app-release.apk
+            else
+              unset ANDROID_KEYSTORE_PATH
+              node scripts/build-android.mjs
+              apk=android/app/build/outputs/apk/debug/app-debug.apk
+            fi
+            bash scripts/android/verify-apk.sh "$apk" "$CHANNEL"
+            node scripts/android/release-contract.mjs "$CHANNEL" "$apk" android-release
+          else
+            apk="android-release/$(node -p 'require("./android-release/manifest.json").name')"
+            bash scripts/android/verify-apk.sh "$apk" "$CHANNEL"
+          fi
+      - name: Remove signing material
+        if: always()
+        run: rm -f "$RUNNER_TEMP/cosstage-release.p12"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: android-${{ inputs.channel }}
+          path: android-release/*
+          if-no-files-found: error
+          retention-days: 14

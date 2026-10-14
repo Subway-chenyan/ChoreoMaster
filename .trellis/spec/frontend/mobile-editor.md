@@ -163,3 +163,53 @@ Core: filtering, preserved frames, music byte identity, mode round-trip, missing
 ### Wrong vs correct
 
 Wrong: `readProjectPackage` followed by dropping image/model Blobs. Correct: filter ZIP extraction before decompression, and select the dedicated viewer from persisted local metadata.
+
+## Android CI, release and download contract (2026-10-14)
+
+### Scope / signatures
+
+Applies to Android Gradle packaging, `.github/workflows/android*.yml`, Desktop Release, `scripts/android/`, and the desktop/web Android download entry.
+
+```ts
+androidVersionCode(version: string): number
+artifactContract(channel: 'stable' | 'preview', version: string, commit: string, runId?: string): object
+parseAndroidDownload(value: unknown): { version: string; url: string } | null
+isAndroidDownloadUrl(value: string): boolean
+window.electronAPI.getAndroidRelease(): Promise<{ version: string; url: string } | null>
+```
+
+### Contracts
+
+- PR mobile changes build debug artifacts without secrets or COS writes. Main mobile changes upload previews to commit/run/attempt-specific paths. Stable APK builds are called directly by Desktop Release and gate its publish job alongside Windows; do not rely on GITHUB_TOKEN tag events to start another workflow.
+- Formal application ID is `com.cosstage.mobile`; debug ID adds `.preview`. Version follows package.json; code is major*1,000,000 + minor*1,000 + patch (minor/patch <=999, code 1..2,100,000,000). Stable signing uses PKCS12 secrets and the public fingerprint in `data/android-signing.json`.
+- APKs must pass apksigner and aapt identity/version/debuggable checks before artifact upload. Signing material lives only in RUNNER_TEMP and is removed under `always()`.
+- Stable objects live under `downloads/android/releases/<version>/`; previews under `downloads/android/preview/<commit>/<run>-<attempt>/`. Manifest keys are schemaVersion, channel, version, versionCode, commit, applicationId, name, path, url, sha256, size.
+- `publishAndroid` validates all local bytes and object conflicts before upload, uses forbid-overwrite for immutable keys, re-reads stored bytes, verifies public APK bytes before stable pointer writes, purges CDN and verifies pointers. Reject stable downgrade and same-version different content. Preview must never write stable aliases/manifest.
+- Full build retries may reuse COS artifacts only when version/commit/metadata/hash match; still revalidate native APK identity and fixed certificate. A partial upload without manifest requires the original build artifact (rerun failed jobs), never overwrite immutable bytes.
+- Stable metadata is `downloads/android/latest.json`; fixed APK alias is `downloads/CosStage-Android.apk`. Renderer uses validated versioned APK URL, never an arbitrary URL from remote JSON. Electron fetches fixed metadata using main-process net.fetch with timeout and no redirects, avoiding file:// CORS. The external-window handler allows only exact official APK URLs.
+- Legacy release tags without the Android signing contract retain Windows-only repair behavior. Windows rollback does not downgrade Android.
+
+### Validation / error matrix
+
+| Case | Required outcome |
+| --- | --- |
+| Missing fixed signing secrets / wrong certificate | Build fails, no stable publish |
+| APK hash/sidecar mismatch / remote immutable conflict | Fail before pointers |
+| Lost upload response with identical remote bytes | Recover and continue |
+| COS read denied / outage | Fail, never interpret as missing object |
+| APK CDN verification fails | Keep existing stable pointers |
+| No Android release (HTTP 404) | Disabled pending-release UI |
+| Invalid manifest / unavailable network | Disabled download UI, no untrusted link |
+| Older release lacks Android artifacts | Existing Windows repair/skip still works |
+
+### Good / base / bad cases
+
+Good: version PR -> parallel builds -> verified signed APK on COS -> existing Windows/GitHub/web publication -> both clients show the released version. Base: PR preview artifact without privileges. Bad: publish debug APK at stable alias, overwrite same version, or expose generic fetch/openExternal IPC.
+
+### Tests required
+
+`tests/android-release.test.mjs` covers version limits, workflow isolation, upload order, retries, collisions, integrity and downgrade protection. `tests/android-download.test.ts` checks URL/manifest allowlists. `tests/mobile-ui/android-download.spec.ts` verifies published and unpublished entries. Keep existing release/desktop tests, actionlint, typecheck and production build. Local mocks are not a real signed APK/COS/GitHub deployment.
+
+### Wrong / correct
+
+Wrong: attach a random runner debug key to `com.cosstage.mobile`, or publish based solely on HTTP 200. Correct: fixed fingerprint-pinned release signing, isolated preview package, byte checks before publication and after CDN.

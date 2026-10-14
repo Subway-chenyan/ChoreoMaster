@@ -68,6 +68,8 @@ npm run dev:mobile
 
 ## 生成 Android APK
 
+自动构建、正式签名、COS 发布和网页/Windows 下载入口见 [Android 发布说明](RELEASE.md)。
+
 开发工具：Node.js 22+、JDK 21、Android SDK Platform 36 / Build Tools 36.0.0，设置 `JAVA_HOME` 和 `ANDROID_HOME`。也可使用 Android Studio 打开 `android/`。
 
 ```bash
@@ -84,9 +86,9 @@ npm run android:open
 adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-应用 ID `com.cosstage.mobile`，最低 Android 7 / API 24；建议使用更新的 Android System WebView。Gradle wrapper 已提交。调试包供验证使用，商店发布还需独立配置签名及发布版本号，不要将签名密钥提交进仓库。
+正式应用 ID `com.cosstage.mobile`，调试包 ID `com.cosstage.mobile.preview`，最低 Android 7 / API 24；建议使用更新的 Android System WebView。Gradle wrapper 已提交。正式签名及版本号由发布流程管理，不要将签名密钥提交进仓库。
 
-GitHub Actions 的 **Android preview** 工作流支持手动执行及相关 PR 构建，完成后下载 `CosStage-android-debug` artifact。本次没有推送代码或触发远程构建。
+GitHub Actions 的 **Android preview** 工作流支持手动执行、相关 PR 和 main 提交构建，完成后下载 `android-preview` artifact；main 构建另上传 COS 预览目录。正式版本由 Desktop Release 调用同一构建流程。本次没有推送代码或触发远程构建。
 
 ## 验证与限制
 

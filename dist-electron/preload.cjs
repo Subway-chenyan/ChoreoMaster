@@ -28,6 +28,7 @@ async function invokeModelAsset(channel, ...args) {
     throw error;
 }
 const electronAPI = {
+    getAndroidRelease: () => electron_1.ipcRenderer.invoke('app:getAndroidRelease'),
     // Dialog operations
     saveTextFile: (defaultName, content, filters) => electron_1.ipcRenderer.invoke('dialog:saveTextFile', defaultName, content, filters),
     saveBinaryFile: (defaultName, content, filters) => electron_1.ipcRenderer.invoke('dialog:saveBinaryFile', defaultName, content, filters),

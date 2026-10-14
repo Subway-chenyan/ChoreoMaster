@@ -1,4 +1,5 @@
-import { app, BrowserWindow, protocol } from 'electron';
+import { isAndroidDownloadUrl } from './android-download.js';
+import { app, BrowserWindow, protocol, shell } from 'electron';
 import { createReadStream } from 'fs';
 import { stat } from 'fs/promises';
 import * as path from 'path';
@@ -210,6 +211,8 @@ app.on('window-all-closed', () => {
 // Security: prevent new window creation
 app.on('web-contents-created', (_, contents) => {
     contents.setWindowOpenHandler(({ url }) => {
+        if (isAndroidDownloadUrl(url))
+            void shell.openExternal(url).catch(() => console.warn('无法打开 Android 下载链接'));
         return { action: 'deny' };
     });
 });
