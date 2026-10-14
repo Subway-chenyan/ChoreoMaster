@@ -432,3 +432,36 @@ Implemented offline mobile project library, touch stage gestures, formation/acto
 ### Next Steps
 
 - 真机从下载入口安装 1.5.0 验证新功能与升级路径
+
+
+## Session 14: 排练反馈修复与 1.6.0 发布
+
+**Date**: 2026-10-14
+**Task**: 移动端排练显示优化（10-14-mobile-rehearsal-display）
+**Branch**: `main`
+
+### Summary
+
+真机反馈四项：①人物大小滑杆无效——根因是真实项目演员无显式宽深（默认 1m×1m），缩放函数只处理显式值；改为默认尺寸同样按 Stage 常量参与缩放。②字体最小档 60%→40%。③新增轻点演员高亮：pan 模式下 Stage 对 pointerdown preventDefault 并捕获指针（click 取消、pointerup 重定向），改用 pointerup + elementFromPoint 几何命中，跨队形保持、再点取消。④收起态切换队形右上角 toast 2s。⑤切换队形后播放跳过持场：useRehearsalPlayback 抽出 startPlayback 新增 playFrom，跳到队形末尾的过渡起点开播；拖进度条清除跳过意图。CI 上跳过用例时序敏感失败，改为拦截 play() 记录起播时间的确定性断言；mobile-ui 配置加 CI 重试 2 次解决 editor 手势用例偶发超时。发布 1.6.0（版本 PR #23 首轮 CI 失败→修复推 main 后 changesets 刷新分支→批准后全绿合并）。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `570b489` | test(mobile): make hold-skip assertion deterministic and retry ui suite on ci |
+| `a32d5d8` | chore(changeset): rehearsal highlight, toast and playback skip |
+| `e68fefc` | chore: version packages (#23)（发布提交，tag v1.6.0） |
+
+### Testing
+
+- [OK] mobile-core 11、mobile-ui 17（新增高亮/toast/跳过持场 3 项）、发布回归 115、typecheck、构建
+- [OK] 视觉验收：150% 缩放对默认尺寸生效（实测 1.5 倍）、高亮醒目、toast 位置正确
+- [OK] 线上：latest.json v1.6.0、别名 APK sha256 与版本化 APK/sidecar/指针一致（b0149044…）、网页入口实测 v1.6.0
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 真机复验四项反馈的修复效果
