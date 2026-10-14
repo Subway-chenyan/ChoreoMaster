@@ -1,7 +1,22 @@
 {
   "schemaVersion": 1,
-  "currentVersion": "1.4.0",
+  "currentVersion": "1.5.0",
   "releases": [
+    {
+      "version": "1.5.0",
+      "date": "2026-10-14",
+      "kind": "minor",
+      "title": "CosStage 1.5.0",
+      "summary": "团员排练新增显示设置：可调整人物与名字大小、一键隐藏名字，并默认演员视角、可切回导演视角；收起后舞台占满全屏仅保留播放控制。",
+      "changes": [
+        {
+          "kind": "minor",
+          "text": "团员排练新增显示设置：可调整人物与名字大小、一键隐藏名字，并默认演员视角、可切回导演视角；收起后舞台占满全屏仅保留播放控制。"
+        }
+      ],
+      "breakingChanges": [],
+      "migrationSteps": []
+    },
     {
       "version": "1.4.0",
       "date": "2026-10-14",
