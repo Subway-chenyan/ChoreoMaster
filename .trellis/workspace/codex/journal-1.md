@@ -336,3 +336,37 @@ Implemented offline mobile project library, touch stage gestures, formation/acto
 ### Next Steps
 
 - None - task complete
+
+
+## Session 11: Android 1.4.0 正式发布与远端真实链路验证
+
+**Date**: 2026-10-14
+**Task**: Android CI、COS 发布与下载入口（10-13-android-release）
+**Branch**: `main`
+
+### Summary
+
+合并版本 PR #21 触发首次正式发布，stable 构建在 restore 步骤暴露真实链路缺陷：CDN 对缺失对象回退返回 200 的 SPA 首页而非 404，restore-release.mjs 解析崩溃（本地 mock 全为标准 404 语义，未覆盖）。修复为 SPA 回退/损坏 manifest 视为未发布、由 publish 不可变预检兜底，新增 3 项回归测试；以 revert + 重做版本提交保持 1.4.0 重新触发（无 force-push）。Desktop Release 全绿：固定签名 APK 构建验证、COS 不可变发布、tag v1.4.0、GitHub Release、网页部署全部成功。线上逐项验证指针、sha256、签名块、别名 APK、releases.json、Windows 指针与网页下载入口。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cd87feb` | chore: version packages (#21)（合并触发发布） |
+| `e9fdc4a` | fix(android): treat CDN SPA fallback as unpublished when restoring releases |
+| `5d056e2` | Revert "chore: version packages (#21)" |
+| `681bdcc` | chore: version packages（发布提交，tag v1.4.0） |
+
+### Testing
+
+- [OK] 发布回归 115 通过、2 跳过（含新增 restore 回退 3 项）
+- [OK] Desktop Release 远端全绿（8m56s）：stable APK 签名验证、COS 发布、GitHub Release、deploy-web
+- [OK] 实站验证：latest.json 指针、APK sha256 三方一致、apksigner v2/v3 签名块、网页下载入口 Playwright 指向 v1.4.0
+
+### Status
+
+[OK] **服务端链路全部完成**
+
+### Next Steps
+
+- 真机安装与升级验证（与 preview 包共存）由用户完成

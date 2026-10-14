@@ -14,3 +14,12 @@
 - 发布回归 110 通过、2 跳过；桌面回归 150 通过；下载界面 Playwright 2 通过；typecheck、production build、actionlint 与 shell 语法检查通过。
 - 2026-10-14 用户在本机执行签名配置，已通过 gh secret list 确认四项 Android Secrets 存在；原写权限障碍已解除，内容由首次正式构建验证。聊天中收到的令牌未使用。
 - 未推送、未触发工作流、未上传生产 APK；本机无 JDK/Android SDK，真实构建、安装与升级需远端和真机验证。保留任务待远端启用。
+
+## 远端真实链路验证（2026-10-14 续）
+
+- 合并版本 PR #21 触发 Desktop Release：stable 构建在 restore 步骤失败——beat.cosdrama.cn 是 SPA 静态站，对象缺失时回退返回 200 的 index.html 而非 404，restore-release.mjs 的 `.json()` 解析崩溃；本地 mock 均为标准 404 语义，未覆盖该回退。
+- 修复：restore-release.mjs 重构为导出函数 + CLI 入口，SPA 回退或损坏 manifest 一律视为未发布，误判由 publish 的不可变预检兜底；新增 3 项回归测试。发布回归 115 通过、2 跳过。
+- 通过 revert + 重做版本提交重新满足“发布必须发生在版本变更提交”的约束（HEAD 681bdcc，保持 1.4.0，未改写历史，未 force-push）。
+- Desktop Release 全绿（detect/build-windows/build-android/publish/deploy-web）：固定签名 stable APK 构建并通过 verify-apk.sh，COS 不可变发布与 CDN 读回验证通过，tag v1.4.0 与 GitHub Release（含 APK、安装包及各自 sha256）创建成功。
+- 线上验证：latest.json 指针返回 v1.4.0（versionCode 1004000、commit 681bdcc、正式包名）；CDN 下载 APK sha256 与指针/sidecar/GitHub 资产一致；别名 CosStage-Android.apk 字节一致；APK 含 apksigner v2/v3 签名块；releases.json 索引 currentVersion 1.4.0；Windows 安装包指针指向 v1.4.0；网页下载入口 Playwright 实站验证指向不可变 v1.4.0 地址，新前端包已部署。
+- 剩余：真机安装与升级验证（含与 preview 包 com.cosstage.mobile.preview 共存）由用户在设备上完成。
