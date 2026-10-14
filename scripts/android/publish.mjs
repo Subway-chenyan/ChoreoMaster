@@ -18,6 +18,21 @@ export function cosErrorDetails(error, secrets = []) {
   for (const secret of secrets.filter(Boolean)) detail = detail.split(secret).join('[REDACTED]');
   return detail.replace(/(https?:\/\/[^\s?]+)\?[^\s]+/g, '$1?[REDACTED]').slice(-2000);
 }
+export function needsCustomApkDomain(path, error) {
+  return path.endsWith('.apk') && /\bDownloadForbidden\b/.test(`${error.stdout ?? ''}\n${error.stderr ?? ''}`);
+}
+export async function readPublicApk(path, request = fetch, pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const response = await request(`https://beat.cosdrama.cn/${path}?readback=${Date.now()}-${attempt}`, {
+        signal: AbortSignal.timeout(60000), cache: 'no-store', redirect: 'error',
+      });
+      if (response.ok) return Buffer.from(await response.arrayBuffer());
+    } catch { /* CDN 刷新及网络短暂失败可重试，不能把失败当成对象不存在。 */ }
+    if (attempt < 2) await pause(2000);
+  }
+  throw new Error(`Custom-domain APK readback failed: ${path}`);
+}
 export async function publishAndroid({ manifest, apk, sidecar, cos, verify, purge }) {
   const expected = artifactContract(
     manifest.channel,
@@ -103,6 +118,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         return await readFile(target);
       } catch (error) {
         if (isMissingCosObject(error)) return null;
+        if (needsCustomApkDomain(path, error)) {
+          // COS 默认域名禁止分发 APK；通过已配置的自定义域名回读，调用方仍校验完整字节。
+          await purge([path]);
+          return readPublicApk(path);
+        }
         throw new Error(`COS read failed: ${path}; ${cosErrorDetails(error, [process.env.TENCENT_SECRET_ID, process.env.TENCENT_SECRET_KEY])}`);
       }
     },

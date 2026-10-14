@@ -4,7 +4,20 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { load } from 'js-yaml';
 import { androidVersionCode, artifactContract } from '../scripts/android/release-contract.mjs';
-import { publishAndroid, isMissingCosObject, cosErrorDetails } from '../scripts/android/publish.mjs';
+import { publishAndroid, isMissingCosObject, cosErrorDetails, needsCustomApkDomain, readPublicApk } from '../scripts/android/publish.mjs';
+test('APK domain restriction uses custom-domain bytes and never treats CDN errors as missing objects', async () => {
+  assert.equal(needsCustomApkDomain('a.apk', { stdout: '403 DownloadForbidden' }), true);
+  assert.equal(needsCustomApkDomain('a.json', { stdout: '403 DownloadForbidden' }), false);
+  assert.equal(needsCustomApkDomain('a.apk', { stderr: '403 AccessDenied' }), false);
+  let attempts = 0;
+  const bytes = await readPublicApk('downloads/test.apk', async (url, options) => {
+    assert.equal(new URL(url).hostname, 'beat.cosdrama.cn');
+    assert.equal(options.redirect, 'error');
+    return ++attempts === 1 ? new Response('', { status: 404 }) : new Response('APK bytes');
+  }, async () => {});
+  assert.equal(bytes.toString(), 'APK bytes');
+  await assert.rejects(readPublicApk('downloads/test.apk', async () => new Response('', { status: 403 }), async () => {}), /readback failed/);
+});
 test('COS diagnostics redact credentials and signed query strings before truncating', () => {
   const detail = cosErrorDetails({ code: 'EIO', stderr: 'secret-id secret-key https://example.com/a?signature=private' }, ['secret-id', 'secret-key']);
   assert.match(detail, /EIO/);
