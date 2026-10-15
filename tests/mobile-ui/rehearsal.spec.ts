@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { zipSync, strToU8 } from 'fflate';
 import { createMobileDocument, addActor } from '../../mobile/editor-model';
 
-function packageFile(missingMusic = false) {
+function packageFile(missingMusic = false, curved = false) {
   let doc = createMobileDocument('团员练习', () => 'opening');
   doc = addActor(doc, {
     id: 'lead',
@@ -31,6 +31,9 @@ function packageFile(missingMusic = false) {
     },
     notes: `第 ${i + 1} 段：向舞台右侧移动\n注意与前排保持距离`,
   }));
+  if (curved) doc.transitions = [{ id: 'curve', fromFrameId: 'f0', toFrameId: 'f1', objectMotions: {
+    lead: { pathType: 'bezier', controlPoints: [{ x: 25, y: 10 }, { x: 30, y: 15 }] },
+  } }];
   doc.musicAsset = 'assets/music.wav';
   doc.stageConfig.background = {
     value: 'assets/background.png',
@@ -152,28 +155,54 @@ test('display settings and performer perspective persist across reopen', async (
   await expect(surface).toHaveAttribute('style', /rotate\(180deg\)/);
   const label = page.locator('.stage-surface').getByText('领舞', { exact: true });
   await expect(label).toBeVisible();
-  const dot = page.locator('[data-performer-id]').first();
+  const dot = page.locator('[data-performer-visual]').first();
   const setScale = async (percent: number) => {
     await page.getByRole('button', { name: '显示设置' }).click();
     const dialog = page.getByRole('dialog', { name: '显示设置' });
     await expect(dialog).toBeVisible();
-    // React 受控 range 需要走原生 value setter 才会触发 onChange
-    await dialog.getByLabel(/人物大小/).evaluate((element: HTMLInputElement, value: string) => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-      setter?.call(element, value);
-      element.dispatchEvent(new Event('input', { bubbles: true }));
-    }, String(percent));
+    const slider = dialog.getByLabel(/人物大小/);
+    if (percent === 50 || percent === 200) {
+      const bounds = await slider.boundingBox();
+      if (!bounds) throw new Error('人物滑块不可见');
+      if (percent === 50) {
+        const touch = await page.context().newCDPSession(page);
+        await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: bounds.x + bounds.width - 8, y: bounds.y + bounds.height / 2 }] });
+        for (let step = 1; step <= 10; step++) await touch.send('Input.dispatchTouchEvent', {
+          type: 'touchMove', touchPoints: [{ x: bounds.x + (bounds.width - 8) * (1 - step / 10) + 1, y: bounds.y + bounds.height / 2 }],
+        });
+        await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+        await touch.detach();
+      } else {
+        await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(bounds.x + bounds.width - 1, bounds.y + bounds.height / 2, { steps: 12 });
+        await page.mouse.up();
+      }
+    } else {
+      await slider.focus();
+      await slider.press('Home');
+      for (let value = 50; value < percent; value += 5) await slider.press('ArrowRight');
+    }
     await expect(dialog.getByText(`人物大小 ${percent}%`)).toBeVisible();
     await page.getByRole('button', { name: '关闭显示设置' }).click();
     await expect(dialog).toHaveCount(0);
   };
   await setScale(200);
   const enlarged = (await dot.boundingBox())?.width ?? 0;
+  await setScale(50);
+  const small = (await dot.boundingBox())?.width ?? 0;
+  expect(enlarged).toBeGreaterThan(small * 3.5);
+  expect((await page.locator('[data-performer-id]').first().boundingBox())?.width).toBeGreaterThanOrEqual(44);
   await setScale(100);
   const base = (await dot.boundingBox())?.width ?? 0;
   expect(base).toBeGreaterThan(0);
   expect(enlarged).toBeGreaterThan(base * 1.5);
   await page.getByRole('button', { name: '显示设置' }).click();
+  const fontSlider = page.getByRole('dialog', { name: '显示设置' }).getByLabel(/字体大小/);
+  await fontSlider.focus();
+  await fontSlider.press('Home');
+  await expect(fontSlider).toHaveValue('20');
+  expect(await label.evaluate((element) => parseFloat(getComputedStyle(element).fontSize))).toBeLessThan(6);
   await page.getByRole('dialog', { name: '显示设置' }).getByRole('switch', { name: '显示名字' }).click();
   await expect(label).toHaveCount(0);
   await page.getByRole('button', { name: '关闭显示设置' }).click();
@@ -189,6 +218,7 @@ test('display settings and performer perspective persist across reopen', async (
   await page.getByRole('button', { name: '显示设置' }).click();
   const reopened = page.getByRole('dialog', { name: '显示设置' });
   await expect(reopened.getByText('人物大小 100%')).toBeVisible();
+  await expect(reopened.getByLabel(/字体大小/)).toHaveValue('20');
   await expect(reopened.getByRole('switch', { name: '显示名字' })).toHaveAttribute('aria-checked', 'false');
 });
 
@@ -299,4 +329,40 @@ test('late play completion cannot interrupt a newer rehearsal playback', async (
     .poll(() => page.locator('audio').evaluate((audio: HTMLAudioElement) => !audio.paused))
     .toBe(true);
   await page.getByRole('button', { name: '暂停排练' }).click();
+});
+
+test('highlighted rehearsal paths appear only in transitions without edit handles or storage writes', async ({ page }) => {
+  await page.setViewportSize({ width: 915, height: 412 });
+  await page.goto('/?mobile=1');
+  await page.getByLabel('导入团员排练包').setInputFiles(packageFile(false, true));
+  await expect(page.getByText('团员排练 · 只读', { exact: true })).toBeVisible();
+  const before = await stored(page);
+  const paths = page.locator('[data-transition-performer-id]');
+  await page.locator('[data-performer-id="lead"]').click();
+  await expect(paths).toHaveCount(0);
+  const seek = async (time: string) => {
+    await page.getByLabel('排练进度').evaluate((element: HTMLInputElement, value) => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(element, value);
+      element.dispatchEvent(new Event('input', { bubbles: true }));
+    }, time);
+  };
+  await seek('1500');
+  await expect(paths).toHaveCount(1);
+  await expect(paths).toHaveAttribute('data-transition-performer-id', 'lead');
+  await expect(paths).toHaveAttribute('d', / C /);
+  await expect(page.getByRole('button', { name: '拖动调整过渡起始点' })).toHaveCount(0);
+  await expect(page.getByTitle('控制点 1', { exact: true })).toHaveCount(0);
+  await page.locator('[data-performer-id="mate"]').click();
+  await expect(paths).toHaveAttribute('data-transition-performer-id', 'mate');
+  await expect(paths).toHaveAttribute('d', / L /);
+  await page.locator('[data-performer-id="mate"]').click();
+  await expect(paths).toHaveCount(0);
+  await page.locator('[data-performer-id="lead"]').click();
+  await seek('2000');
+  await expect(paths).toHaveCount(0);
+  await seek('1000');
+  await expect(paths).toHaveCount(1);
+  await page.getByRole('button', { name: '收起队形列表' }).click();
+  await expect(paths).toHaveCount(1);
+  expect(await stored(page)).toEqual(before);
 });

@@ -25,12 +25,11 @@ import {
   MIN_LABEL_SCALE,
   MIN_PERFORMER_SCALE,
   REHEARSAL_DISPLAY_STORAGE_KEY,
-  applyRehearsalLabelScale,
   clampLabelScale,
   clampPerformerScale,
   loadRehearsalDisplay,
   saveRehearsalDisplay,
-  scaleRehearsalPerformers,
+  rehearsalTransitionPaths,
   type RehearsalDisplaySettings,
 } from '../../mobile/rehearsal-display';
 
@@ -74,13 +73,9 @@ export default function MobileRehearsal({
   const [reset, setReset] = useState(0);
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ seq: number; text: string } | null>(null);
-  const performers = useMemo(
-    () => scaleRehearsalPerformers(doc.performers, display.performerScale),
-    [doc.performers, display.performerScale]
-  );
-  const stage = useMemo(
-    () => applyRehearsalLabelScale(baseStage, display.labelScale),
-    [baseStage, display.labelScale]
+  const transitionPaths = useMemo(
+    () => rehearsalTransitionPaths(playback.time, frames, doc.performers, doc.transitions ?? [], highlightId),
+    [playback.time, frames, doc.performers, doc.transitions, highlightId]
   );
   const updateDisplay = (patch: Partial<RehearsalDisplaySettings>) =>
     setDisplay((prev) => ({ ...prev, ...patch }));
@@ -305,12 +300,15 @@ export default function MobileRehearsal({
             touchMode="pan"
             viewResetKey={reset}
             readonly
-            performers={performers}
+            performers={doc.performers}
+            performerDisplayScale={display.performerScale}
+            performerLabelScale={display.labelScale}
+            transitionPaths={transitionPaths}
             performerGroups={doc.performerGroups}
             positions={scene.positions}
             rotations={scene.rotations}
             hiddenGroupIds={scene.hiddenGroupIds}
-            stageConfig={stage}
+            stageConfig={baseStage}
             selectedPerformerIds={highlightId ? [highlightId] : []}
             onSelectionChange={noChange}
             onPositionChange={noChange}

@@ -30,22 +30,15 @@ import {
   deleteMobileProject,
 } from '../mobile/project-store';
 import { createLegacyUnitBoxAsset } from '../electron/model-asset-contract';
-import {
-  DEFAULT_PERFORMER_DEPTH,
-  DEFAULT_PERFORMER_WIDTH,
-  DEFAULT_PERFORMER_LABEL_FONT_SIZE,
-} from '../electron/stage-defaults';
 import { pinchViewport } from '../mobile/gestures';
 import {
   DEFAULT_REHEARSAL_DISPLAY,
   MAX_PERFORMER_SCALE,
   MIN_LABEL_SCALE,
-  applyRehearsalLabelScale,
   loadRehearsalDisplay,
   saveRehearsalDisplay,
-  scaleRehearsalPerformers,
+  rehearsalTransitionPaths,
 } from '../mobile/rehearsal-display';
-import type { StageConfig } from '../types';
 import {
   createManagedProject,
   saveManagedProject,
@@ -370,29 +363,31 @@ test('rehearsal display settings persist, clamp and fall back per field', () => 
   });
 });
 
-test('performer scaling only touches performers and covers default sizes', () => {
-  const performers = [
-    { id: 'a', name: '甲', color: '#fff', label: 'A', shape: 'circle' as const, width: 1, depth: 0.8 },
-    { id: 'b', name: '乙', color: '#fff', label: 'B', shape: 'circle' as const, type: 'performer' as const },
-    { id: 'c', name: '平台', color: '#fff', label: 'C', shape: 'square' as const, type: 'prop' as const, width: 4, depth: 2 },
-  ];
-  assert.equal(scaleRehearsalPerformers(performers, 1), performers);
-  const scaled = scaleRehearsalPerformers(performers, 1.5);
-  assert.equal(scaled[0].width, 1.5);
-  assert.ok(Math.abs((scaled[0].depth ?? 0) - 1.2) < 1e-9);
-  // 默认尺寸（1m×1m）的演员同样参与缩放
-  assert.equal(scaled[1].width, DEFAULT_PERFORMER_WIDTH * 1.5);
-  assert.equal(scaled[1].depth, DEFAULT_PERFORMER_DEPTH * 1.5);
-  assert.equal(scaled[2].width, 4);
-  assert.equal(scaled[2].depth, 2);
-});
 
-test('label scaling builds on the project stage config with the shared default fallback', () => {
-  const base = { performerLabelFontSize: 14 } as StageConfig;
-  assert.equal(applyRehearsalLabelScale(base, 1), base);
-  assert.equal(applyRehearsalLabelScale(base, 1.5).performerLabelFontSize, 21);
-  assert.equal(
-    applyRehearsalLabelScale({} as StageConfig, 2).performerLabelFontSize,
-    DEFAULT_PERFORMER_LABEL_FONT_SIZE * 2
-  );
+test('rehearsal paths follow the highlighted performer and only exist between formations', () => {
+  const doc = fixture();
+  doc.frames[0].startTime = 0;
+  doc.frames[0].duration = 1000;
+  doc.frames[1].startTime = 2000;
+  doc.frames[1].duration = 1000;
+  const paths = (time: number, id: string | null = 'p1') =>
+    rehearsalTransitionPaths(time, doc.frames, doc.performers, doc.transitions ?? [], id);
+  const snapshot = JSON.stringify(doc);
+  assert.deepEqual(paths(999), []);
+  assert.deepEqual(paths(2000), []);
+  assert.deepEqual(paths(3000), []);
+  assert.deepEqual(paths(1500, null), []);
+  assert.deepEqual(paths(1500, 'missing'), []);
+  const path = paths(1000)[0];
+  assert.equal(path.performerId, 'p1');
+  assert.deepEqual(path.start, doc.frames[0].positions.p1);
+  assert.deepEqual(path.end, doc.frames[1].positions.p1);
+  assert.deepEqual(path.controlPoints, doc.transitions?.[0].objectMotions.p1.controlPoints);
+  assert.equal(path.pathType, 'bezier');
+  assert.equal(paths(1500, 'p2')[0].pathType, 'linear');
+  assert.equal(JSON.stringify(doc), snapshot);
+  doc.frames[0].hiddenGroupIds = ['g1'];
+  assert.deepEqual(paths(1500), []);
+  delete doc.frames[1].positions.p2;
+  assert.deepEqual(paths(1500, 'p2'), []);
 });

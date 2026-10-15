@@ -1,9 +1,5 @@
-import {
-  DEFAULT_PERFORMER_DEPTH,
-  DEFAULT_PERFORMER_WIDTH,
-  DEFAULT_PERFORMER_LABEL_FONT_SIZE,
-} from '../electron/stage-defaults';
-import type { Performer, StageConfig } from '../types';
+import type { Frame, Performer, TransitionSegment, TransitionPathDisplay } from '../types';
+import { findTransitionSegment, getSortedFrames } from '../utils/transitions';
 
 export interface RehearsalDisplaySettings {
   /** 是否显示名字标签 */
@@ -18,7 +14,7 @@ export interface RehearsalDisplaySettings {
 
 export const MIN_PERFORMER_SCALE = 0.5;
 export const MAX_PERFORMER_SCALE = 2;
-export const MIN_LABEL_SCALE = 0.4;
+export const MIN_LABEL_SCALE = 0.2;
 export const MAX_LABEL_SCALE = 2;
 
 export const DEFAULT_REHEARSAL_DISPLAY: RehearsalDisplaySettings = {
@@ -79,27 +75,21 @@ export function saveRehearsalDisplay(settings: RehearsalDisplaySettings): string
   });
 }
 
-/**
- * 只缩放表演者的宽深，道具与平台保持原始尺寸，避免平台占位判定失真。
- * 未设置宽深的表演者按 Stage 的默认尺寸（1m×1m）参与缩放，否则滑杆对默认尺寸的队伍无效。
- */
-export function scaleRehearsalPerformers(performers: Performer[], scale: number): Performer[] {
-  if (scale === 1) return performers;
-  const scaleSize = (value: number | undefined, fallback: number) =>
-    (typeof value === 'number' && Number.isFinite(value) ? value : fallback) * scale;
-  return performers.map((performer) => {
-    if (performer.type === 'prop') return performer;
-    return {
-      ...performer,
-      width: scaleSize(performer.width, DEFAULT_PERFORMER_WIDTH),
-      depth: scaleSize(performer.depth, DEFAULT_PERFORMER_DEPTH),
-    };
-  });
-}
-
-/** 在项目舞台配置之上叠加名字字体缩放；项目未配置时回退默认字号。 */
-export function applyRehearsalLabelScale(stageConfig: StageConfig, labelScale: number): StageConfig {
-  if (labelScale === 1) return stageConfig;
-  const base = stageConfig.performerLabelFontSize ?? DEFAULT_PERFORMER_LABEL_FONT_SIZE;
-  return { ...stageConfig, performerLabelFontSize: Math.round(base * labelScale * 10) / 10 };
+/** 只在实际队形间隙显示高亮演员的路径，与播放插值使用相同端点和控制点。 */
+export function rehearsalTransitionPaths(
+  time: number, frames: Frame[], performers: Performer[], transitions: TransitionSegment[], highlightId: string | null,
+): TransitionPathDisplay[] {
+  if (!highlightId) return [];
+  const sorted = getSortedFrames(frames);
+  if (sorted.some((frame) => time >= frame.startTime && time < frame.startTime + frame.duration)) return [];
+  const from = [...sorted].reverse().find((frame) => frame.startTime + frame.duration <= time);
+  const to = sorted.find((frame) => frame.startTime > time);
+  const performer = performers.find((item) => item.id === highlightId);
+  if (!from || !to || !performer || (performer.groupId && from.hiddenGroupIds?.includes(performer.groupId))) return [];
+  const start = from.positions[highlightId];
+  const end = to.positions[highlightId];
+  if (!start || !end) return [];
+  const motion = findTransitionSegment(transitions, from.id, to.id)?.objectMotions?.[highlightId];
+  return [{ performerId: highlightId, color: performer.color, start, end,
+    pathType: motion?.pathType ?? 'linear', controlPoints: motion?.controlPoints ?? [], isSelected: true }];
 }

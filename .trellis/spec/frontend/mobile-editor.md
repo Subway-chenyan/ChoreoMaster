@@ -213,3 +213,12 @@ Good: version PR -> parallel builds -> verified signed APK on COS -> existing Wi
 ### Wrong / correct
 
 Wrong: attach a random runner debug key to `com.cosstage.mobile`, or publish based solely on HTTP 200. Correct: fixed fingerprint-pinned release signing, isolated preview package, byte checks before publication and after CDN.
+
+## Rehearsal visual sizing and highlighted paths (2026-10-15)
+
+- `Stage.performerDisplayScale` scales the inner performer visual after the minimum touch target is applied; it must not scale stored dimensions or shrink the 44px touch target. Default 1 preserves editor rendering. Props retain their sizes.
+- `Stage.performerLabelScale` applies after `getStageLabelFontSize` normalizes the project baseline. Rehearsal permits 20–200% display scale without changing the document font or the shared editor minimum.
+- `rehearsalTransitionPaths(time, frames, performers, transitions, highlightId)` returns at most one selected path, only between the previous formation end (inclusive) and next formation start (exclusive). Hold times, absent highlights/endpoints and hidden performers return an empty list. Path endpoints and Bézier control points match playback interpolation; missing control points fall back to endpoints in Stage.
+- Read-only paths never expose edit handles, control guides or pointer targets. They remain aligned under actor-view rotation and viewport pan/zoom, and cannot mutate choreography data.
+- Regression checks must measure the visible performer node, not only its hit rectangle. Exercise native range drag (including touch), sub-6px rendered labels, persistence, linear/Bézier paths, exact interval boundaries, highlight toggling and unchanged IndexedDB contents.
+- Wrong: scaling performer width under `max(width, 44px)` or reducing a font before its 6px clamp. Correct: apply display scales after these baseline constraints.

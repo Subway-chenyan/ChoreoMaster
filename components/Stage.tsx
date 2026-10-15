@@ -49,6 +49,9 @@ interface StageProps {
   readonly?: boolean;
   mode?: ToolMode;
   showLabels?: boolean;
+  /** 仅缩放显示图形，不改变项目尺寸和最小触摸区域。 */
+  performerDisplayScale?: number;
+  performerLabelScale?: number;
   showDirectionArrows?: boolean;
   /** 演员视角：整个平面 180° 点镜像（文字保持正向），与 2D 导出的排练视角同语义 */
   flippedView?: boolean;
@@ -202,6 +205,8 @@ export const Stage: React.FC<StageProps> = ({
   readonly = false,
   mode = ToolMode.SELECT,
   showLabels = true,
+  performerDisplayScale = 1,
+  performerLabelScale = 1,
   showDirectionArrows = true,
   flippedView = false,
   gridScale = 1,
@@ -1006,21 +1011,22 @@ export const Stage: React.FC<StageProps> = ({
             <svg className="absolute inset-0 h-full w-full pointer-events-none z-[15]" preserveAspectRatio="none" viewBox="0 0 100 100">
               {transitionOverlays.map((overlay) => (
                 <g key={overlay.performerId}>
-                  {overlay.isSelected && overlay.pathType === 'bezier' && (
+                  {!readonly && overlay.isSelected && overlay.pathType === 'bezier' && (
                     <>
                       <line x1={overlay.startView.x} y1={overlay.startView.y} x2={overlay.controlPointsView[0].x} y2={overlay.controlPointsView[0].y} stroke="#38bdf8" strokeWidth="0.3" strokeDasharray="1.2 0.8" opacity="0.8" />
                       <line x1={overlay.endView.x} y1={overlay.endView.y} x2={overlay.controlPointsView[1].x} y2={overlay.controlPointsView[1].y} stroke="#38bdf8" strokeWidth="0.3" strokeDasharray="1.2 0.8" opacity="0.8" />
                     </>
                   )}
                   <path
-                    className="pointer-events-auto cursor-pointer"
+                    data-transition-performer-id={overlay.performerId}
+                    className={readonly ? "pointer-events-none" : "pointer-events-auto cursor-pointer"}
                     d={overlay.pathD}
                     fill="none"
                     stroke={overlay.color}
                     strokeWidth={overlay.isSelected ? '0.75' : '0.35'}
                     strokeDasharray={overlay.isSelected ? '1.6 1' : '1 1.4'}
                     opacity={overlay.isSelected ? '1' : '0.38'}
-                    pointerEvents="stroke"
+                    pointerEvents={readonly ? "none" : "stroke"}
                     onPointerDown={(event) => {
                       event.stopPropagation();
                       onTransitionObjectSelect?.(overlay.performerId);
@@ -1033,7 +1039,7 @@ export const Stage: React.FC<StageProps> = ({
               ))}
             </svg>
             {transitionOverlays
-              .filter((overlay) => overlay.isSelected)
+              .filter((overlay) => !readonly && overlay.isSelected)
               .map((overlay) => (
               <button
                 key={`transition-start-${overlay.performerId}`}
@@ -1059,7 +1065,7 @@ export const Stage: React.FC<StageProps> = ({
               />
               ))}
             {transitionOverlays
-              .filter((overlay) => overlay.isSelected && overlay.pathType === 'bezier')
+              .filter((overlay) => !readonly && overlay.isSelected && overlay.pathType === 'bezier')
               .flatMap((overlay) => overlay.controlPointsView.map((controlPoint, index) => (
               <button
                 key={`transition-control-${overlay.performerId}-${index}`}
@@ -1266,7 +1272,7 @@ export const Stage: React.FC<StageProps> = ({
                 zIndex: (platformOccupancy.entityLiftById[performer.id] ?? 0) > 0 ? 14 : 10,
               }}
             >
-              <div className="relative h-full w-full" style={{ transform: `rotate(${rotation}deg)`, ...(touchMode ? { width: '65%', height: '65%' } : {}) }}>
+              <div data-performer-visual={performer.id} className="relative h-full w-full" style={{ transform: `rotate(${rotation}deg) scale(${performerDisplayScale})`, ...(touchMode ? { width: '65%', height: '65%' } : {}) }}>
                 {isSelected && !readonly && !touchMode && !lockedPerformerIdSet.has(performer.id) && (
                   <button
                     type="button"
@@ -1321,7 +1327,7 @@ export const Stage: React.FC<StageProps> = ({
             >
               <div
                 className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 font-medium text-white bg-slate-900/80 px-2 py-0.5 rounded whitespace-nowrap shadow-sm"
-                style={{ fontSize: `${labelFontSize}px`, rotate: flippedView ? '180deg' : undefined }}
+                style={{ fontSize: `${labelFontSize * (performer.type === 'prop' ? 1 : performerLabelScale)}px`, rotate: flippedView ? '180deg' : undefined }}
               >
                 {performer.name}
               </div>
