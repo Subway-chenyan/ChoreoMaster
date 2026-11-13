@@ -328,10 +328,53 @@ export interface ProjectMeta {
   thumbnail?: string;
 }
 
+// 内嵌 MCP 服务的可选配置（settings.json 的 mcp 字段），缺省时默认启用
+export interface McpSettings {
+  enabled?: boolean;
+  port?: number;
+  // 可选 Bearer Token；设置后 MCP 客户端请求需携带 Authorization: Bearer <token>
+  token?: string;
+}
+
 export interface AppSettings {
   storagePath: string;
   recentProjects: string[];
   maxRecentProjects: number;
+  mcp?: McpSettings;
+}
+
+// MCP 服务对外推送的变更描述（主进程 → 渲染进程）
+export interface McpProjectChange {
+  changeId: string;
+  projectId: string;
+  toolName: string;
+  description: string;
+  timestamp: number;
+}
+
+// MCP 服务运行状态（桌面端「AI 配置」页展示）
+export interface McpStatus {
+  enabled: boolean;
+  running: boolean;
+  port: number;
+  url: string;
+  activeProjectId: string | null;
+  error: string | null;
+}
+
+// MCP 修改记录（可回退条目）
+export interface McpChangeSummary {
+  id: string;
+  timestamp: number;
+  projectId: string;
+  toolName: string;
+  description: string;
+}
+
+export interface McpRollbackResult {
+  projectId: string;
+  undoneCount: number;
+  description: string;
 }
 
 export type ProjectAssetKind = 'audio' | 'background' | 'stage-background';

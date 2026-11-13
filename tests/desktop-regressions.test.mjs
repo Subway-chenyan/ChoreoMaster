@@ -642,7 +642,7 @@ test('3D transform editing is transient and uses the shared interaction policy',
   };
 
   visitCallExpressions(appSyntaxTree);
-  assert.ok(localStorageCalls.length > 0, 'expected to inspect existing localStorage calls');
+  // App.tsx 可能不含 localStorage 调用（AI 配置已迁移为 MCP 服务），存在时仍须满足约束
   assert.ok(pushUndoActionCalls.length > 0, 'expected to inspect existing pushUndoAction calls');
   for (const call of localStorageCalls) {
     assert.doesNotMatch(

@@ -3,14 +3,14 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   AudioMarker,
   Frame,
+  McpProjectChange,
   MotionControlPoint,
   Performer,
   Position,
   PerformerShape,
   PerformerGroup,
   PerformerType,
-  AIConfig,
-  AIChoreoPlan,
+  AIConfig,  AIChoreoPlan,
   ObjectMotion,
   ProjectDocument,
   ProjectLoadResult,
@@ -307,6 +307,24 @@ type DeleteEditorStateUndoAction = {
   after: EditorDeletionState;
 };
 
+// MCP 外部更新到达时的编辑器快照：保证 Ctrl+Z 可找回被覆盖的本地未保存编辑
+type ExternalDocumentSnapshot = {
+  performers: Performer[];
+  performerGroups: PerformerGroup[];
+  frames: Frame[];
+  transitions: TransitionSegment[];
+  audioMarkers: AudioMarker[];
+  stageConfig: StageConfig;
+  performerNotes: PerformerNote[];
+  currentFrameId: string;
+};
+
+type RestoreDocumentUndoAction = {
+  type: 'restore-document';
+  before: ExternalDocumentSnapshot;
+  after: ExternalDocumentSnapshot;
+};
+
 type PendingDeleteRequest =
   | { type: 'performers'; ids: string[] }
   | { type: 'group'; id: string }
@@ -318,7 +336,8 @@ type UndoAction = MovePerformersUndoAction
   | PasteFormationUndoAction
   | RotatePerformerUndoAction
   | ResizePerformerUndoAction
-  | DeleteEditorStateUndoAction;
+  | DeleteEditorStateUndoAction
+  | RestoreDocumentUndoAction;
 
 const getSupportedVideoEncoderConfig = async (
   width: number,
@@ -626,25 +645,9 @@ const App: React.FC = () => {
   const saveRequestedRef = useRef(false);
   const saveHandlerRef = useRef<() => Promise<boolean>>(async () => false);
   const saveToastTimerRef = useRef<number | null>(null);
-  
-  const [aiConfig, setAiConfig] = useState<AIConfig>(() => {
-    const saved = localStorage.getItem('choreo-ai-config');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      return {
-        backendUrl: parsed.backendUrl || import.meta.env.VITE_AI_BACKEND_URL || 'http://localhost:8000',
-        memberToken: parsed.memberToken || import.meta.env.VITE_MEMBER_TOKEN || '',
-      };
-    }
-    return {
-      backendUrl: import.meta.env.VITE_AI_BACKEND_URL || 'http://localhost:8000',
-      memberToken: import.meta.env.VITE_MEMBER_TOKEN || ''
-    };
-  });
 
-  useEffect(() => {
-    localStorage.setItem('choreo-ai-config', JSON.stringify(aiConfig));
-  }, [aiConfig]);
+  // MCP 修改记录刷新令牌：收到 MCP 实时更新后递增，驱动侧栏历史列表刷新
+  const [mcpChangeToken, setMcpChangeToken] = useState(0);
 
   // Theme
   const { theme } = useTheme();
@@ -1933,13 +1936,14 @@ const App: React.FC = () => {
   };
 
   // Load a project
-  const handleLoadProject = async (projectId: string) => {
+  // skipSaveBefore：MCP 主动打开项目时使用——MCP 已把文档落盘，无需回存，
+  // 且若当前项目已被删除，保存会失败并导致静默中止（渲染端卡在失效项目上）。
+  const handleLoadProject = async (projectId: string, options: { skipSaveBefore?: boolean } = {}) => {
     if (!window.electronAPI?.isElectron) return;
-    if (!await saveBeforeProjectOperation()) return;
-    
+    if (!options.skipSaveBefore && !await saveBeforeProjectOperation()) return;
+
     try {
       await applyLoadedProject(projectId, await window.electronAPI.project.load(projectId));
-      
     } catch (error) {
       console.error('Failed to load project:', error);
       setProjectMessages(['项目加载失败，请检查项目文件是否完整']);
@@ -2042,6 +2046,141 @@ const App: React.FC = () => {
     }, AUTO_SAVE_INTERVAL_MS);
     return () => window.clearInterval(intervalId);
   }, []);
+
+  // ==================== MCP 外部修改实时集成 ====================
+
+  // 恢复编辑器快照（供 restore-document 的 undo/redo）
+  const applyExternalDocumentSnapshot = (snapshot: ExternalDocumentSnapshot) => {
+    setPerformers(snapshot.performers);
+    setPerformerGroups(snapshot.performerGroups);
+    setFrames(snapshot.frames);
+    setTransitions(snapshot.transitions);
+    setAudioMarkers(snapshot.audioMarkers);
+    setStageConfig(snapshot.stageConfig);
+    setPerformerNotes(snapshot.performerNotes);
+    setCurrentFrameId(snapshot.currentFrameId);
+  };
+
+  // 应用 MCP 已落盘的项目更新：仅当该项目正是当前打开的项目时实时应用
+  const applyExternalProjectUpdate = useCallback(async (change: McpProjectChange) => {
+    if (!window.electronAPI?.isElectron || !window.electronAPI.mcp) return;
+    if (change.projectId !== currentProjectId) return;
+    try {
+      const result = await window.electronAPI.project.load(change.projectId);
+      const data = result.data;
+      const nextFrames = data.frames;
+      // 本地未保存编辑保护：覆盖前推入 undo 栈，Ctrl+Z 可找回
+      if (projectHasChanges) {
+        pushUndoAction({
+          type: 'restore-document',
+          before: {
+            performers, performerGroups, frames, transitions, audioMarkers, stageConfig, performerNotes,
+            currentFrameId,
+          },
+          after: {
+            performers: data.performers,
+            performerGroups: data.performerGroups,
+            frames: nextFrames,
+            transitions: data.transitions || [],
+            audioMarkers: data.audioMarkers || [],
+            stageConfig: data.stageConfig,
+            performerNotes: data.performerNotes || [],
+            currentFrameId: nextFrames.some((f) => f.id === currentFrameId)
+              ? currentFrameId
+              : (nextFrames[0]?.id ?? currentFrameId),
+          },
+        });
+      }
+      const musicUnchanged = (data.musicAsset || null) === (musicAsset || null);
+      setPerformers(data.performers);
+      setPerformerGroups(data.performerGroups);
+      setFrames(data.frames);
+      setTransitions(data.transitions || []);
+      setAudioMarkers(data.audioMarkers || []);
+      setMusicName(data.musicName || null);
+      setMusicAsset(data.musicAsset || null);
+      setStageConfig(data.stageConfig);
+      setPerformerNotes(data.performerNotes || []);
+      setMediaCache((prev) => ({ ...prev, ...result.mediaUrls }));
+      if (!musicUnchanged) {
+        // 音频变化才重置并重新解码
+        setAudioBuffer(null);
+        setMusicUrl(result.audioUrl);
+        if (result.audioUrl && audioContextRef.current) {
+          try {
+            const response = await fetch(result.audioUrl);
+            if (response.ok) {
+              setAudioBuffer(await audioContextRef.current.decodeAudioData(await response.arrayBuffer()));
+            }
+          } catch (error) {
+            console.error('Failed to restore external project audio:', error);
+          }
+        }
+      }
+      setCurrentFrameId((prev) => (nextFrames.some((f) => f.id === prev) ? prev : (nextFrames[0]?.id ?? prev)));
+      setSelectedPerformerIds((prev) => prev.filter((id) => data.performers.some((p) => p.id === id)));
+      setSelectedTransitionId((prev) => ((data.transitions || []).some((t) => t.id === prev) ? prev : null));
+      setSelectedTransitionPerformerId((prev) => (data.performers.some((p) => p.id === prev) ? prev : null));
+      // MCP 侧已落盘：同步保存基准，避免脏标记与自动保存回环
+      setLastSavedState(JSON.stringify({
+        performers: data.performers,
+        performerGroups: data.performerGroups,
+        frames: data.frames,
+        transitions: data.transitions || [],
+        audioMarkers: data.audioMarkers || [],
+        stageConfig: data.stageConfig,
+        musicName: data.musicName || null,
+        musicAsset: data.musicAsset || null,
+        performerNotes: data.performerNotes || [],
+      }));
+      setLastSavedAt(Date.now());
+      setProjectHasChanges(false);
+      setProjectMessages([`MCP 修改已应用：${change.description}`]);
+      // 刷新侧栏的 MCP 修改记录
+      setMcpChangeToken((token) => token + 1);
+    } catch (error) {
+      console.error('Failed to apply external MCP update:', error);
+      setProjectMessages(['MCP 修改应用失败；重新打开项目可获取最新内容']);
+    }
+  }, [currentProjectId, projectHasChanges, musicAsset, performers, performerGroups, frames, transitions, audioMarkers, stageConfig, performerNotes, currentFrameId, pushUndoAction]);
+
+  // 事件订阅通过 ref 使用最新 handler，避免每次状态变化都重订阅
+  const applyExternalUpdateRef = useRef(applyExternalProjectUpdate);
+  applyExternalUpdateRef.current = applyExternalProjectUpdate;
+  const loadProjectRef = useRef(handleLoadProject);
+  loadProjectRef.current = handleLoadProject;
+
+  useEffect(() => {
+    const mcp = window.electronAPI?.isElectron ? window.electronAPI.mcp : undefined;
+    if (!mcp) return;
+    const unsubscribeUpdated = mcp.onProjectUpdated((change) => {
+      void applyExternalUpdateRef.current(change);
+    });
+    const unsubscribeOpen = mcp.onOpenProject((projectId) => {
+      // MCP 已落盘，跳过回存当前项目：避免旧项目被删除时保存失败导致打开被静默中止
+      void loadProjectRef.current(projectId, { skipSaveBefore: true });
+    });
+    const unsubscribeFlush = mcp.onFlushRequest((request) => {
+      void (async () => {
+        let ok = true;
+        // 仅当渲染端正处于该项目且确有未保存编辑时才回存；
+        // 保存失败（例如项目目录已被删除）不阻断 MCP 写入，返回 false 让主进程使用磁盘版本。
+        if (request.projectId === currentProjectId && projectHasChanges) {
+          try {
+            ok = await saveHandlerRef.current();
+          } catch {
+            ok = false;
+          }
+        }
+        await mcp.ackFlush(request.requestId, ok);
+      })();
+    });
+    return () => {
+      unsubscribeUpdated();
+      unsubscribeOpen();
+      unsubscribeFlush();
+    };
+  }, [currentProjectId, projectHasChanges]);
 
   const handleDeleteSelectedPerformers = () => {
     if (selectedPerformerIds.length === 0) return;
@@ -2928,6 +3067,9 @@ const App: React.FC = () => {
       if (last.previousCurrentFrameId) setCurrentFrameId(last.previousCurrentFrameId);
     } else if (last.type === 'delete-editor-state') {
       applyDeletionState(last.before);
+    } else if (last.type === 'restore-document') {
+      // 恢复 MCP 修改前的本地未保存编辑（脏标记由 projectHasChanges 的派生 effect 自动计算）
+      applyExternalDocumentSnapshot(last.before);
     }
     setRedoStack(prev => [...prev, last]);
   };
@@ -2980,6 +3122,9 @@ const App: React.FC = () => {
       setSelectedPerformerIds(last.performers.map((performer) => performer.id));
     } else if (last.type === 'delete-editor-state') {
       applyDeletionState(last.after);
+    } else if (last.type === 'restore-document') {
+      // 重做回到 MCP 已落盘的状态（脏标记由派生 effect 自动计算为 false）
+      applyExternalDocumentSnapshot(last.after);
     }
     setUndoStack(prev => [...prev, last]);
   };
@@ -5421,8 +5566,7 @@ const App: React.FC = () => {
             onClearLEDContent={handleClearLEDContent}
             onStageBackgroundUpload={handleStageBackgroundUpload}
             onClearStageBackground={handleClearStageBackground}
-            aiConfig={aiConfig}
-            onAiConfigChange={setAiConfig}
+            mcpChangeToken={mcpChangeToken}
             // Project storage props
             currentProjectId={currentProjectId}
             onLoadProject={handleLoadProject}

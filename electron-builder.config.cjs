@@ -28,6 +28,7 @@ module.exports = {
     'dist-electron/project-document.js',
     'dist-electron/stage-defaults.js',
     'dist-electron/project-template-service.js',
+    'dist-electron/mcp/**/*',
     'dist/**/*',
     'package.json',
   ],

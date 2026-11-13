@@ -2,6 +2,10 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
   AppSettings,
+  McpChangeSummary,
+  McpProjectChange,
+  McpRollbackResult,
+  McpStatus,
   ProjectAssetKind,
   ProjectAssetResult,
   ProjectDocument,
@@ -23,6 +27,11 @@ import type {
   ProjectModelAsset,
   ProjectModelAssetTransferResult,
 } from './model-asset-contract.js';
+
+export interface McpFlushRequest {
+  requestId: string;
+  projectId: string;
+}
 
 export interface ElectronAPI {
   getAndroidRelease: () => Promise<{ version: string; url: string } | null>;
@@ -88,6 +97,23 @@ export interface ElectronAPI {
     download: () => Promise<void>;
     install: () => Promise<void>;
     onStateChanged: (callback: (state: UpdateState) => void) => () => void;
+  };
+
+  // MCP service events（内嵌 MCP 服务的推送通道）
+  mcp: {
+    // MCP 修改已落盘，渲染端应实时应用（projectId 为当前打开项目时）
+    onProjectUpdated: (callback: (change: McpProjectChange) => void) => () => void;
+    // MCP 请求渲染端打开指定项目
+    onOpenProject: (callback: (projectId: string) => void) => () => void;
+    // MCP 写前 flush 请求：若有未保存编辑应立即保存并 ackFlush
+    onFlushRequest: (callback: (request: McpFlushRequest) => void) => () => void;
+    ackFlush: (requestId: string, ok: boolean) => Promise<void>;
+    // 配置面板：服务状态 / 开关 / 修改记录 / 回退
+    getStatus: () => Promise<McpStatus>;
+    setEnabled: (enabled: boolean) => Promise<McpStatus>;
+    listChanges: (projectId?: string) => Promise<McpChangeSummary[]>;
+    rollbackTo: (changeId: string) => Promise<McpRollbackResult>;
+    undoLast: (projectId?: string) => Promise<{ projectId: string; description: string }>;
   };
 
   // System information
@@ -219,6 +245,31 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.on('update:stateChanged', handler);
       return () => ipcRenderer.removeListener('update:stateChanged', handler);
     },
+  },
+
+  // MCP service events
+  mcp: {
+    onProjectUpdated: (callback: (change: McpProjectChange) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, change: McpProjectChange) => callback(change);
+      ipcRenderer.on('mcp:projectUpdated', handler);
+      return () => ipcRenderer.removeListener('mcp:projectUpdated', handler);
+    },
+    onOpenProject: (callback: (projectId: string) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, projectId: string) => callback(projectId);
+      ipcRenderer.on('mcp:openProject', handler);
+      return () => ipcRenderer.removeListener('mcp:openProject', handler);
+    },
+    onFlushRequest: (callback: (request: McpFlushRequest) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, request: McpFlushRequest) => callback(request);
+      ipcRenderer.on('mcp:flushRequest', handler);
+      return () => ipcRenderer.removeListener('mcp:flushRequest', handler);
+    },
+    ackFlush: (requestId: string, ok: boolean) => ipcRenderer.invoke('mcp:flushAck', requestId, ok),
+    getStatus: () => ipcRenderer.invoke('mcp:getStatus'),
+    setEnabled: (enabled: boolean) => ipcRenderer.invoke('mcp:setEnabled', enabled),
+    listChanges: (projectId?: string) => ipcRenderer.invoke('mcp:listChanges', projectId),
+    rollbackTo: (changeId: string) => ipcRenderer.invoke('mcp:rollbackTo', changeId),
+    undoLast: (projectId?: string) => ipcRenderer.invoke('mcp:undoLast', projectId),
   },
 
   // System information

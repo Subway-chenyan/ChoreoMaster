@@ -6,16 +6,20 @@ import * as path from 'path';
 import { Readable } from 'stream';
 import { fileURLToPath } from 'url';
 import isDev from 'electron-is-dev';
-import { getProjectStoragePath, registerIpcHandlers } from './ipc-handlers.js';
+import { getAppSettings, getProjectStoragePath, registerIpcHandlers, updateAppSettings } from './ipc-handlers.js';
 import { resolveProjectAssetPath } from './project-service.js';
 import { resolveLibraryAssetPath } from './model-asset-service.js';
 import { updaterManager } from './updater.js';
+import { McpController } from './mcp/controller.js';
+import { registerMcpIpcHandlers } from './mcp/ipc.js';
+import { createElectronRuntimeContext } from './mcp/runtime.js';
 
 // ESM 兼容: 获取 __dirname
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 let mainWindow: BrowserWindow | null = null;
+let mcpController: McpController | null = null;
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -194,18 +198,42 @@ function createWindow(): void {
 app.whenReady().then(async () => {
   registerProjectAssetProtocol();
   createWindow();
+
+  // 内嵌 MCP 服务：活动项目跟踪 + 变更历史 + Streamable HTTP (127.0.0.1)
+  const mcpContext = createElectronRuntimeContext({
+    getStoragePath: getProjectStoragePath,
+    getMainWindow: () => mainWindow,
+  });
+  mcpController = new McpController({
+    runtime: mcpContext,
+    readConfig: async () => (await getAppSettings()).mcp ?? {},
+    writeConfig: async (mcp) => {
+      const settings = await getAppSettings();
+      await updateAppSettings({ ...settings, mcp: { ...settings.mcp, ...mcp } });
+    },
+    onProjectChanged: (change) => mcpContext.notifyProjectUpdated(change),
+  });
+
   if (mainWindow) {
-    registerIpcHandlers(mainWindow);
+    registerIpcHandlers(mainWindow, mcpContext);
+    registerMcpIpcHandlers(mcpController);
     updaterManager.init(mainWindow);
     // 启动后延迟检查更新，避免影响启动速度
     setTimeout(() => updaterManager.checkForUpdates(), 5000);
   }
+
+  // 启动失败（如端口占用）不影响应用本身
+  await mcpController.initialize();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
     }
   });
+});
+
+app.on('will-quit', () => {
+  void mcpController?.stop();
 });
 
 app.on('window-all-closed', () => {

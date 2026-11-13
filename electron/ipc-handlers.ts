@@ -30,6 +30,7 @@ import {
   saveManagedProject,
 } from './project-service.js';
 import { createProjectFromTemplate, listProjectTemplates } from './project-template-service.js';
+import type { McpRuntimeContext } from './mcp/context.js';
 import { updaterManager } from './updater.js';
 import {
   beginGlbModelImport,
@@ -86,10 +87,20 @@ export async function getProjectStoragePath(): Promise<string> {
   return (await loadSettings()).storagePath;
 }
 
+// 供 MCP 服务读取 settings.json（含可选 mcp 配置）
+export async function getAppSettings(): Promise<AppSettings> {
+  return loadSettings();
+}
+
 async function saveSettings(settings: AppSettings): Promise<void> {
   await ensureStorageDir(DEFAULT_STORAGE_PATH);
   const settingsPath = getSettingsPath();
   await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
+}
+
+// 供 MCP 服务写回 settings.json（开关状态等）
+export async function updateAppSettings(settings: AppSettings): Promise<void> {
+  await saveSettings(settings);
 }
 
 function requireIdentifier(value: unknown, label: string): string {
@@ -130,7 +141,7 @@ function registerModelAssetHandler<TArgs extends unknown[], TResult>(
   });
 }
 
-export function registerIpcHandlers(mainWindow: BrowserWindow): void {
+export function registerIpcHandlers(mainWindow: BrowserWindow, mcpContext?: McpRuntimeContext): void {
   type BinaryExportSession = {
     filePath: string;
     handle: fs.FileHandle;
@@ -328,7 +339,10 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     const settings = await loadSettings();
     await ensureStorageDir(settings.storagePath);
     const created = await createManagedProject(settings.storagePath, name);
-    
+
+    // MCP 活动项目跟踪：新建项目后即为活动项目（渲染端随后会加载它）
+    mcpContext?.setActiveProjectId(created.id);
+
     // Update recent projects
     settings.recentProjects = [created.id, ...settings.recentProjects.filter(p => p !== created.id)]
       .slice(0, settings.maxRecentProjects);
@@ -341,7 +355,10 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle('project:load', async (_, projectId: string) => {
     const settings = await loadSettings();
     const result = await loadManagedProject(settings.storagePath, projectId);
-    
+
+    // MCP 活动项目跟踪：渲染端打开项目后即为活动项目
+    mcpContext?.setActiveProjectId(projectId);
+
     // Update recent projects
     settings.recentProjects = [projectId, ...settings.recentProjects.filter(p => p !== projectId)].slice(0, settings.maxRecentProjects);
     await saveSettings(settings);
@@ -396,6 +413,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     if (filePaths.length === 0) return null;
     const settings = await loadSettings();
     const result = await importProjectPackage(settings.storagePath, filePaths[0]);
+    mcpContext?.setActiveProjectId(result.projectId);
     settings.recentProjects = [result.projectId, ...settings.recentProjects.filter(p => p !== result.projectId)]
       .slice(0, settings.maxRecentProjects);
     await saveSettings(settings);
@@ -427,6 +445,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     if (filePaths.length === 0) return null;
     const settings = await loadSettings();
     const result = await importChoreographyDocument(settings.storagePath, filePaths[0]);
+    mcpContext?.setActiveProjectId(result.projectId);
     settings.recentProjects = [result.projectId, ...settings.recentProjects.filter((id) => id !== result.projectId)]
       .slice(0, settings.maxRecentProjects);
     await saveSettings(settings);
@@ -450,6 +469,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     settings.recentProjects = [result.projectId, ...settings.recentProjects.filter((id) => id !== result.projectId)]
       .slice(0, settings.maxRecentProjects);
     await saveSettings(settings);
+    mcpContext?.setActiveProjectId(result.projectId);
     return result;
   });
 
@@ -467,6 +487,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     settings.recentProjects = [result.projectId, ...settings.recentProjects.filter((id) => id !== result.projectId)]
       .slice(0, settings.maxRecentProjects);
     await saveSettings(settings);
+    mcpContext?.setActiveProjectId(result.projectId);
     return result;
   });
 
@@ -474,6 +495,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle('project:delete', async (_, projectId: string): Promise<void> => {
     const settings = await loadSettings();
     await deleteManagedProject(settings.storagePath, projectId);
+    mcpContext?.clearActiveProjectId(projectId);
     
     // Update recent projects
     settings.recentProjects = settings.recentProjects.filter(p => p !== projectId);
