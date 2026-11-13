@@ -1,5 +1,9 @@
 import type {
   AppSettings,
+  McpChangeSummary,
+  McpProjectChange,
+  McpRollbackResult,
+  McpStatus,
   ProjectAssetKind,
   ProjectAssetResult,
   ProjectDocument,
@@ -21,6 +25,11 @@ import type {
   ProjectModelAsset,
   ProjectModelAssetTransferResult,
 } from './electron/model-asset-contract';
+
+export interface McpFlushRequest {
+  requestId: string;
+  projectId: string;
+}
 
 declare global {
   interface Window {
@@ -88,6 +97,19 @@ declare global {
         download: () => Promise<void>;
         install: () => Promise<void>;
         onStateChanged: (callback: (state: UpdateState) => void) => () => void;
+      };
+
+      // MCP service events（内嵌 MCP 服务的推送通道 + 配置面板能力）
+      mcp: {
+        onProjectUpdated: (callback: (change: McpProjectChange) => void) => () => void;
+        onOpenProject: (callback: (projectId: string) => void) => () => void;
+        onFlushRequest: (callback: (request: McpFlushRequest) => void) => () => void;
+        ackFlush: (requestId: string, ok: boolean) => Promise<void>;
+        getStatus: () => Promise<McpStatus>;
+        setEnabled: (enabled: boolean) => Promise<McpStatus>;
+        listChanges: (projectId?: string) => Promise<McpChangeSummary[]>;
+        rollbackTo: (changeId: string) => Promise<McpRollbackResult>;
+        undoLast: (projectId?: string) => Promise<{ projectId: string; description: string }>;
       };
 
       // System information

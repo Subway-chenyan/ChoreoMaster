@@ -448,6 +448,18 @@ export async function loadManagedProject(
   return hydrateProject(projectId, projectDir, parseProjectDocument(raw, projectId));
 }
 
+// 读取磁盘上的原始项目文档（仅 normalize，不做 hydrateProject 的 assetPath → choreo-asset:// 转换）。
+// 供 MCP 服务在修改链路中使用：读原文档 → 变换 → saveManagedProject，避免协议 URL 被写回磁盘。
+export async function readManagedProjectDocument(
+  storagePath: string,
+  projectId: string,
+): Promise<ProjectDocument> {
+  const projectDir = resolveManagedProjectPath(storagePath, projectId);
+  const projectPath = path.join(projectDir, PROJECT_FILE_NAME);
+  const raw = JSON.parse(await fs.readFile(projectPath, 'utf8')) as unknown;
+  return parseProjectDocument(raw, projectId);
+}
+
 export async function listManagedProjects(storagePath: string): Promise<ProjectMeta[]> {
   const projectsDir = path.join(storagePath, 'projects');
   await fs.mkdir(projectsDir, { recursive: true });

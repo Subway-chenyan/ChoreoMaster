@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Performer, Frame, PerformerShape, PerformerGroup, PerformerType, AIConfig, AIChoreoPlan, ModelAssetManifest, ModelAssetSummary, ProjectModelAsset, ProjectTemplateData } from '../types';
+import { Performer, Frame, PerformerShape, PerformerGroup, PerformerType, AIChoreoPlan, ModelAssetManifest, ModelAssetSummary, ProjectModelAsset, ProjectTemplateData } from '../types';
 import { Plus, Users, Trash2, Download, Grid, Music, Sparkles, Wand2, Film, Copy, Search, Settings, Scaling, Upload, FilePlus, Circle, Square, Triangle, UserCheck, UserX, Eye, EyeOff, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, MoreVertical, Palette, Edit2, Box, Library, Save, StickyNote, Lock, Unlock } from 'lucide-react';
 import { PRESET_SHAPES, DEFAULT_COLORS } from '../constants';
 import { StageConfig } from '../types';
@@ -9,9 +9,8 @@ import { ProjectBrowser } from './ProjectBrowser';
 import ModelAssetSidebar from './model-assets/ModelAssetSidebar';
 import PropEditorModal from './PropEditorModal';
 import PerformerEditorModal from './PerformerEditorModal';
-import { ChoreoAgentModal } from './ChoreoAgentModal';
+import { McpSettingsPanel } from './McpSettingsPanel';
 import { EditableNumberInput, SelectField, StepperNumberField } from './FormControls';
-import { validateAgentAccess } from '../services/choreoAgentService';
 import { isPerformerGroupCompatible, resolveGroupAction, type GroupablePerformerType } from '../utils/performer-grouping';
 import { formatFrameDuration, isKeyframeFrame } from '../utils/frame-keyframes';
 import {
@@ -79,8 +78,8 @@ interface SidebarProps {
     onClearLEDContent: () => void;
     onStageBackgroundUpload: (e?: React.ChangeEvent<HTMLInputElement>) => void;
     onClearStageBackground: () => void;
-    aiConfig: AIConfig;
-    onAiConfigChange: (config: AIConfig) => void;
+    // MCP 修改记录刷新令牌（App 收到 MCP 实时更新后递增）
+    mcpChangeToken?: number;
     // Project storage props
     currentProjectId?: string | null;
     onLoadProject?: (projectId: string) => void;
@@ -241,8 +240,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     onClearLEDContent,
     onStageBackgroundUpload,
     onClearStageBackground,
-    aiConfig,
-    onAiConfigChange,
+    mcpChangeToken,
     // Project storage props
     currentProjectId,
     onLoadProject,
@@ -278,9 +276,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const [presetScale, setPresetScale] = useState(0.8); // Default 80% size to be safe
 
     const [searchQuery, setSearchQuery] = useState('');
-    const [choreoAgentOpen, setChoreoAgentOpen] = useState(false);
-    const [agentAccessError, setAgentAccessError] = useState<string | null>(null);
-    const [isValidatingAgentAccess, setIsValidatingAgentAccess] = useState(false);
 
     // Group State
     const [showAddForm, setShowAddForm] = useState(false);
@@ -401,23 +396,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
             setShowAddForm(false);
             const nextColorIndex = (DEFAULT_COLORS.indexOf(newPerformerColor) + 1) % DEFAULT_COLORS.length;
             setNewPerformerColor(DEFAULT_COLORS[nextColorIndex]);
-        }
-    };
-
-    const handleOpenChoreoAgent = async () => {
-        if (!aiConfig.memberToken.trim()) {
-            setAgentAccessError('请输入管理员发放的 Agent 访问 Key。');
-            return;
-        }
-        setIsValidatingAgentAccess(true);
-        setAgentAccessError(null);
-        try {
-            await validateAgentAccess(aiConfig);
-            setChoreoAgentOpen(true);
-        } catch (error) {
-            setAgentAccessError(error instanceof Error ? error.message : 'Agent 访问 Key 校验失败。');
-        } finally {
-            setIsValidatingAgentAccess(false);
         }
     };
 
@@ -1765,58 +1743,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 {/* PRESETS TAB */}
                 {activeTab === 'presets' && (
                     <div className="space-y-6">
-                        {/* AI Settings */}
-                        <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700/50">
-                            <div className="flex items-center justify-between mb-3 text-slate-400">
-                                <div className="flex items-center gap-2">
-                                    <Settings size={14} />
-                                    <span className="text-xs font-bold uppercase">AI 配置</span>
-                                </div>
-                            </div>
-                            <div className="space-y-3">
-                                <div className="space-y-1">
-                                    <label className="text-[10px] text-slate-500 uppercase">Agent 访问 Key</label>
-                                    <input
-                                        type="password"
-                                        className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
-                                        placeholder="请输入管理员发放的 Key"
-                                        value={aiConfig.memberToken}
-                                        onChange={(e) => {
-                                            setAgentAccessError(null);
-                                            onAiConfigChange({ ...aiConfig, memberToken: e.target.value });
-                                        }}
-                                    />
-                                    <p className="text-[10px] leading-4 text-slate-600">访问地址由应用统一管理，无需手动配置。</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Multimodal Agent */}
-                        <div className="rounded-lg border border-cyan-500/20 bg-slate-900 p-4">
-                            <div className="mb-3 flex items-start gap-3">
-                                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-cyan-500/10 text-cyan-400">
-                                    <Sparkles size={15} />
-                                </div>
-                                <div>
-                                    <div className="text-xs font-bold text-slate-200">智能队形编排 Agent</div>
-                                    <p className="mt-1 text-[11px] leading-5 text-slate-500">
-                                        结合音乐、队形草图和你的创作要求，分阶段完成队形设计。
-                                    </p>
-                                </div>
-                            </div>
-                            <button
-                                onClick={handleOpenChoreoAgent}
-                                disabled={isValidatingAgentAccess}
-                                className="flex w-full items-center justify-center gap-2 rounded-md bg-cyan-500 py-2 text-xs font-bold text-slate-950 transition-colors hover:bg-cyan-400 disabled:cursor-wait disabled:opacity-60"
-                            >
-                                <Wand2 size={13} /> {isValidatingAgentAccess ? '正在校验 Key...' : '打开编舞 Agent'}
-                            </button>
-                            {agentAccessError && (
-                                <div className="mt-2 rounded border border-red-900/60 bg-red-950/30 px-2.5 py-2 text-[11px] leading-5 text-red-300">
-                                    {agentAccessError}
-                                </div>
-                            )}
-                        </div>
+                        {/* MCP Service */}
+                        <McpSettingsPanel projectId={currentProjectId ?? null} refreshToken={mcpChangeToken} />
 
                         {/* Preset Size Slider */}
                         <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700/50">
@@ -1875,12 +1803,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         ))}
                     </div>
                 )}
-                <ChoreoAgentModal
-                    isOpen={choreoAgentOpen}
-                    aiConfig={aiConfig}
-                    onClose={() => setChoreoAgentOpen(false)}
-                    onApplyPlan={onApplyAIPlan}
-                />
             </div>
 
             <PerformerEditorModal
